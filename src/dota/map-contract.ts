@@ -5,17 +5,43 @@ import { pathExists } from "../util/fsx.js";
 export interface MapEntityRequirement {
   targetname: string;
   classname?: string;
+  origin?: string;
+  angles?: string;
+  properties?: Record<string, string>;
+}
+
+export interface ManagedMapEntity {
+  targetname: string;
+  classname: string;
+  origin: string;
+  angles?: string;
   properties?: Record<string, string>;
 }
 
 export interface MapContract {
   map?: string;
   requiredEntities: MapEntityRequirement[];
+  managedEntities?: ManagedMapEntity[];
 }
 
 export interface ResolvedMapContract {
   path: string;
   contract: MapContract;
+}
+
+function scalarProperties(value: unknown, field: string, path: string): Record<string, string> | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${field} must be an object: ${path}`);
+  }
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, property]) => {
+      if (!["string", "number", "boolean"].includes(typeof property)) {
+        throw new Error(`${field}.${key} must be a scalar: ${path}`);
+      }
+      return [key, String(property)];
+    }),
+  );
 }
 
 function validateContract(value: unknown, path: string): MapContract {
@@ -32,27 +58,63 @@ function validateContract(value: unknown, path: string): MapContract {
     if (requirement.classname !== undefined && typeof requirement.classname !== "string") {
       throw new Error(`requiredEntities[${index}].classname must be a string: ${path}`);
     }
-    let properties: Record<string, string> | undefined;
-    if (requirement.properties !== undefined) {
-      if (!requirement.properties || typeof requirement.properties !== "object" || Array.isArray(requirement.properties)) {
-        throw new Error(`requiredEntities[${index}].properties must be an object: ${path}`);
+    for (const key of ["origin", "angles"]) {
+      if (requirement[key] !== undefined && typeof requirement[key] !== "string") {
+        throw new Error(`requiredEntities[${index}].${key} must be a string: ${path}`);
       }
-      properties = Object.fromEntries(
-        Object.entries(requirement.properties as Record<string, unknown>).map(([key, value]) => {
-          if (!["string", "number", "boolean"].includes(typeof value)) {
-            throw new Error(`requiredEntities[${index}].properties.${key} must be a scalar: ${path}`);
-          }
-          return [key, String(value)];
-        }),
-      );
     }
+    const properties = scalarProperties(
+      requirement.properties,
+      `requiredEntities[${index}].properties`,
+      path,
+    );
     return {
       targetname: requirement.targetname,
       classname: requirement.classname as string | undefined,
+      origin: requirement.origin as string | undefined,
+      angles: requirement.angles as string | undefined,
       properties,
     };
   });
-  return { map: raw.map as string | undefined, requiredEntities };
+  let managedEntities: ManagedMapEntity[] | undefined;
+  if (raw.managedEntities !== undefined) {
+    if (!Array.isArray(raw.managedEntities)) {
+      throw new Error(`Map contract "managedEntities" must be an array: ${path}`);
+    }
+    managedEntities = raw.managedEntities.map((entry, index) => {
+      if (!entry || typeof entry !== "object") {
+        throw new Error(`managedEntities[${index}] must be an object: ${path}`);
+      }
+      const managed = entry as Record<string, unknown>;
+      for (const key of ["targetname", "classname", "origin"]) {
+        if (typeof managed[key] !== "string" || !managed[key]) {
+          throw new Error(`managedEntities[${index}].${key} must be a non-empty string: ${path}`);
+        }
+      }
+      if (managed.angles !== undefined && typeof managed.angles !== "string") {
+        throw new Error(`managedEntities[${index}].angles must be a string: ${path}`);
+      }
+      return {
+        targetname: managed.targetname as string,
+        classname: managed.classname as string,
+        origin: managed.origin as string,
+        angles: managed.angles as string | undefined,
+        properties: scalarProperties(
+          managed.properties,
+          `managedEntities[${index}].properties`,
+          path,
+        ),
+      };
+    });
+    const names = new Set<string>();
+    for (const managed of managedEntities) {
+      if (names.has(managed.targetname)) {
+        throw new Error(`managedEntities contains duplicate targetname "${managed.targetname}": ${path}`);
+      }
+      names.add(managed.targetname);
+    }
+  }
+  return { map: raw.map as string | undefined, requiredEntities, managedEntities };
 }
 
 export async function loadMapContract(

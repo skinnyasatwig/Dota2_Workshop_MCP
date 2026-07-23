@@ -60,6 +60,7 @@ export interface EntitySpec {
 export interface ParsedMapEntity {
   classname: string;
   origin?: string;
+  angles?: string;
   nodeId?: number;
   targetname?: string;
   target?: string;
@@ -118,10 +119,12 @@ export function parseMapEntities(text: string): ParsedMapEntity[] {
     const classname = properties.classname;
     if (classname) {
       const origin = block.match(/"origin"\s+"vector3"\s+"([^"]+)"/)?.[1];
+      const angles = block.match(/"angles"\s+"qangle"\s+"([^"]+)"/)?.[1];
       const nodeText = block.match(/"nodeID"\s+"int"\s+"(\d+)"/)?.[1];
       entities.push({
         classname,
         origin,
+        angles,
         nodeId: nodeText === undefined ? undefined : Number(nodeText),
         targetname: properties.targetname,
         target: properties.target,
@@ -219,6 +222,94 @@ export function patchMapEntities(text: string, patches: MapEntityPatch[]): MapEn
   };
 }
 
+export interface ManagedEntitySpec {
+  targetname: string;
+  classname: string;
+  origin: string;
+  angles?: string;
+  properties?: Record<string, string | number>;
+}
+
+export interface MapEntityReconcileResult {
+  text: string;
+  added: string[];
+  updated: string[];
+  unchanged: string[];
+  conflicts: string[];
+}
+
+/** Make named entities match a desired-state contract without removing unrelated map data. */
+export function reconcileMapEntities(text: string, specs: ManagedEntitySpec[]): MapEntityReconcileResult {
+  const byTargetname = new Map<string, ParsedMapEntity[]>();
+  for (const entity of parseMapEntities(text)) {
+    if (!entity.targetname) continue;
+    const matches = byTargetname.get(entity.targetname) ?? [];
+    matches.push(entity);
+    byTargetname.set(entity.targetname, matches);
+  }
+
+  const added: string[] = [];
+  const updated: string[] = [];
+  const unchanged: string[] = [];
+  const conflicts: string[] = [];
+  const patches: MapEntityPatch[] = [];
+  const missing: ManagedEntitySpec[] = [];
+
+  for (const spec of specs) {
+    const matches = byTargetname.get(spec.targetname) ?? [];
+    if (matches.length > 1) {
+      conflicts.push(spec.targetname);
+      continue;
+    }
+    if (!matches.length) {
+      missing.push(spec);
+      added.push(spec.targetname);
+      continue;
+    }
+
+    const current = matches[0];
+    const desiredProperties = Object.fromEntries(
+      Object.entries(spec.properties ?? {}).filter(([key]) => key !== "targetname"),
+    );
+    const differs =
+      current.classname !== spec.classname ||
+      current.origin !== spec.origin ||
+      (spec.angles !== undefined && current.angles !== spec.angles) ||
+      Object.entries(desiredProperties).some(([key, value]) => current.properties[key] !== String(value));
+    if (!differs) {
+      unchanged.push(spec.targetname);
+      continue;
+    }
+    patches.push({
+      targetname: spec.targetname,
+      classname: spec.classname,
+      origin: spec.origin,
+      angles: spec.angles,
+      properties: desiredProperties,
+    });
+    updated.push(spec.targetname);
+  }
+
+  let out = patches.length ? patchMapEntities(text, patches).text : text;
+  let nodeId = maxNodeId(out);
+  for (const spec of missing) {
+    const properties = { ...(spec.properties ?? {}), targetname: spec.targetname };
+    out = insertEntity(
+      out,
+      buildEntityBlock(
+        {
+          classname: spec.classname,
+          origin: spec.origin,
+          angles: spec.angles,
+          properties,
+        },
+        ++nodeId,
+      ),
+    );
+  }
+  return { text: out, added, updated, unchanged, conflicts };
+}
+
 export function rewriteWaypointPath(
   text: string,
   fromPrefix: string,
@@ -251,13 +342,13 @@ export function rewriteWaypointPath(
 export function buildEntityBlock(spec: EntitySpec, nodeId: number): string {
   const props = spec.properties ?? {};
   const propLines = Object.entries(props)
-    .map(([k, v]) => `\t\t"${k}" "string" "${String(v)}"`)
+    .map(([k, v]) => `\t\t"${escapedDmxString(k)}" "string" "${escapedDmxString(v)}"`)
     .join("\n");
   return `"CMapEntity"
 {
 	"id" "elementid" "${randomUUID()}"
-	"origin" "vector3" "${spec.origin ?? "0 0 0"}"
-	"angles" "qangle" "${spec.angles ?? "0 0 0"}"
+	"origin" "vector3" "${escapedDmxString(spec.origin ?? "0 0 0")}"
+	"angles" "qangle" "${escapedDmxString(spec.angles ?? "0 0 0")}"
 	"scales" "vector3" "1 1 1"
 	"nodeID" "int" "${nodeId}"
 	"children" "element_array" [ ]
@@ -277,7 +368,7 @@ export function buildEntityBlock(spec: EntitySpec, nodeId: number): string {
 	"entity_properties" "EditGameClassProps"
 	{
 		"id" "elementid" "${randomUUID()}"
-		"classname" "string" "${spec.classname}"
+		"classname" "string" "${escapedDmxString(spec.classname)}"
 ${propLines}
 	}
 	"hitNormal" "vector3" "0 0 1"

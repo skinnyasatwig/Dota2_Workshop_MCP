@@ -11,6 +11,7 @@ import {
   insertEntity,
   parseMapEntities,
   patchMapEntities,
+  reconcileMapEntities,
   rewriteWaypointPath,
 } from "../dota/vmap.js";
 import { readAddonInfo, registerMapFile } from "../dota/addoninfo.js";
@@ -174,6 +175,73 @@ export function registerMapTools(server: McpServer) {
   );
 
   server.registerTool(
+    "map_sync_contract",
+    {
+      title: "Synchronize a map with its managed contract",
+      description:
+        "Preview or apply the desired managedEntities from .dota-workshop/map-contract.json. Missing named entities " +
+        "are created; existing named entities are repaired to the declared class, transform, and keyvalues. The " +
+        "operation is idempotent, preserves unrelated map data, and refuses to write when duplicate targetnames make " +
+        "a match ambiguous. Defaults to preview-only; pass apply=true to write.",
+      inputSchema: {
+        projectRoot: z.string().optional(),
+        map: z.string(),
+        contractFile: z
+          .string()
+          .optional()
+          .describe("JSON contract path. Defaults to .dota-workshop/map-contract.json."),
+        apply: z.boolean().optional().describe("Write the planned changes (default false)."),
+        recompile: z.boolean().optional().describe("Compile after applying (default false)."),
+      },
+    },
+    guard(async ({ projectRoot, map, contractFile, apply, recompile }): Promise<ToolResult> => {
+      const dota = await requireDotaPaths();
+      const project = await resolveProject(projectRoot);
+      const p = projectMapPaths(dota, project, map);
+      if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}.`);
+      const resolved = await loadMapContract(project.root, map, contractFile);
+      if (!resolved) return error(`Map contract not found under ${project.root}.`);
+      const specs = resolved.contract.managedEntities ?? [];
+      if (!specs.length) {
+        return error(`Contract has no managedEntities to synchronize: ${resolved.path}`);
+      }
+
+      const current = await vmapToText(dota.dmxconvertExe, p.contentVmap);
+      const result = reconcileMapEntities(current, specs);
+      if (result.conflicts.length) {
+        return error(
+          `No changes written. Duplicate targetnames make these managed entities ambiguous: ${result.conflicts.join(", ")}`,
+        );
+      }
+
+      const changed = result.added.length + result.updated.length;
+      if (apply && changed) await textToVmap(dota.dmxconvertExe, result.text, p.contentVmap);
+      const steps = [
+        `${apply ? "Synchronized" : "Previewed"} ${specs.length} managed entities in "${map}".`,
+        `Add ${result.added.length}, update ${result.updated.length}, unchanged ${result.unchanged.length}.`,
+      ];
+      if (!apply && changed) steps.push("No files changed. Pass apply=true to write this plan.");
+      if (apply && recompile) {
+        const res = await compileProjectMap(dota, project, map);
+        steps.push(res.code === 0 ? `Recompiled -> ${p.installedGameVpk}` : `Recompile FAILED (exit ${res.code})`);
+      }
+      return json(
+        {
+          map,
+          contract: resolved.path,
+          applied: apply === true,
+          changed,
+          added: result.added,
+          updated: result.updated,
+          unchanged: result.unchanged,
+          recompiled: apply === true && recompile === true,
+        },
+        steps.join("\n"),
+      );
+    }),
+  );
+
+  server.registerTool(
     "map_rewrite_path",
     {
       title: "Rewrite a waypoint chain",
@@ -311,6 +379,8 @@ export function registerMapTools(server: McpServer) {
             z.object({
               targetname: z.string(),
               classname: z.string().optional(),
+              origin: z.string().optional(),
+              angles: z.string().optional(),
               properties: z.record(numOrStr).optional(),
             }),
           )
@@ -329,7 +399,21 @@ export function registerMapTools(server: McpServer) {
       const p = projectMapPaths(dota, project, map);
       const findings: { severity: "error" | "warn"; code: string; message: string }[] = [];
       const resolvedContract = requiredEntities ? undefined : await loadMapContract(project.root, map, contractFile);
-      const requirements = requiredEntities ?? resolvedContract?.contract.requiredEntities ?? [];
+      const contractRequirements = resolvedContract
+        ? [
+            ...resolvedContract.contract.requiredEntities,
+            ...(resolvedContract.contract.managedEntities ?? []).map((managed) => ({
+              targetname: managed.targetname,
+              classname: managed.classname,
+              origin: managed.origin,
+              angles: managed.angles,
+              properties: managed.properties,
+            })),
+          ]
+        : [];
+      const requirements = requiredEntities
+        ? requiredEntities
+        : [...new Map(contractRequirements.map((requirement) => [requirement.targetname, requirement])).values()];
 
       const source = await pathExists(p.contentVmap);
       const compiled = await pathExists(p.gameVpk);
@@ -392,16 +476,34 @@ export function registerMapTools(server: McpServer) {
               code: "required-entity-missing",
               message: `Required entity "${required.targetname}" is missing.`,
             });
-          } else if (required.classname && !matches.some((entity) => entity.classname === required.classname)) {
+            continue;
+          }
+          const matchingClass = required.classname
+            ? matches.filter((entity) => entity.classname === required.classname)
+            : matches;
+          if (!matchingClass.length) {
             findings.push({
               severity: "error",
               code: "required-classname-mismatch",
               message: `"${required.targetname}" exists but is not a ${required.classname}.`,
             });
-          } else if (required.properties) {
-            const matchingClass = required.classname
-              ? matches.filter((entity) => entity.classname === required.classname)
-              : matches;
+            continue;
+          }
+          if (required.origin && !matchingClass.some((entity) => entity.origin === required.origin)) {
+            findings.push({
+              severity: "error",
+              code: "required-origin-mismatch",
+              message: `"${required.targetname}" is not at origin "${required.origin}".`,
+            });
+          }
+          if (required.angles && !matchingClass.some((entity) => entity.angles === required.angles)) {
+            findings.push({
+              severity: "error",
+              code: "required-angles-mismatch",
+              message: `"${required.targetname}" does not have angles "${required.angles}".`,
+            });
+          }
+          if (required.properties) {
             for (const [key, value] of Object.entries(required.properties)) {
               if (!matchingClass.some((entity) => entity.properties[key] === String(value))) {
                 findings.push({

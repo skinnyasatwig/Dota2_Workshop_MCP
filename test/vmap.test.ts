@@ -4,6 +4,7 @@ import {
   buildEntityBlock,
   parseMapEntities,
   patchMapEntities,
+  reconcileMapEntities,
   rewriteWaypointPath,
 } from "../src/dota/vmap.js";
 
@@ -117,4 +118,63 @@ test("rewriteWaypointPath converts and renames a complete ordered chain", () => 
       { classname: "path_corner", targetname: "path_radiant_north_3", target: undefined, speed: undefined },
     ],
   );
+});
+
+test("reconcileMapEntities adds missing entities and repairs managed drift idempotently", () => {
+  const text =
+    `"world" "CMapWorld"\n{\n"children" "element_array"\n[\n` +
+    buildEntityBlock(
+      {
+        classname: "info_target",
+        origin: "0 0 0",
+        properties: { targetname: "radiant_t1", teamnumber: 3 },
+      },
+      10,
+    ) +
+    `\n]\n}\n`;
+  const specs = [
+    {
+      targetname: "radiant_t1",
+      classname: "npc_dota_tower",
+      origin: "128 256 128",
+      angles: "0 90 0",
+      properties: { teamnumber: 2 },
+    },
+    {
+      targetname: "radiant_spawn_north",
+      classname: "info_target",
+      origin: "-1024 512 128",
+    },
+  ];
+
+  const first = reconcileMapEntities(text, specs);
+  assert.deepEqual(first.added, ["radiant_spawn_north"]);
+  assert.deepEqual(first.updated, ["radiant_t1"]);
+  assert.deepEqual(first.conflicts, []);
+  const entities = parseMapEntities(first.text);
+  const tower = entities.find((entity) => entity.targetname === "radiant_t1");
+  assert.equal(tower?.classname, "npc_dota_tower");
+  assert.equal(tower?.origin, "128 256 128");
+  assert.equal(tower?.angles, "0 90 0");
+  assert.equal(tower?.properties.teamnumber, "2");
+  assert.equal(entities.find((entity) => entity.targetname === "radiant_spawn_north")?.origin, "-1024 512 128");
+
+  const second = reconcileMapEntities(first.text, specs);
+  assert.deepEqual(second.added, []);
+  assert.deepEqual(second.updated, []);
+  assert.deepEqual(second.unchanged, ["radiant_t1", "radiant_spawn_north"]);
+  assert.equal(second.text, first.text);
+});
+
+test("reconcileMapEntities refuses ambiguous duplicate targetnames", () => {
+  const duplicate = buildEntityBlock(
+    { classname: "info_target", properties: { targetname: "shared_marker" } },
+    1,
+  );
+  const result = reconcileMapEntities(`${duplicate}\n${duplicate}`, [
+    { targetname: "shared_marker", classname: "info_target", origin: "0 0 0" },
+  ]);
+  assert.deepEqual(result.conflicts, ["shared_marker"]);
+  assert.deepEqual(result.added, []);
+  assert.deepEqual(result.updated, []);
 });
