@@ -66,6 +66,22 @@ export interface ParsedMapEntity {
   properties: Record<string, string>;
 }
 
+export interface MapEntityPatch {
+  targetname: string;
+  classname?: string;
+  newTargetname?: string;
+  origin?: string;
+  angles?: string;
+  properties?: Record<string, string | number>;
+  removeProperties?: string[];
+}
+
+export interface MapEntityPatchResult {
+  text: string;
+  matched: string[];
+  unmatched: string[];
+}
+
 function matchingBrace(text: string, open: number): number {
   let depth = 0;
   let inString = false;
@@ -115,6 +131,120 @@ export function parseMapEntities(text: string): ParsedMapEntity[] {
     marker.lastIndex = close + 1;
   }
   return entities;
+}
+
+function entityBlockRanges(text: string): { start: number; end: number; block: string; entity: ParsedMapEntity }[] {
+  const ranges: { start: number; end: number; block: string; entity: ParsedMapEntity }[] = [];
+  const marker = /"CMapEntity"\s*\{/g;
+  let match: RegExpExecArray | null;
+  while ((match = marker.exec(text))) {
+    const open = text.indexOf("{", match.index);
+    const close = matchingBrace(text, open);
+    if (close < 0) break;
+    const block = text.slice(match.index, close + 1);
+    const entity = parseMapEntities(block)[0];
+    if (entity) ranges.push({ start: match.index, end: close + 1, block, entity });
+    marker.lastIndex = close + 1;
+  }
+  return ranges;
+}
+
+function escapedKey(key: string): string {
+  return key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function escapedDmxString(value: string | number): string {
+  return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function replaceTypedValue(block: string, key: string, type: string, value: string | number): string {
+  const pattern = new RegExp(`("${escapedKey(key)}"\\s+"${escapedKey(type)}"\\s+")((?:\\\\.|[^"\\\\])*)(")`);
+  return block.replace(pattern, (_match, prefix: string, _old: string, suffix: string) => {
+    return `${prefix}${escapedDmxString(value)}${suffix}`;
+  });
+}
+
+function removeStringProperty(block: string, key: string): string {
+  const pattern = new RegExp(`^([\\t ]*)"${escapedKey(key)}"\\s+"string"\\s+"(?:\\\\.|[^"\\\\])*"\\s*\\r?\\n?`, "m");
+  return block.replace(pattern, "");
+}
+
+function upsertStringProperty(block: string, key: string, value: string | number): string {
+  const existing = new RegExp(`"${escapedKey(key)}"\\s+"string"\\s+"(?:\\\\.|[^"\\\\])*"`);
+  if (existing.test(block)) return replaceTypedValue(block, key, "string", value);
+
+  const marker = /"entity_properties"\s+"EditGameClassProps"\s*\{/g.exec(block);
+  if (!marker) throw new Error("CMapEntity has no entity_properties block.");
+  const open = block.indexOf("{", marker.index);
+  const close = matchingBrace(block, open);
+  if (close < 0) throw new Error("Malformed entity_properties block.");
+  const indent = block.match(/^([\t ]*)"classname"\s+"string"/m)?.[1] ?? "\t\t";
+  const line = `${indent}"${key}" "string" "${escapedDmxString(value)}"\n`;
+  return block.slice(0, close) + line + block.slice(close);
+}
+
+function patchEntityBlock(block: string, patch: MapEntityPatch): string {
+  let out = block;
+  if (patch.classname !== undefined) out = replaceTypedValue(out, "classname", "string", patch.classname);
+  if (patch.origin !== undefined) out = replaceTypedValue(out, "origin", "vector3", patch.origin);
+  if (patch.angles !== undefined) out = replaceTypedValue(out, "angles", "qangle", patch.angles);
+  for (const key of patch.removeProperties ?? []) out = removeStringProperty(out, key);
+  if (patch.newTargetname !== undefined) out = upsertStringProperty(out, "targetname", patch.newTargetname);
+  for (const [key, value] of Object.entries(patch.properties ?? {})) out = upsertStringProperty(out, key, value);
+  return out;
+}
+
+/** Patch existing entities by targetname without rebuilding unrelated map data. */
+export function patchMapEntities(text: string, patches: MapEntityPatch[]): MapEntityPatchResult {
+  const byTargetname = new Map(patches.map((patch) => [patch.targetname, patch]));
+  const matched: string[] = [];
+  const replacements: { start: number; end: number; block: string }[] = [];
+  for (const range of entityBlockRanges(text)) {
+    if (!range.entity.targetname) continue;
+    const patch = byTargetname.get(range.entity.targetname);
+    if (!patch) continue;
+    replacements.push({ start: range.start, end: range.end, block: patchEntityBlock(range.block, patch) });
+    matched.push(range.entity.targetname);
+  }
+
+  let out = text;
+  for (const replacement of replacements.sort((a, b) => b.start - a.start)) {
+    out = out.slice(0, replacement.start) + replacement.block + out.slice(replacement.end);
+  }
+  const matchedSet = new Set(matched);
+  return {
+    text: out,
+    matched,
+    unmatched: patches.map((patch) => patch.targetname).filter((targetname) => !matchedSet.has(targetname)),
+  };
+}
+
+export function rewriteWaypointPath(
+  text: string,
+  fromPrefix: string,
+  toPrefix: string,
+  classname = "path_corner",
+  startIndex = 1,
+): MapEntityPatchResult {
+  const suffix = new RegExp(`^${escapedKey(fromPrefix)}(\\d+)$`);
+  const waypoints = parseMapEntities(text)
+    .filter((entity) => entity.targetname && suffix.test(entity.targetname))
+    .sort((a, b) => Number(a.targetname!.match(suffix)![1]) - Number(b.targetname!.match(suffix)![1]));
+  if (!waypoints.length) return { text, matched: [], unmatched: [fromPrefix] };
+
+  const patches = waypoints.map((entity, offset): MapEntityPatch => {
+    const next = offset < waypoints.length - 1 ? `${toPrefix}${startIndex + offset + 1}` : undefined;
+    return {
+      targetname: entity.targetname!,
+      classname,
+      newTargetname: `${toPrefix}${startIndex + offset}`,
+      properties: next ? { target: next } : undefined,
+      removeProperties: next
+        ? ["speed", "radius", "orientationtype"]
+        : ["target", "speed", "radius", "orientationtype"],
+    };
+  });
+  return patchMapEntities(text, patches);
 }
 
 /** Build a CMapEntity keyvalues2 block (whitespace is irrelevant to dmxconvert). */

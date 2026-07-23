@@ -10,6 +10,8 @@ import {
   buildEntityBlock,
   insertEntity,
   parseMapEntities,
+  patchMapEntities,
+  rewriteWaypointPath,
 } from "../dota/vmap.js";
 import { readAddonInfo, registerMapFile } from "../dota/addoninfo.js";
 import { compileProjectMap, projectMapPaths } from "../dota/map-project.js";
@@ -114,6 +116,98 @@ export function registerMapTools(server: McpServer) {
       if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}.`);
       const txt = await vmapToText(dota.dmxconvertExe, p.contentVmap);
       return json({ map, length: txt.length }, txt);
+    }),
+  );
+
+  server.registerTool(
+    "map_patch_entities",
+    {
+      title: "Patch existing map entities",
+      description:
+        "Batch-update entities selected by targetname without rebuilding the map: change classname/targetname, move or " +
+        "rotate them, add/replace string keyvalues, or remove keyvalues. Unmatched selectors abort the write by default. " +
+        "Use this to turn layout markers into real towers, spawners, forts, triggers, and other gameplay entities.",
+      inputSchema: {
+        projectRoot: z.string().optional(),
+        map: z.string(),
+        patches: z.array(
+          z.object({
+            targetname: z.string(),
+            classname: z.string().optional(),
+            newTargetname: z.string().optional(),
+            origin: z.string().optional(),
+            angles: z.string().optional(),
+            properties: z.record(numOrStr).optional(),
+            removeProperties: z.array(z.string()).optional(),
+          }),
+        ),
+        strict: z.boolean().optional().describe("Abort without writing if any targetname is missing (default true)."),
+        recompile: z.boolean().optional(),
+      },
+    },
+    guard(async ({ projectRoot, map, patches, strict, recompile }): Promise<ToolResult> => {
+      const dota = await requireDotaPaths();
+      const project = await resolveProject(projectRoot);
+      const p = projectMapPaths(dota, project, map);
+      if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}.`);
+
+      const current = await vmapToText(dota.dmxconvertExe, p.contentVmap);
+      const result = patchMapEntities(current, patches);
+      if (strict !== false && result.unmatched.length) {
+        return error(`No changes written. Missing targetnames: ${result.unmatched.join(", ")}`);
+      }
+      await textToVmap(dota.dmxconvertExe, result.text, p.contentVmap);
+
+      const steps = [
+        `Patched ${result.matched.length} entities in "${map}".`,
+        result.unmatched.length ? `Unmatched: ${result.unmatched.join(", ")}` : "All selectors matched.",
+      ];
+      if (recompile) {
+        const res = await compileProjectMap(dota, project, map);
+        steps.push(res.code === 0 ? `Recompiled -> ${p.installedGameVpk}` : `Recompile FAILED (exit ${res.code})`);
+      }
+      return json(
+        { map, matched: result.matched, unmatched: result.unmatched, recompiled: !!recompile },
+        steps.join("\n"),
+      );
+    }),
+  );
+
+  server.registerTool(
+    "map_rewrite_path",
+    {
+      title: "Rewrite a waypoint chain",
+      description:
+        "Convert and consistently rename every numerically suffixed waypoint in an existing chain. Updates classname, " +
+        "targetname, and target links together and removes path_track-only properties. Useful for converting generated " +
+        "path_track routes into Dota creep path_corner chains.",
+      inputSchema: {
+        projectRoot: z.string().optional(),
+        map: z.string(),
+        fromPrefix: z.string().describe("Existing prefix before the numeric suffix, e.g. radiant_north_route_."),
+        toPrefix: z.string().describe("New prefix, e.g. path_radiant_north_."),
+        classname: z.string().optional().describe("New entity class (default path_corner)."),
+        startIndex: z.number().int().min(0).optional().describe("First numeric suffix (default 1)."),
+        recompile: z.boolean().optional(),
+      },
+    },
+    guard(async ({ projectRoot, map, fromPrefix, toPrefix, classname, startIndex, recompile }): Promise<ToolResult> => {
+      const dota = await requireDotaPaths();
+      const project = await resolveProject(projectRoot);
+      const p = projectMapPaths(dota, project, map);
+      if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}.`);
+
+      const current = await vmapToText(dota.dmxconvertExe, p.contentVmap);
+      const result = rewriteWaypointPath(current, fromPrefix, toPrefix, classname ?? "path_corner", startIndex ?? 1);
+      if (!result.matched.length) return error(`No numerically suffixed waypoints found with prefix "${fromPrefix}".`);
+      await textToVmap(dota.dmxconvertExe, result.text, p.contentVmap);
+
+      const steps = [`Rewrote ${result.matched.length} waypoints: ${fromPrefix}* -> ${toPrefix}${startIndex ?? 1}...`];
+      if (recompile) {
+        const res = await compileProjectMap(dota, project, map);
+        steps.push(res.code === 0 ? `Recompiled -> ${p.installedGameVpk}` : `Recompile FAILED (exit ${res.code})`);
+      }
+      return json({ map, count: result.matched.length, fromPrefix, toPrefix }, steps.join("\n"));
     }),
   );
 
