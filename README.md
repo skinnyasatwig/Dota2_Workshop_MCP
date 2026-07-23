@@ -39,7 +39,7 @@ fallback for non-tstl addons.
 | **In-game DebugSDK** | `addon_attach_debug_sdk`, `addon_detach_debug_sdk`, `dota_lua_eval`, `dota_debug_dump`, `dota_selftest` |
 | **Reference library** | `ref_harvest`, `ref_harvest_top`, `ref_list`, `ref_search`, `ref_find`, `ref_passport`, `ref_inspect`, `ref_get`, `ref_recipe`, `ref_curate`, `ref_stats`, `asset_db` (SQLite index: fast structured search by kind/ext/name) |
 | **Docs & references** | `docs_search`, `docs_get`, `docs_list`, `dota_patterns`, `panorama_api_search`, `panorama_api_get`, `tools_catalog` |
-| **Maps** | `map_create`, `map_add_entity`, `map_to_text`, `map_from_text`, `map_compile`, `map_list` |
+| **Maps** | `map_create`, `map_add_entity`, `map_to_text`, `map_from_text`, `map_compile`, `map_list`, `map_validate` |
 | **Map generation** | `map_build`, `map_terrain`, `map_preview`, `map_tile_to_world`, `entity_catalog`, `scaffold_td` |
 | **Reference games** | `workshop_search`, `workshop_download`, `workshop_list`, `workshop_inspect`, `workshop_read`, `workshop_grep`, `panorama_decompile` |
 | **Asset preview (out of engine)** | `asset_preview` (particles/textures/models → inline contact-sheet image + HTML gallery), `sound_preview` (sounds → inline waveform/icon image + playable HTML soundboard + inline audio), `preview_studio` / `preview_studio_stop` (interactive gallery + public share link: animated particles, 3D models, audio players, click-to-select), `preview_pick` / `preview_selections` (resolve the IDs the user picked/clicked → game + asset path) — decoded via ValveResourceFormat, no Dota launch |
@@ -207,7 +207,8 @@ walk — tower defense"* into a real map:
 - **`map_build`** — one call: clone the template, shape terrain, place entities, lay waypoint paths,
   register and compile. Terrain ops work on the **Dota tile grid** (`verticesHeight` / `verticesWater` /
   `cellsTileSet`) over shapes (`rect` / `circle` / `ring` / `path`): raise platforms, carve roads
-  (different tileset), flood water moats, etc.
+  (different tileset), flood water moats, etc. Waypoint paths can choose their entity class and starting
+  index; Dota creep routes typically use `classname: "path_corner"` and `startIndex: 1`.
 - **`map_terrain`** — apply terrain ops to an existing map.
 - **`map_preview`** — render the map top-down to an **image straight from the data**, no game launch —
   the fast way to iterate on a layout (water = blue, road = tan, grass = green, shaded by height).
@@ -294,6 +295,13 @@ playable `.vpk` — a pipeline verified end to end.
 - **`map_to_text` / `map_from_text`** — read/write the full vmap DMX text for arbitrary edits.
 - **`map_compile`** — compile a map's `.vmap` → `.vpk`.
 - **`map_list`** — list maps with source/compiled status.
+- **`map_validate`** — no-game preflight: verify map registration, source/compiled state, required
+  script-facing entities, duplicate target names, and broken `path_corner`/`path_track` chains.
+
+Map registration supports both legacy KeyValues 1 and the KV3 `addoninfo.txt` produced by current
+Workshop Tools. Source-controlled layouts under `game/dota_addons/<addon>` and
+`content/dota_addons/<addon>` are detected directly. `addon_link dryRun=true` previews safe junctions;
+the real link operation refuses to overwrite conflicting folders.
 
 Then launch it: `addon_launch_custom_game map="<name>"`.
 

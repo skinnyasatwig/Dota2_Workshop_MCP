@@ -7,10 +7,10 @@
 //      (root/scripts/npc, root/scripts/vscripts) — e.g. a folder inside dota_addons.
 
 import { join, basename } from "node:path";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { pathExists } from "../util/fsx.js";
 
-export type ProjectType = "ts-template" | "raw" | "unknown";
+export type ProjectType = "ts-template" | "raw" | "repo" | "unknown";
 
 export interface AddonProject {
   root: string;
@@ -60,9 +60,31 @@ export function validateAddonName(name: string): void {
   }
 }
 
+async function childDirectories(path: string): Promise<string[]> {
+  if (!(await pathExists(path))) return [];
+  const entries = await readdir(path, { withFileTypes: true });
+  return entries.filter((entry) => entry.isDirectory() || entry.isSymbolicLink()).map((entry) => entry.name);
+}
+
+function uniqueValidAddonNames(names: string[]): string[] {
+  return [...new Set(names.filter((name) => ADDON_NAME_RE.test(name)))];
+}
+
+async function detectRepoAddon(root: string, preferredName?: string): Promise<string | undefined> {
+  const gameAddons = await childDirectories(join(root, "game", "dota_addons"));
+  const contentAddons = await childDirectories(join(root, "content", "dota_addons"));
+  const candidates = uniqueValidAddonNames([...gameAddons, ...contentAddons]);
+  if (preferredName && candidates.includes(preferredName)) return preferredName;
+  if (candidates.length === 1) return candidates[0];
+  const shared = gameAddons.filter((name) => contentAddons.includes(name) && ADDON_NAME_RE.test(name));
+  return shared.length === 1 ? shared[0] : undefined;
+}
+
 export async function detectProject(root: string): Promise<AddonProject> {
   const pkg = await readPackageJson(root);
   const hasTstl = !!pkg && ("typescript-to-lua" in pkg.deps || "@moddota/dota-lua-types" in pkg.deps);
+  const packageAddonName = pkg?.name?.toLowerCase();
+  const repoAddonName = await detectRepoAddon(root, packageAddonName);
 
   const templateLayout =
     (await pathExists(join(root, "src", "vscripts"))) || (await pathExists(join(root, "game", "scripts")));
@@ -72,7 +94,16 @@ export async function detectProject(root: string): Promise<AddonProject> {
   let gameDir: string;
   let contentDir: string;
 
-  if (templateLayout || hasTstl) {
+  if (repoAddonName) {
+    type = "repo";
+    gameDir = join(root, "game", "dota_addons", repoAddonName);
+    const nestedContent = join(root, "content", "dota_addons", repoAddonName);
+    contentDir = (await pathExists(nestedContent))
+      ? nestedContent
+      : (await pathExists(join(root, "maps")))
+        ? root
+        : nestedContent;
+  } else if (templateLayout || hasTstl) {
     type = hasTstl ? "ts-template" : "raw";
     gameDir = join(root, "game");
     contentDir = join(root, "content");
@@ -86,8 +117,8 @@ export async function detectProject(root: string): Promise<AddonProject> {
     contentDir = join(root, "content");
   }
 
-  // Addon name: package.json name, else the project folder name.
-  const addonName = (pkg?.name ?? basename(root)).toLowerCase();
+  // Addon name: detected repo folder, package.json name, else project folder.
+  const addonName = repoAddonName ?? packageAddonName ?? basename(root).toLowerCase();
 
   const project: AddonProject = {
     root,

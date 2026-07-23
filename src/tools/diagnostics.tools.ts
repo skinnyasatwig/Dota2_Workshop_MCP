@@ -1,13 +1,15 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { readdir, lstat, readlink } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { resolveDotaPaths, hasWorkshopTools } from "../dota/paths.js";
 import { configuredAddonDir, resolveProject } from "../config.js";
 import { pathExists } from "../util/fsx.js";
 import { parseKV, getWrapperBlock, blockToObject } from "../kv/index.js";
+import { parseAddonInfo } from "../dota/addoninfo.js";
 import { readTextFile } from "../util/fsx.js";
 import { auditAddon } from "../dota/audit.js";
+import { inspectProjectLink } from "../dota/project-link.js";
 import { json, text, error, guard, ToolResult } from "../util/result.js";
 
 async function listAddons(dir: string): Promise<string[]> {
@@ -52,18 +54,12 @@ export function registerDiagnosticsTools(server: McpServer) {
           let linked = false;
           let linkInfo = "not linked";
           if (dota) {
-            const gameLink = join(dota.gameDotaAddons, p.addonName);
-            if (await pathExists(gameLink)) {
-              linked = true;
-              linkInfo = `present at ${gameLink}`;
-            }
-            // Is the project's game dir a junction/symlink?
-            try {
-              const st = await lstat(p.gameDir);
-              if (st.isSymbolicLink()) linkInfo += ` (game/ -> ${await readlink(p.gameDir)})`;
-            } catch {
-              /* ignore */
-            }
+            const [gameLink, contentLink] = await Promise.all([
+              inspectProjectLink(p.gameDir, join(dota.gameDotaAddons, p.addonName)),
+              inspectProjectLink(p.contentDir, join(dota.contentDotaAddons, p.addonName)),
+            ]);
+            linked = gameLink.state === "linked" && contentLink.state === "linked";
+            linkInfo = `game=${gameLink.state}, content=${contentLink.state}`;
           }
           report.project = {
             root: p.root,
@@ -77,8 +73,8 @@ export function registerDiagnosticsTools(server: McpServer) {
           };
           if (!linked) {
             (report.project as any).hint =
-              "Addon not found in dota_addons. In a TS template run `node scripts/install.js` (or `npm install` " +
-              "without --ignore-scripts) to create the game/content junctions, then the launch tools will work.";
+              "Project is not fully linked into both game/content dota_addons trees. Run addon_link with " +
+              "dryRun=true to inspect the safe link plan.";
           }
         } catch (e) {
           report.project = { root, error: e instanceof Error ? e.message : String(e) };
@@ -124,10 +120,17 @@ export function registerDiagnosticsTools(server: McpServer) {
       const path = join(dota.gameDotaAddons, addon, "addoninfo.txt");
       if (!(await pathExists(path))) return error(`addoninfo.txt not found for addon "${addon}" at ${path}`);
       const { text: raw } = await readTextFile(path);
+      const summary = parseAddonInfo(raw);
+      if (summary.format === "kv3") {
+        return json(
+          { addon, path, info: summary },
+          `${path}\n\n${JSON.stringify(summary, null, 2)}`,
+        );
+      }
       const doc = parseKV(raw);
       const block = getWrapperBlock(doc);
       const data = block ? blockToObject(block) : {};
-      return json({ addon, path, info: data }, `${path}\n\n${JSON.stringify(data, null, 2)}`);
+      return json({ addon, path, info: data, summary }, `${path}\n\n${JSON.stringify(data, null, 2)}`);
     }),
   );
 

@@ -57,6 +57,66 @@ export interface EntitySpec {
   properties?: Record<string, string | number>;
 }
 
+export interface ParsedMapEntity {
+  classname: string;
+  origin?: string;
+  nodeId?: number;
+  targetname?: string;
+  target?: string;
+  properties: Record<string, string>;
+}
+
+function matchingBrace(text: string, open: number): number {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = open; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{") depth++;
+    else if (ch === "}" && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/** Extract map entities and their string keyvalues from keyvalues2 vmap text. */
+export function parseMapEntities(text: string): ParsedMapEntity[] {
+  const entities: ParsedMapEntity[] = [];
+  const marker = /"CMapEntity"\s*\{/g;
+  let match: RegExpExecArray | null;
+  while ((match = marker.exec(text))) {
+    const open = text.indexOf("{", match.index);
+    const close = matchingBrace(text, open);
+    if (close < 0) break;
+    const block = text.slice(open, close + 1);
+    const properties: Record<string, string> = {};
+    for (const prop of block.matchAll(/"([^"]+)"\s+"string"\s+"((?:\\.|[^"\\])*)"/g)) {
+      properties[prop[1]] = prop[2];
+    }
+    const classname = properties.classname;
+    if (classname) {
+      const origin = block.match(/"origin"\s+"vector3"\s+"([^"]+)"/)?.[1];
+      const nodeText = block.match(/"nodeID"\s+"int"\s+"(\d+)"/)?.[1];
+      entities.push({
+        classname,
+        origin,
+        nodeId: nodeText === undefined ? undefined : Number(nodeText),
+        targetname: properties.targetname,
+        target: properties.target,
+        properties,
+      });
+    }
+    marker.lastIndex = close + 1;
+  }
+  return entities;
+}
+
 /** Build a CMapEntity keyvalues2 block (whitespace is irrelevant to dmxconvert). */
 export function buildEntityBlock(spec: EntitySpec, nodeId: number): string {
   const props = spec.properties ?? {};

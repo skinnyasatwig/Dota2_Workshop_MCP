@@ -3,39 +3,17 @@ import { z } from "zod";
 import { join } from "node:path";
 import { readFile } from "node:fs/promises";
 import { resolveProject } from "../config.js";
-import { requireDotaPaths, DotaPaths } from "../dota/paths.js";
-import { AddonProject } from "../dota/project.js";
-import { vmapToText, textToVmap, cloneVmap, compileVmap, buildEntityBlock, insertEntity, maxNodeId } from "../dota/vmap.js";
+import { requireDotaPaths } from "../dota/paths.js";
+import { vmapToText, textToVmap, cloneVmap, buildEntityBlock, insertEntity, maxNodeId } from "../dota/vmap.js";
 import { parseTileGrid, applyTileGrid, setHeight, setWater, setTileset, fill, tileToWorld, vIndex, cIndex, Shape } from "../dota/tilegrid.js";
-import { parseKV, serializeKV, getWrapperBlock, findPair, upsertPair, objectToBlock, isBlock } from "../kv/index.js";
+import { registerMapFile } from "../dota/addoninfo.js";
+import { compileProjectMap, projectMapPaths } from "../dota/map-project.js";
 import { resolveDataPath } from "../util/datapath.js";
 import { encodeRgbaPng } from "../util/png.js";
-import { readTextFile, writeTextFile, pathExists } from "../util/fsx.js";
+import { writeTextFile, pathExists } from "../util/fsx.js";
 import { json, text, image, error, guard, ToolResult } from "../util/result.js";
 
 const NAME_RE = /^[a-z][a-z0-9_]+$/;
-
-function paths(dota: DotaPaths, project: AddonProject, name: string) {
-  return {
-    base: join(dota.contentDotaAddons, "addon_template", "maps", "template_map.vmap"),
-    contentVmap: join(dota.contentDotaAddons, project.addonName, "maps", `${name}.vmap`),
-    gameVpk: join(dota.gameDotaAddons, project.addonName, "maps", `${name}.vpk`),
-    addoninfo: join(project.gameDir, "addoninfo.txt"),
-  };
-}
-
-async function registerMap(addoninfoPath: string, name: string, maxPlayers: number): Promise<void> {
-  const doc = (await pathExists(addoninfoPath))
-    ? parseKV((await readTextFile(addoninfoPath)).text)
-    : parseKV(`"AddonInfo"\n{\n\t"maps" ""\n\t"IsPlayable" "1"\n}\n`);
-  const wrapper = getWrapperBlock(doc)!;
-  const mapsPair = findPair(wrapper, "maps");
-  const list = (mapsPair && !isBlock(mapsPair.value) ? (mapsPair.value as string) : "").split(/\s+/).filter(Boolean);
-  if (!list.includes(name)) list.push(name);
-  upsertPair(wrapper, "maps", list.join(" "));
-  if (!findPair(wrapper, name)) upsertPair(wrapper, name, objectToBlock({ MaxPlayers: String(maxPlayers) }));
-  await writeTextFile(addoninfoPath, serializeKV(doc), { encoding: "utf8" });
-}
 
 // Build a Shape from a loose JSON object.
 function toShape(s: any): Shape {
@@ -67,6 +45,29 @@ function applyTerrainOps(textIn: string, ops: any[], log: string[]): string {
   return applyTileGrid(textIn, g);
 }
 
+export interface WaypointEntity {
+  classname: string;
+  origin: string;
+  properties: Record<string, string>;
+}
+
+export function expandWaypointPath(path: any): WaypointEntity[] {
+  const points: number[][] = path.points ?? [];
+  const startIndex = Number.isInteger(path.startIndex) ? path.startIndex : 0;
+  const classname = path.classname ?? "path_track";
+  return points.map((point, offset) => {
+    const index = startIndex + offset;
+    const properties: Record<string, string> = {
+      ...(path.properties ?? {}),
+      targetname: `${path.name}_${index}`,
+    };
+    if (offset < points.length - 1) properties.target = `${path.name}_${index + 1}`;
+    else if (path.loop && points.length) properties.target = `${path.name}_${startIndex}`;
+    if (path.speed !== undefined) properties.speed = String(path.speed);
+    return { classname, origin: point.join(" "), properties };
+  });
+}
+
 function placeEntities(textIn: string, entities: any[], paths_: any[], log: string[]): string {
   let txt = textIn;
   let node = maxNodeId(txt);
@@ -75,15 +76,15 @@ function placeEntities(textIn: string, entities: any[], paths_: any[], log: stri
     log.push(`entity ${e.classname} @ ${e.origin ?? "0 0 0"}`);
   }
   for (const p of paths_ ?? []) {
-    const pts: number[][] = p.points || [];
-    for (let i = 0; i < pts.length; i++) {
-      const origin = pts[i].join(" ");
-      const props: Record<string, string> = { targetname: `${p.name}_${i}` };
-      if (i < pts.length - 1) props.target = `${p.name}_${i + 1}`;
-      if (p.speed) props.speed = String(p.speed);
-      txt = insertEntity(txt, buildEntityBlock({ classname: "path_track", origin, properties: props }, ++node));
+    const waypoints = expandWaypointPath(p);
+    for (const waypoint of waypoints) {
+      txt = insertEntity(txt, buildEntityBlock(waypoint, ++node));
     }
-    log.push(`path "${p.name}": ${pts.length} waypoints (first node ${p.name}_0)`);
+    const startIndex = Number.isInteger(p.startIndex) ? p.startIndex : 0;
+    log.push(
+      `path "${p.name}": ${waypoints.length} ${p.classname ?? "path_track"} waypoints ` +
+        `(first node ${p.name}_${startIndex}${p.loop ? ", looped" : ""})`,
+    );
   }
   return txt;
 }
@@ -324,13 +325,13 @@ export function registerMapGenTools(server: McpServer) {
     guard(async ({ projectRoot, map, ops, recompile }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
-      const p = paths(dota, project, map);
+      const p = projectMapPaths(dota, project, map);
       if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}. Create it with map_create or map_build.`);
       const log: string[] = [];
       const txt = applyTerrainOps(await vmapToText(dota.dmxconvertExe, p.contentVmap), ops, log);
       await textToVmap(dota.dmxconvertExe, txt, p.contentVmap);
       if (recompile) {
-        const res = await compileVmap(dota.resourceCompilerExe, dota.dotaGameDir, p.contentVmap, p.gameVpk);
+        const res = await compileProjectMap(dota, project, map);
         log.push(res.code === 0 ? `recompiled -> ${p.gameVpk}` : `recompile FAILED (${res.code})`);
       }
       return json({ map, ops: ops.length }, log.join("\n"));
@@ -352,7 +353,10 @@ export function registerMapGenTools(server: McpServer) {
         maxPlayers: z.number().int().min(1).max(24).optional(),
         terrain: z.array(z.any()).optional().describe("Terrain ops (tile coords)."),
         entities: z.array(z.any()).optional().describe("[{classname, origin:'x y z', angles?, properties?}] (world coords)."),
-        paths: z.array(z.any()).optional().describe("[{name, points:[[x,y,z]...], speed?}] -> chained path_track waypoints (world coords)."),
+        paths: z.array(z.any()).optional().describe(
+          "[{name, points:[[x,y,z]...], classname?, startIndex?, loop?, speed?, properties?}] -> chained waypoints. " +
+            "Defaults to path_track starting at _0; Dota creep routes usually use classname:'path_corner', startIndex:1.",
+        ),
         compile: z.boolean().optional(),
         overwrite: z.boolean().optional(),
       },
@@ -361,12 +365,12 @@ export function registerMapGenTools(server: McpServer) {
       if (!NAME_RE.test(name)) return error(`Invalid map name "${name}".`);
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
-      const p = paths(dota, project, name);
-      if (!(await pathExists(p.base))) return error(`Template base map not found: ${p.base}`);
+      const p = projectMapPaths(dota, project, name);
+      if (!(await pathExists(p.baseTemplate))) return error(`Template base map not found: ${p.baseTemplate}`);
       if ((await pathExists(p.contentVmap)) && !overwrite) return error(`Map "${name}" exists (pass overwrite=true).`);
 
-      await cloneVmap(p.base, p.contentVmap);
-      await registerMap(p.addoninfo, name, maxPlayers ?? 10);
+      await cloneVmap(p.baseTemplate, p.contentVmap);
+      await registerMapFile(p.addoninfo, name, maxPlayers ?? 10);
 
       const log: string[] = [`cloned + registered "${name}"`];
       let txt = await vmapToText(dota.dmxconvertExe, p.contentVmap);
@@ -375,9 +379,9 @@ export function registerMapGenTools(server: McpServer) {
       await textToVmap(dota.dmxconvertExe, txt, p.contentVmap);
 
       if (compile) {
-        const res = await compileVmap(dota.resourceCompilerExe, dota.dotaGameDir, p.contentVmap, p.gameVpk);
-        const ok = res.code === 0 && (await pathExists(p.gameVpk));
-        log.push(ok ? `compiled -> ${p.gameVpk}` : `compile FAILED (exit ${res.code})\n${res.stdout.slice(-1200)}`);
+        const res = await compileProjectMap(dota, project, name);
+        const ok = res.code === 0 && (await pathExists(p.installedGameVpk));
+        log.push(ok ? `compiled -> ${p.installedGameVpk}` : `compile FAILED (exit ${res.code})\n${res.stdout.slice(-1200)}`);
       } else {
         log.push(`Next: map_compile name="${name}", then addon_launch_custom_game map="${name}".`);
       }
@@ -397,7 +401,7 @@ export function registerMapGenTools(server: McpServer) {
     guard(async ({ projectRoot, map, scale }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
-      const p = paths(dota, project, map);
+      const p = projectMapPaths(dota, project, map);
       if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}.`);
       const g = parseTileGrid(await vmapToText(dota.dmxconvertExe, p.contentVmap));
       const px = Math.max(2, Math.min(16, scale ?? 8));
@@ -559,7 +563,7 @@ function leak(this: void, unit: CDOTA_BaseNPC): void {
     guard(async ({ projectRoot, map, tx, ty }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
-      const p = paths(dota, project, map);
+      const p = projectMapPaths(dota, project, map);
       if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}.`);
       const g = parseTileGrid(await vmapToText(dota.dmxconvertExe, p.contentVmap));
       const [wx, wy] = tileToWorld(g, tx, ty);

@@ -1,51 +1,23 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { join } from "node:path";
 import { resolveProject } from "../config.js";
-import { requireDotaPaths, DotaPaths } from "../dota/paths.js";
-import { AddonProject } from "../dota/project.js";
-import { vmapToText, textToVmap, cloneVmap, maxNodeId, buildEntityBlock, insertEntity, compileVmap } from "../dota/vmap.js";
-import { parseKV, serializeKV, getWrapperBlock, findPair, upsertPair, objectToBlock, isBlock, blockToObject } from "../kv/index.js";
-import { readTextFile, writeTextFile, pathExists } from "../util/fsx.js";
+import { requireDotaPaths } from "../dota/paths.js";
+import {
+  vmapToText,
+  textToVmap,
+  cloneVmap,
+  maxNodeId,
+  buildEntityBlock,
+  insertEntity,
+  parseMapEntities,
+} from "../dota/vmap.js";
+import { readAddonInfo, registerMapFile } from "../dota/addoninfo.js";
+import { compileProjectMap, projectMapPaths } from "../dota/map-project.js";
+import { pathExists } from "../util/fsx.js";
 import { json, text, error, guard, ToolResult } from "../util/result.js";
 
 const NAME_RE = /^[a-z][a-z0-9_]+$/;
 const numOrStr = z.union([z.string(), z.number()]);
-
-interface MapPaths {
-  contentVmap: string;
-  gameVpk: string;
-  addoninfo: string;
-  baseTemplate: string;
-}
-function mapPaths(dota: DotaPaths, project: AddonProject, name: string): MapPaths {
-  return {
-    contentVmap: join(dota.contentDotaAddons, project.addonName, "maps", `${name}.vmap`),
-    gameVpk: join(dota.gameDotaAddons, project.addonName, "maps", `${name}.vpk`),
-    addoninfo: join(project.gameDir, "addoninfo.txt"),
-    baseTemplate: join(dota.contentDotaAddons, "addon_template", "maps", "template_map.vmap"),
-  };
-}
-
-async function registerMap(addoninfoPath: string, name: string, maxPlayers: number): Promise<void> {
-  let doc;
-  if (await pathExists(addoninfoPath)) {
-    doc = parseKV((await readTextFile(addoninfoPath)).text);
-  } else {
-    doc = parseKV(`"AddonInfo"\n{\n\t"maps" ""\n\t"IsPlayable" "1"\n}\n`);
-  }
-  const wrapper = getWrapperBlock(doc);
-  if (!wrapper) throw new Error("addoninfo.txt has no AddonInfo wrapper.");
-  const mapsPair = findPair(wrapper, "maps");
-  const current = mapsPair && !isBlock(mapsPair.value) ? (mapsPair.value as string) : "";
-  const list = current.split(/\s+/).filter(Boolean);
-  if (!list.includes(name)) list.push(name);
-  upsertPair(wrapper, "maps", list.join(" "));
-  if (!findPair(wrapper, name)) {
-    upsertPair(wrapper, name, objectToBlock({ MaxPlayers: String(maxPlayers) }));
-  }
-  await writeTextFile(addoninfoPath, serializeKV(doc), { encoding: "utf8" });
-}
 
 export function registerMapTools(server: McpServer) {
   server.registerTool(
@@ -68,17 +40,17 @@ export function registerMapTools(server: McpServer) {
       if (!NAME_RE.test(name)) return error(`Invalid map name "${name}" (lowercase letters, digits, underscores).`);
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
-      const p = mapPaths(dota, project, name);
+      const p = projectMapPaths(dota, project, name);
       if (!(await pathExists(p.baseTemplate))) return error(`Base template map not found: ${p.baseTemplate}`);
       if ((await pathExists(p.contentVmap)) && !overwrite) return error(`Map already exists: ${p.contentVmap} (pass overwrite=true).`);
 
       await cloneVmap(p.baseTemplate, p.contentVmap);
-      await registerMap(p.addoninfo, name, maxPlayers ?? 10);
+      await registerMapFile(p.addoninfo, name, maxPlayers ?? 10);
 
       const out: Record<string, unknown> = { name, vmap: p.contentVmap, registered: p.addoninfo };
       const steps = [`Created map "${name}":`, `  + ${p.contentVmap}`, `  ~ registered in ${p.addoninfo}`];
       if (compile) {
-        const res = await compileVmap(dota.resourceCompilerExe, dota.dotaGameDir, p.contentVmap, p.gameVpk);
+        const res = await compileProjectMap(dota, project, name);
         out.compiled = res.code === 0;
         steps.push(res.code === 0 ? `  ✓ compiled -> ${p.gameVpk}` : `  ✗ compile failed (exit ${res.code})`);
         if (res.code !== 0) steps.push(res.stdout.slice(-1500));
@@ -109,7 +81,7 @@ export function registerMapTools(server: McpServer) {
     guard(async ({ projectRoot, map, classname, origin, angles, properties, recompile }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
-      const p = mapPaths(dota, project, map);
+      const p = projectMapPaths(dota, project, map);
       if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}. Create it with map_create.`);
 
       const txt = await vmapToText(dota.dmxconvertExe, p.contentVmap);
@@ -118,7 +90,7 @@ export function registerMapTools(server: McpServer) {
 
       const steps = [`Added ${classname} at ${origin ?? "0 0 0"} to "${map}".`];
       if (recompile) {
-        const res = await compileVmap(dota.resourceCompilerExe, dota.dotaGameDir, p.contentVmap, p.gameVpk);
+        const res = await compileProjectMap(dota, project, map);
         steps.push(res.code === 0 ? `Recompiled -> ${p.gameVpk}` : `Recompile FAILED (exit ${res.code})\n${res.stdout.slice(-1500)}`);
       } else {
         steps.push(`Recompile with map_compile name="${map}".`);
@@ -137,7 +109,7 @@ export function registerMapTools(server: McpServer) {
     guard(async ({ projectRoot, map }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
-      const p = mapPaths(dota, project, map);
+      const p = projectMapPaths(dota, project, map);
       if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}.`);
       const txt = await vmapToText(dota.dmxconvertExe, p.contentVmap);
       return json({ map, length: txt.length }, txt);
@@ -161,11 +133,11 @@ export function registerMapTools(server: McpServer) {
     guard(async ({ projectRoot, map, text: dmxText, recompile }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
-      const p = mapPaths(dota, project, map);
+      const p = projectMapPaths(dota, project, map);
       await textToVmap(dota.dmxconvertExe, dmxText, p.contentVmap);
       const steps = [`Wrote ${p.contentVmap} (${dmxText.length} chars).`];
       if (recompile) {
-        const res = await compileVmap(dota.resourceCompilerExe, dota.dotaGameDir, p.contentVmap, p.gameVpk);
+        const res = await compileProjectMap(dota, project, map);
         steps.push(res.code === 0 ? `Recompiled -> ${p.gameVpk}` : `Recompile FAILED (exit ${res.code})\n${res.stdout.slice(-1500)}`);
       }
       return json({ map }, steps.join("\n"));
@@ -187,14 +159,14 @@ export function registerMapTools(server: McpServer) {
     guard(async ({ projectRoot, name, force, dryRun }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
-      const p = mapPaths(dota, project, name);
-      if (dryRun) return text(`[dry run]\n"${dota.resourceCompilerExe}" -v -nop4${force ? " -f" : ""} -i "${p.contentVmap}" -game "${dota.dotaGameDir}"`);
+      const p = projectMapPaths(dota, project, name);
+      if (dryRun) return text(`[dry run]\n"${dota.resourceCompilerExe}" -v -nop4${force ? " -f" : ""} -i "${p.installedContentVmap}" -game "${dota.dotaGameDir}"`);
       if (!(await pathExists(p.contentVmap))) return error(`Map content not found: ${p.contentVmap}.`);
-      const res = await compileVmap(dota.resourceCompilerExe, dota.dotaGameDir, p.contentVmap, p.gameVpk, force);
-      const ok = res.code === 0 && (await pathExists(p.gameVpk));
+      const res = await compileProjectMap(dota, project, name, force);
+      const ok = res.code === 0 && (await pathExists(p.installedGameVpk));
       return json(
-        { name, ok, vpk: p.gameVpk, exitCode: res.code },
-        `${ok ? "COMPILE OK -> " + p.gameVpk : "COMPILE FAILED (exit " + res.code + ")"}\n\n${res.stdout.slice(-2000)}\n${res.stderr.slice(-500)}`.trim(),
+        { name, ok, vpk: p.installedGameVpk, exitCode: res.code },
+        `${ok ? "COMPILE OK -> " + p.installedGameVpk : "COMPILE FAILED (exit " + res.code + ")"}\n\n${res.stdout.slice(-2000)}\n${res.stderr.slice(-500)}`.trim(),
       );
     }),
   );
@@ -209,16 +181,14 @@ export function registerMapTools(server: McpServer) {
     guard(async ({ projectRoot }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
-      const addoninfo = join(project.gameDir, "addoninfo.txt");
+      const addoninfo = projectMapPaths(dota, project, "_probe").addoninfo;
       let names: string[] = [];
       if (await pathExists(addoninfo)) {
-        const wrapper = getWrapperBlock(parseKV((await readTextFile(addoninfo)).text));
-        const mapsPair = wrapper && findPair(wrapper, "maps");
-        if (mapsPair && !isBlock(mapsPair.value)) names = (mapsPair.value as string).split(/\s+/).filter(Boolean);
+        names = (await readAddonInfo(addoninfo)).maps;
       }
       const maps = [];
       for (const name of names) {
-        const p = mapPaths(dota, project, name);
+        const p = projectMapPaths(dota, project, name);
         maps.push({ name, source: await pathExists(p.contentVmap), compiled: await pathExists(p.gameVpk) });
       }
       return json(
@@ -226,6 +196,127 @@ export function registerMapTools(server: McpServer) {
         maps.length
           ? maps.map((m) => `  ${m.name}  [source: ${m.source ? "yes" : "no"}, compiled: ${m.compiled ? "yes" : "no"}]`).join("\n")
           : "No maps registered in addoninfo.txt.",
+      );
+    }),
+  );
+
+  server.registerTool(
+    "map_validate",
+    {
+      title: "Validate a map and its script contract",
+      description:
+        "Static preflight for autonomous map work (does not launch Dota): checks source/registration/compiled state, " +
+        "extracts entities, finds duplicate targetnames and broken path_corner/path_track links, and verifies required " +
+        "targetname/classname pairs used by game scripts.",
+      inputSchema: {
+        projectRoot: z.string().optional(),
+        map: z.string(),
+        requiredEntities: z
+          .array(
+            z.object({
+              targetname: z.string(),
+              classname: z.string().optional(),
+            }),
+          )
+          .optional()
+          .describe("Script contract, e.g. [{targetname:'radiant_t1'}, {targetname:'path_radiant_north_1', classname:'path_corner'}]."),
+        requireCompiled: z.boolean().optional().describe("Treat a missing compiled VPK as an error (default false)."),
+      },
+    },
+    guard(async ({ projectRoot, map, requiredEntities, requireCompiled }): Promise<ToolResult> => {
+      const dota = await requireDotaPaths();
+      const project = await resolveProject(projectRoot);
+      const p = projectMapPaths(dota, project, map);
+      const findings: { severity: "error" | "warn"; code: string; message: string }[] = [];
+
+      const source = await pathExists(p.contentVmap);
+      const compiled = await pathExists(p.gameVpk);
+      if (!source) {
+        findings.push({ severity: "error", code: "source-missing", message: `Map source not found: ${p.contentVmap}` });
+      }
+
+      let registered = false;
+      if (await pathExists(p.addoninfo)) {
+        registered = (await readAddonInfo(p.addoninfo)).maps.includes(map);
+      }
+      if (!registered) {
+        findings.push({ severity: "error", code: "not-registered", message: `"${map}" is not registered in ${p.addoninfo}` });
+      }
+      if (!compiled) {
+        findings.push({
+          severity: requireCompiled ? "error" : "warn",
+          code: "compiled-missing",
+          message: `Compiled map not found: ${p.gameVpk}`,
+        });
+      }
+
+      let entities: ReturnType<typeof parseMapEntities> = [];
+      if (source) {
+        entities = parseMapEntities(await vmapToText(dota.dmxconvertExe, p.contentVmap));
+        const byTargetname = new Map<string, typeof entities>();
+        for (const entity of entities) {
+          if (!entity.targetname) continue;
+          const bucket = byTargetname.get(entity.targetname) ?? [];
+          bucket.push(entity);
+          byTargetname.set(entity.targetname, bucket);
+        }
+
+        for (const [targetname, matches] of byTargetname) {
+          if (matches.length > 1) {
+            findings.push({
+              severity: "error",
+              code: "duplicate-targetname",
+              message: `targetname "${targetname}" is used by ${matches.length} entities.`,
+            });
+          }
+        }
+
+        for (const entity of entities) {
+          if (!["path_corner", "path_track"].includes(entity.classname) || !entity.target) continue;
+          if (!byTargetname.has(entity.target)) {
+            findings.push({
+              severity: "error",
+              code: "broken-path-target",
+              message: `${entity.targetname ?? entity.classname} targets missing waypoint "${entity.target}".`,
+            });
+          }
+        }
+
+        for (const required of requiredEntities ?? []) {
+          const matches = byTargetname.get(required.targetname) ?? [];
+          if (!matches.length) {
+            findings.push({
+              severity: "error",
+              code: "required-entity-missing",
+              message: `Required entity "${required.targetname}" is missing.`,
+            });
+          } else if (required.classname && !matches.some((entity) => entity.classname === required.classname)) {
+            findings.push({
+              severity: "error",
+              code: "required-classname-mismatch",
+              message: `"${required.targetname}" exists but is not a ${required.classname}.`,
+            });
+          }
+        }
+      }
+
+      const errors = findings.filter((finding) => finding.severity === "error");
+      const header = errors.length
+        ? `VALIDATION FAILED: ${errors.length} error(s), ${findings.length - errors.length} warning(s).`
+        : `VALIDATION OK: ${entities.length} entities, ${findings.length} warning(s).`;
+      const body = findings.map((finding) => `  [${finding.severity.toUpperCase()}] ${finding.message}`).join("\n");
+      return json(
+        {
+          ok: errors.length === 0,
+          map,
+          project: project.addonName,
+          source,
+          registered,
+          compiled,
+          entityCount: entities.length,
+          findings,
+        },
+        `${header}${body ? `\n${body}` : ""}`,
       );
     }),
   );
