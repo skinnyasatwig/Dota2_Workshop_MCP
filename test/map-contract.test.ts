@@ -20,7 +20,7 @@ test("loadMapContract loads and validates the project default", async () => {
     JSON.stringify({
       map: "twin_gates",
       requiredEntities: [
-        { targetname: "radiant_t1", classname: "npc_dota_tower" },
+        { targetname: "radiant_t1", classname: "npc_dota_tower", properties: { teamnumber: 2 } },
         { targetname: "path_radiant_north_1", classname: "path_corner" },
       ],
     }),
@@ -28,6 +28,7 @@ test("loadMapContract loads and validates the project default", async () => {
   const resolved = await loadMapContract(root, "twin_gates");
   assert.equal(resolved?.path, path);
   assert.equal(resolved?.contract.requiredEntities.length, 2);
+  assert.equal(resolved?.contract.requiredEntities[0].properties?.teamnumber, "2");
   await rm(root, { recursive: true, force: true });
 });
 

@@ -5,6 +5,7 @@ import { pathExists } from "../util/fsx.js";
 export interface MapEntityRequirement {
   targetname: string;
   classname?: string;
+  properties?: Record<string, string>;
 }
 
 export interface MapContract {
@@ -31,9 +32,24 @@ function validateContract(value: unknown, path: string): MapContract {
     if (requirement.classname !== undefined && typeof requirement.classname !== "string") {
       throw new Error(`requiredEntities[${index}].classname must be a string: ${path}`);
     }
+    let properties: Record<string, string> | undefined;
+    if (requirement.properties !== undefined) {
+      if (!requirement.properties || typeof requirement.properties !== "object" || Array.isArray(requirement.properties)) {
+        throw new Error(`requiredEntities[${index}].properties must be an object: ${path}`);
+      }
+      properties = Object.fromEntries(
+        Object.entries(requirement.properties as Record<string, unknown>).map(([key, value]) => {
+          if (!["string", "number", "boolean"].includes(typeof value)) {
+            throw new Error(`requiredEntities[${index}].properties.${key} must be a scalar: ${path}`);
+          }
+          return [key, String(value)];
+        }),
+      );
+    }
     return {
       targetname: requirement.targetname,
       classname: requirement.classname as string | undefined,
+      properties,
     };
   });
   return { map: raw.map as string | undefined, requiredEntities };

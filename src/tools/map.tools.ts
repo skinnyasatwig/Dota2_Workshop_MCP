@@ -311,6 +311,7 @@ export function registerMapTools(server: McpServer) {
             z.object({
               targetname: z.string(),
               classname: z.string().optional(),
+              properties: z.record(numOrStr).optional(),
             }),
           )
           .optional()
@@ -397,6 +398,19 @@ export function registerMapTools(server: McpServer) {
               code: "required-classname-mismatch",
               message: `"${required.targetname}" exists but is not a ${required.classname}.`,
             });
+          } else if (required.properties) {
+            const matchingClass = required.classname
+              ? matches.filter((entity) => entity.classname === required.classname)
+              : matches;
+            for (const [key, value] of Object.entries(required.properties)) {
+              if (!matchingClass.some((entity) => entity.properties[key] === String(value))) {
+                findings.push({
+                  severity: "error",
+                  code: "required-property-mismatch",
+                  message: `"${required.targetname}" does not have ${key}="${value}".`,
+                });
+              }
+            }
           }
         }
       }
