@@ -13,6 +13,7 @@ import {
 } from "../dota/vmap.js";
 import { readAddonInfo, registerMapFile } from "../dota/addoninfo.js";
 import { compileProjectMap, projectMapPaths } from "../dota/map-project.js";
+import { loadMapContract } from "../dota/map-contract.js";
 import { pathExists } from "../util/fsx.js";
 import { json, text, error, guard, ToolResult } from "../util/result.js";
 
@@ -220,14 +221,20 @@ export function registerMapTools(server: McpServer) {
           )
           .optional()
           .describe("Script contract, e.g. [{targetname:'radiant_t1'}, {targetname:'path_radiant_north_1', classname:'path_corner'}]."),
+        contractFile: z
+          .string()
+          .optional()
+          .describe("JSON contract path. Defaults to .dota-workshop/map-contract.json when present."),
         requireCompiled: z.boolean().optional().describe("Treat a missing compiled VPK as an error (default false)."),
       },
     },
-    guard(async ({ projectRoot, map, requiredEntities, requireCompiled }): Promise<ToolResult> => {
+    guard(async ({ projectRoot, map, requiredEntities, contractFile, requireCompiled }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
       const p = projectMapPaths(dota, project, map);
       const findings: { severity: "error" | "warn"; code: string; message: string }[] = [];
+      const resolvedContract = requiredEntities ? undefined : await loadMapContract(project.root, map, contractFile);
+      const requirements = requiredEntities ?? resolvedContract?.contract.requiredEntities ?? [];
 
       const source = await pathExists(p.contentVmap);
       const compiled = await pathExists(p.gameVpk);
@@ -282,7 +289,7 @@ export function registerMapTools(server: McpServer) {
           }
         }
 
-        for (const required of requiredEntities ?? []) {
+        for (const required of requirements) {
           const matches = byTargetname.get(required.targetname) ?? [];
           if (!matches.length) {
             findings.push({
@@ -314,6 +321,8 @@ export function registerMapTools(server: McpServer) {
           registered,
           compiled,
           entityCount: entities.length,
+          contract: resolvedContract?.path ?? null,
+          requirementCount: requirements.length,
           findings,
         },
         `${header}${body ? `\n${body}` : ""}`,
