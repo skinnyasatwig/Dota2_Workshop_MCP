@@ -313,7 +313,9 @@ are declarative desired state and require `targetname`, `classname`, and `origin
 `properties` / `removeProperties` are optional. A `managedPaths` entry takes a `name` plus
 `points: [[x,y,z], ...]` and expands to `name_1`, `name_2`, and so on with generated `target` links;
 the terminal node explicitly removes stale `target` values (`startIndex`, `classname`, `loop`,
-`angles`, and shared `properties` are optional). `map_validate` checks all expanded entities.
+`angles`, and shared `properties` are optional). `maxSegmentLength` rejects accidental large jumps;
+`mirrorOf` plus `mirrorAxis` (`x`, `y`, or `xy`) enforces exact route symmetry. `map_validate`
+checks all expanded entities.
 
 Map registration supports both legacy KeyValues 1 and the KV3 `addoninfo.txt` produced by current
 Workshop Tools. Source-controlled layouts under `game/dota_addons/<addon>` and

@@ -28,6 +28,9 @@ export interface ManagedMapPath {
   loop?: boolean;
   angles?: string;
   properties?: Record<string, string>;
+  maxSegmentLength?: number;
+  mirrorOf?: string;
+  mirrorAxis?: "x" | "y" | "xy";
 }
 
 export interface MapContract {
@@ -218,6 +221,50 @@ function validateContract(value: unknown, path: string): MapContract {
       if (managedPath.angles !== undefined && typeof managedPath.angles !== "string") {
         throw new Error(`managedPaths[${index}].angles must be a string: ${path}`);
       }
+      if (
+        managedPath.maxSegmentLength !== undefined &&
+        (
+          typeof managedPath.maxSegmentLength !== "number" ||
+          !Number.isFinite(managedPath.maxSegmentLength) ||
+          managedPath.maxSegmentLength <= 0
+        )
+      ) {
+        throw new Error(`managedPaths[${index}].maxSegmentLength must be a positive number: ${path}`);
+      }
+      const maxSegmentLength = managedPath.maxSegmentLength as number | undefined;
+      if (managedPath.mirrorOf !== undefined && (typeof managedPath.mirrorOf !== "string" || !managedPath.mirrorOf)) {
+        throw new Error(`managedPaths[${index}].mirrorOf must be a non-empty string: ${path}`);
+      }
+      if (
+        managedPath.mirrorAxis !== undefined &&
+        !["x", "y", "xy"].includes(managedPath.mirrorAxis as string)
+      ) {
+        throw new Error(`managedPaths[${index}].mirrorAxis must be x, y, or xy: ${path}`);
+      }
+      if ((managedPath.mirrorOf === undefined) !== (managedPath.mirrorAxis === undefined)) {
+        throw new Error(`managedPaths[${index}] must set mirrorOf and mirrorAxis together: ${path}`);
+      }
+      for (let pointIndex = 1; pointIndex < points.length; pointIndex++) {
+        const previous = points[pointIndex - 1];
+        const current = points[pointIndex];
+        const distance = Math.hypot(
+          current[0] - previous[0],
+          current[1] - previous[1],
+          current[2] - previous[2],
+        );
+        if (distance === 0) {
+          throw new Error(`managedPaths[${index}] repeats point ${pointIndex}: ${path}`);
+        }
+        if (
+          maxSegmentLength !== undefined &&
+          distance > maxSegmentLength
+        ) {
+          throw new Error(
+            `managedPaths[${index}] segment ${pointIndex} length ${distance.toFixed(2)} exceeds ` +
+              `maxSegmentLength ${maxSegmentLength}: ${path}`,
+          );
+        }
+      }
       const properties = scalarProperties(
         managedPath.properties,
         `managedPaths[${index}].properties`,
@@ -236,8 +283,48 @@ function validateContract(value: unknown, path: string): MapContract {
         loop: managedPath.loop as boolean | undefined,
         angles: managedPath.angles as string | undefined,
         properties,
+        maxSegmentLength,
+        mirrorOf: managedPath.mirrorOf as string | undefined,
+        mirrorAxis: managedPath.mirrorAxis as "x" | "y" | "xy" | undefined,
       };
     });
+    const pathsByName = new Map<string, ManagedMapPath>();
+    for (const managedPath of managedPaths) {
+      if (pathsByName.has(managedPath.name)) {
+        throw new Error(`managedPaths contains duplicate name "${managedPath.name}": ${path}`);
+      }
+      pathsByName.set(managedPath.name, managedPath);
+    }
+    for (const managedPath of managedPaths) {
+      if (!managedPath.mirrorOf || !managedPath.mirrorAxis) continue;
+      const reference = pathsByName.get(managedPath.mirrorOf);
+      if (!reference) {
+        throw new Error(
+          `managedPath "${managedPath.name}" mirrors missing path "${managedPath.mirrorOf}": ${path}`,
+        );
+      }
+      if (reference.points.length !== managedPath.points.length) {
+        throw new Error(
+          `managedPath "${managedPath.name}" must have ${reference.points.length} points to mirror ` +
+            `"${managedPath.mirrorOf}": ${path}`,
+        );
+      }
+      for (let pointIndex = 0; pointIndex < reference.points.length; pointIndex++) {
+        const [x, y, z] = reference.points[pointIndex];
+        const expected: [number, number, number] = [
+          managedPath.mirrorAxis.includes("x") ? -x : x,
+          managedPath.mirrorAxis.includes("y") ? -y : y,
+          z,
+        ];
+        const actual = managedPath.points[pointIndex];
+        if (!actual.every((coordinate, axis) => coordinate === expected[axis])) {
+          throw new Error(
+            `managedPath "${managedPath.name}" point ${pointIndex} is not the ${managedPath.mirrorAxis}-axis ` +
+              `mirror of "${managedPath.mirrorOf}": ${path}`,
+          );
+        }
+      }
+    }
   }
   const contract = {
     map: raw.map as string | undefined,

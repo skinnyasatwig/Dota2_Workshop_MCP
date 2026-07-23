@@ -36,6 +36,7 @@ test("loadMapContract loads and validates the project default", async () => {
         {
           name: "path_radiant_north",
           startIndex: 1,
+          maxSegmentLength: 1200,
           points: [
             [-1024, 512, 128],
             [0, 0, 128],
@@ -137,5 +138,48 @@ test("loadMapContract rejects path names that collide with managed entities", as
     }),
   );
   await assert.rejects(() => loadMapContract(root, "twin_gates"), /duplicate targetname "route_1"/);
+  await rm(root, { recursive: true, force: true });
+});
+
+test("loadMapContract rejects broken managed path mirror assertions", async () => {
+  const root = await freshRoot();
+  await writeFile(
+    join(root, ".dota-workshop", "map-contract.json"),
+    JSON.stringify({
+      requiredEntities: [],
+      managedPaths: [
+        {
+          name: "north_route",
+          points: [[-100, -50, 0], [100, -50, 0]],
+        },
+        {
+          name: "south_route",
+          mirrorOf: "north_route",
+          mirrorAxis: "y",
+          points: [[-100, 50, 0], [100, 40, 0]],
+        },
+      ],
+    }),
+  );
+  await assert.rejects(() => loadMapContract(root, "twin_gates"), /not the y-axis mirror/);
+  await rm(root, { recursive: true, force: true });
+});
+
+test("loadMapContract rejects managed path segments over the declared maximum", async () => {
+  const root = await freshRoot();
+  await writeFile(
+    join(root, ".dota-workshop", "map-contract.json"),
+    JSON.stringify({
+      requiredEntities: [],
+      managedPaths: [
+        {
+          name: "route",
+          maxSegmentLength: 100,
+          points: [[0, 0, 0], [101, 0, 0]],
+        },
+      ],
+    }),
+  );
+  await assert.rejects(() => loadMapContract(root, "twin_gates"), /exceeds maxSegmentLength 100/);
   await rm(root, { recursive: true, force: true });
 });
