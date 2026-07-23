@@ -16,7 +16,7 @@ import {
 } from "../dota/vmap.js";
 import { readAddonInfo, registerMapFile } from "../dota/addoninfo.js";
 import { compileProjectMap, projectMapPaths } from "../dota/map-project.js";
-import { loadMapContract } from "../dota/map-contract.js";
+import { loadMapContract, managedEntitiesForContract } from "../dota/map-contract.js";
 import { pathExists } from "../util/fsx.js";
 import { json, text, error, guard, ToolResult } from "../util/result.js";
 
@@ -179,10 +179,11 @@ export function registerMapTools(server: McpServer) {
     {
       title: "Synchronize a map with its managed contract",
       description:
-        "Preview or apply the desired managedEntities from .dota-workshop/map-contract.json. Missing named entities " +
-        "are created; existing named entities are repaired to the declared class, transform, and keyvalues. The " +
-        "operation is idempotent, preserves unrelated map data, and refuses to write when duplicate targetnames make " +
-        "a match ambiguous. Defaults to preview-only; pass apply=true to write.",
+        "Preview or apply desired managedEntities and compact managedPaths from " +
+        ".dota-workshop/map-contract.json. Paths expand into complete linked waypoint chains. Missing named entities " +
+        "are created; existing named entities are repaired to the declared class, transform, links, and keyvalues; " +
+        "obsolete numbered nodes under managed path prefixes are removed. The operation is idempotent, preserves " +
+        "unrelated map data, and refuses ambiguous duplicate targetnames. Defaults to preview-only; pass apply=true.",
       inputSchema: {
         projectRoot: z.string().optional(),
         map: z.string(),
@@ -201,24 +202,26 @@ export function registerMapTools(server: McpServer) {
       if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}.`);
       const resolved = await loadMapContract(project.root, map, contractFile);
       if (!resolved) return error(`Map contract not found under ${project.root}.`);
-      const specs = resolved.contract.managedEntities ?? [];
+      const specs = managedEntitiesForContract(resolved.contract);
       if (!specs.length) {
-        return error(`Contract has no managedEntities to synchronize: ${resolved.path}`);
+        return error(`Contract has no managedEntities or managedPaths to synchronize: ${resolved.path}`);
       }
 
       const current = await vmapToText(dota.dmxconvertExe, p.contentVmap);
-      const result = reconcileMapEntities(current, specs);
+      const prunePrefixes = (resolved.contract.managedPaths ?? []).map((path) => path.name);
+      const result = reconcileMapEntities(current, specs, { prunePrefixes });
       if (result.conflicts.length) {
         return error(
           `No changes written. Duplicate targetnames make these managed entities ambiguous: ${result.conflicts.join(", ")}`,
         );
       }
 
-      const changed = result.added.length + result.updated.length;
+      const changed = result.added.length + result.updated.length + result.removed.length;
       if (apply && changed) await textToVmap(dota.dmxconvertExe, result.text, p.contentVmap);
       const steps = [
         `${apply ? "Synchronized" : "Previewed"} ${specs.length} managed entities in "${map}".`,
-        `Add ${result.added.length}, update ${result.updated.length}, unchanged ${result.unchanged.length}.`,
+        `Add ${result.added.length}, update ${result.updated.length}, remove ${result.removed.length}, ` +
+          `unchanged ${result.unchanged.length}.`,
       ];
       if (!apply && changed) steps.push("No files changed. Pass apply=true to write this plan.");
       if (apply && recompile) {
@@ -233,6 +236,7 @@ export function registerMapTools(server: McpServer) {
           changed,
           added: result.added,
           updated: result.updated,
+          removed: result.removed,
           unchanged: result.unchanged,
           recompiled: apply === true && recompile === true,
         },
@@ -382,6 +386,7 @@ export function registerMapTools(server: McpServer) {
               origin: z.string().optional(),
               angles: z.string().optional(),
               properties: z.record(numOrStr).optional(),
+              absentProperties: z.array(z.string()).optional(),
             }),
           )
           .optional()
@@ -399,15 +404,19 @@ export function registerMapTools(server: McpServer) {
       const p = projectMapPaths(dota, project, map);
       const findings: { severity: "error" | "warn"; code: string; message: string }[] = [];
       const resolvedContract = requiredEntities ? undefined : await loadMapContract(project.root, map, contractFile);
+      const managedContractEntities = resolvedContract
+        ? managedEntitiesForContract(resolvedContract.contract)
+        : [];
       const contractRequirements = resolvedContract
         ? [
             ...resolvedContract.contract.requiredEntities,
-            ...(resolvedContract.contract.managedEntities ?? []).map((managed) => ({
+            ...managedContractEntities.map((managed) => ({
               targetname: managed.targetname,
               classname: managed.classname,
               origin: managed.origin,
               angles: managed.angles,
               properties: managed.properties,
+              absentProperties: managed.removeProperties,
             })),
           ]
         : [];
@@ -453,6 +462,22 @@ export function registerMapTools(server: McpServer) {
               severity: "error",
               code: "duplicate-targetname",
               message: `targetname "${targetname}" is used by ${matches.length} entities.`,
+            });
+          }
+        }
+
+        const managedNames = new Set(managedContractEntities.map((entity) => entity.targetname));
+        const managedPathPrefixes = resolvedContract?.contract.managedPaths?.map((path) => `${path.name}_`) ?? [];
+        for (const entity of entities) {
+          if (!entity.targetname || managedNames.has(entity.targetname)) continue;
+          const ownedByManagedPath = managedPathPrefixes.some((prefix) => {
+            return entity.targetname!.startsWith(prefix) && /^\d+$/.test(entity.targetname!.slice(prefix.length));
+          });
+          if (ownedByManagedPath) {
+            findings.push({
+              severity: "error",
+              code: "unexpected-managed-path-node",
+              message: `Managed path contains undeclared waypoint "${entity.targetname}".`,
             });
           }
         }
@@ -512,6 +537,15 @@ export function registerMapTools(server: McpServer) {
                   message: `"${required.targetname}" does not have ${key}="${value}".`,
                 });
               }
+            }
+          }
+          for (const key of required.absentProperties ?? []) {
+            if (matchingClass.some((entity) => entity.properties[key] !== undefined)) {
+              findings.push({
+                severity: "error",
+                code: "required-property-present",
+                message: `"${required.targetname}" must not have property "${key}".`,
+              });
             }
           }
         }

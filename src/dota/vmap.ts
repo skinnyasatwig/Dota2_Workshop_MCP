@@ -228,20 +228,47 @@ export interface ManagedEntitySpec {
   origin: string;
   angles?: string;
   properties?: Record<string, string | number>;
+  removeProperties?: string[];
 }
 
 export interface MapEntityReconcileResult {
   text: string;
   added: string[];
   updated: string[];
+  removed: string[];
   unchanged: string[];
   conflicts: string[];
 }
 
+function removeEntityBlocks(text: string, targetnames: Set<string>): string {
+  const ranges = entityBlockRanges(text).filter(
+    (range) => range.entity.targetname && targetnames.has(range.entity.targetname),
+  );
+  let out = text;
+  for (const range of ranges.sort((a, b) => b.start - a.start)) {
+    let start = range.start;
+    let end = range.end;
+    const commaAfter = out.slice(end).match(/^\s*,/);
+    if (commaAfter) {
+      end += commaAfter[0].length;
+    } else {
+      const commaBefore = out.slice(0, start).match(/,\s*$/);
+      if (commaBefore) start -= commaBefore[0].length;
+    }
+    out = out.slice(0, start) + out.slice(end);
+  }
+  return out;
+}
+
 /** Make named entities match a desired-state contract without removing unrelated map data. */
-export function reconcileMapEntities(text: string, specs: ManagedEntitySpec[]): MapEntityReconcileResult {
+export function reconcileMapEntities(
+  text: string,
+  specs: ManagedEntitySpec[],
+  options: { prunePrefixes?: string[] } = {},
+): MapEntityReconcileResult {
+  const parsed = parseMapEntities(text);
   const byTargetname = new Map<string, ParsedMapEntity[]>();
-  for (const entity of parseMapEntities(text)) {
+  for (const entity of parsed) {
     if (!entity.targetname) continue;
     const matches = byTargetname.get(entity.targetname) ?? [];
     matches.push(entity);
@@ -250,6 +277,7 @@ export function reconcileMapEntities(text: string, specs: ManagedEntitySpec[]): 
 
   const added: string[] = [];
   const updated: string[] = [];
+  const removed: string[] = [];
   const unchanged: string[] = [];
   const conflicts: string[] = [];
   const patches: MapEntityPatch[] = [];
@@ -271,11 +299,13 @@ export function reconcileMapEntities(text: string, specs: ManagedEntitySpec[]): 
     const desiredProperties = Object.fromEntries(
       Object.entries(spec.properties ?? {}).filter(([key]) => key !== "targetname"),
     );
+    const removeProperties = (spec.removeProperties ?? []).filter((key) => key !== "targetname");
     const differs =
       current.classname !== spec.classname ||
       current.origin !== spec.origin ||
       (spec.angles !== undefined && current.angles !== spec.angles) ||
-      Object.entries(desiredProperties).some(([key, value]) => current.properties[key] !== String(value));
+      Object.entries(desiredProperties).some(([key, value]) => current.properties[key] !== String(value)) ||
+      removeProperties.some((key) => current.properties[key] !== undefined);
     if (!differs) {
       unchanged.push(spec.targetname);
       continue;
@@ -286,11 +316,30 @@ export function reconcileMapEntities(text: string, specs: ManagedEntitySpec[]): 
       origin: spec.origin,
       angles: spec.angles,
       properties: desiredProperties,
+      removeProperties,
     });
     updated.push(spec.targetname);
   }
 
   let out = patches.length ? patchMapEntities(text, patches).text : text;
+  const desiredNames = new Set(specs.map((spec) => spec.targetname));
+  const prefixPatterns = (options.prunePrefixes ?? []).map(
+    (prefix) => new RegExp(`^${escapedKey(prefix)}_\\d+$`),
+  );
+  const staleNames = new Set(
+    parsed
+      .map((entity) => entity.targetname)
+      .filter(
+        (targetname): targetname is string =>
+          !!targetname &&
+          !desiredNames.has(targetname) &&
+          prefixPatterns.some((pattern) => pattern.test(targetname)),
+      ),
+  );
+  if (staleNames.size) {
+    out = removeEntityBlocks(out, staleNames);
+    removed.push(...staleNames);
+  }
   let nodeId = maxNodeId(out);
   for (const spec of missing) {
     const properties = { ...(spec.properties ?? {}), targetname: spec.targetname };
@@ -307,7 +356,7 @@ export function reconcileMapEntities(text: string, specs: ManagedEntitySpec[]): 
       ),
     );
   }
-  return { text: out, added, updated, unchanged, conflicts };
+  return { text: out, added, updated, removed, unchanged, conflicts };
 }
 
 export function rewriteWaypointPath(

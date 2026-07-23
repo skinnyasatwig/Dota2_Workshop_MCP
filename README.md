@@ -294,9 +294,10 @@ playable `.vpk` — a pipeline verified end to end.
   `prop_dynamic`, `point_*`, …) with origin/angles/properties.
 - **`map_patch_entities`** — batch-convert named layout markers into real gameplay entities and
   update their class, name, transform, and keyvalues without disturbing unrelated map data.
-- **`map_sync_contract`** — preview or apply a desired-state `managedEntities` list from
-  `.dota-workshop/map-contract.json`. It creates missing named entities, repairs drifted class,
-  position, rotation, and keyvalues, preserves unrelated map data, and refuses ambiguous duplicate
+- **`map_sync_contract`** — preview or apply desired-state `managedEntities` and compact
+  `managedPaths` from `.dota-workshop/map-contract.json`. It creates missing named entities, expands
+  complete linked waypoint chains, repairs drifted class/position/rotation/keyvalues, prunes obsolete
+  numbered nodes owned by those paths, preserves unrelated map data, and refuses ambiguous duplicate
   target names. Preview is the default; pass `apply:true` to write and `recompile:true` to compile.
 - **`map_rewrite_path`** — convert/rename a complete numbered waypoint chain while repairing all
   target links (for example generated `path_track` routes → creep `path_corner` routes).
@@ -309,7 +310,10 @@ playable `.vpk` — a pipeline verified end to end.
 
 Contract entries under `requiredEntities` are validation-only. Entries under `managedEntities`
 are declarative desired state and require `targetname`, `classname`, and `origin`; `angles` and
-`properties` are optional. `map_validate` checks both sets.
+`properties` / `removeProperties` are optional. A `managedPaths` entry takes a `name` plus
+`points: [[x,y,z], ...]` and expands to `name_1`, `name_2`, and so on with generated `target` links;
+the terminal node explicitly removes stale `target` values (`startIndex`, `classname`, `loop`,
+`angles`, and shared `properties` are optional). `map_validate` checks all expanded entities.
 
 Map registration supports both legacy KeyValues 1 and the KV3 `addoninfo.txt` produced by current
 Workshop Tools. Source-controlled layouts under `game/dota_addons/<addon>` and

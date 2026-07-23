@@ -8,6 +8,7 @@ export interface MapEntityRequirement {
   origin?: string;
   angles?: string;
   properties?: Record<string, string>;
+  absentProperties?: string[];
 }
 
 export interface ManagedMapEntity {
@@ -16,12 +17,24 @@ export interface ManagedMapEntity {
   origin: string;
   angles?: string;
   properties?: Record<string, string>;
+  removeProperties?: string[];
+}
+
+export interface ManagedMapPath {
+  name: string;
+  points: [number, number, number][];
+  classname?: string;
+  startIndex?: number;
+  loop?: boolean;
+  angles?: string;
+  properties?: Record<string, string>;
 }
 
 export interface MapContract {
   map?: string;
   requiredEntities: MapEntityRequirement[];
   managedEntities?: ManagedMapEntity[];
+  managedPaths?: ManagedMapPath[];
 }
 
 export interface ResolvedMapContract {
@@ -42,6 +55,32 @@ function scalarProperties(value: unknown, field: string, path: string): Record<s
       return [key, String(property)];
     }),
   );
+}
+
+export function expandManagedPath(path: ManagedMapPath): ManagedMapEntity[] {
+  const startIndex = path.startIndex ?? 1;
+  return path.points.map((point, offset) => {
+    const index = startIndex + offset;
+    const isLast = offset === path.points.length - 1;
+    const properties = { ...(path.properties ?? {}) };
+    if (!isLast) properties.target = `${path.name}_${index + 1}`;
+    else if (path.loop) properties.target = `${path.name}_${startIndex}`;
+    return {
+      targetname: `${path.name}_${index}`,
+      classname: path.classname ?? "path_corner",
+      origin: point.join(" "),
+      angles: path.angles,
+      properties: Object.keys(properties).length ? properties : undefined,
+      removeProperties: isLast && !path.loop ? ["target"] : undefined,
+    };
+  });
+}
+
+export function managedEntitiesForContract(contract: MapContract): ManagedMapEntity[] {
+  return [
+    ...(contract.managedEntities ?? []),
+    ...(contract.managedPaths ?? []).flatMap(expandManagedPath),
+  ];
 }
 
 function validateContract(value: unknown, path: string): MapContract {
@@ -68,12 +107,27 @@ function validateContract(value: unknown, path: string): MapContract {
       `requiredEntities[${index}].properties`,
       path,
     );
+    let absentProperties: string[] | undefined;
+    if (requirement.absentProperties !== undefined) {
+      if (
+        !Array.isArray(requirement.absentProperties) ||
+        !requirement.absentProperties.every((key) => typeof key === "string" && key)
+      ) {
+        throw new Error(`requiredEntities[${index}].absentProperties must be an array of strings: ${path}`);
+      }
+      absentProperties = [...new Set(requirement.absentProperties as string[])];
+      const conflict = absentProperties.find((key) => properties?.[key] !== undefined);
+      if (conflict) {
+        throw new Error(`requiredEntities[${index}] both requires and forbids property "${conflict}": ${path}`);
+      }
+    }
     return {
       targetname: requirement.targetname,
       classname: requirement.classname as string | undefined,
       origin: requirement.origin as string | undefined,
       angles: requirement.angles as string | undefined,
       properties,
+      absentProperties,
     };
   });
   let managedEntities: ManagedMapEntity[] | undefined;
@@ -94,27 +148,111 @@ function validateContract(value: unknown, path: string): MapContract {
       if (managed.angles !== undefined && typeof managed.angles !== "string") {
         throw new Error(`managedEntities[${index}].angles must be a string: ${path}`);
       }
+      let removeProperties: string[] | undefined;
+      if (managed.removeProperties !== undefined) {
+        if (
+          !Array.isArray(managed.removeProperties) ||
+          !managed.removeProperties.every((key) => typeof key === "string" && key)
+        ) {
+          throw new Error(`managedEntities[${index}].removeProperties must be an array of strings: ${path}`);
+        }
+        removeProperties = [...new Set(managed.removeProperties as string[])];
+      }
+      const properties = scalarProperties(
+        managed.properties,
+        `managedEntities[${index}].properties`,
+        path,
+      );
+      const conflict = removeProperties?.find((key) => properties?.[key] !== undefined);
+      if (conflict) {
+        throw new Error(`managedEntities[${index}] both sets and removes property "${conflict}": ${path}`);
+      }
       return {
         targetname: managed.targetname as string,
         classname: managed.classname as string,
         origin: managed.origin as string,
         angles: managed.angles as string | undefined,
-        properties: scalarProperties(
-          managed.properties,
-          `managedEntities[${index}].properties`,
-          path,
-        ),
+        properties,
+        removeProperties,
       };
     });
-    const names = new Set<string>();
-    for (const managed of managedEntities) {
-      if (names.has(managed.targetname)) {
-        throw new Error(`managedEntities contains duplicate targetname "${managed.targetname}": ${path}`);
-      }
-      names.add(managed.targetname);
-    }
   }
-  return { map: raw.map as string | undefined, requiredEntities, managedEntities };
+  let managedPaths: ManagedMapPath[] | undefined;
+  if (raw.managedPaths !== undefined) {
+    if (!Array.isArray(raw.managedPaths)) {
+      throw new Error(`Map contract "managedPaths" must be an array: ${path}`);
+    }
+    managedPaths = raw.managedPaths.map((entry, index) => {
+      if (!entry || typeof entry !== "object") {
+        throw new Error(`managedPaths[${index}] must be an object: ${path}`);
+      }
+      const managedPath = entry as Record<string, unknown>;
+      if (typeof managedPath.name !== "string" || !managedPath.name) {
+        throw new Error(`managedPaths[${index}].name must be a non-empty string: ${path}`);
+      }
+      if (!Array.isArray(managedPath.points) || !managedPath.points.length) {
+        throw new Error(`managedPaths[${index}].points must be a non-empty array: ${path}`);
+      }
+      const points = managedPath.points.map((point, pointIndex) => {
+        if (
+          !Array.isArray(point) ||
+          point.length !== 3 ||
+          !point.every((coordinate) => typeof coordinate === "number" && Number.isFinite(coordinate))
+        ) {
+          throw new Error(`managedPaths[${index}].points[${pointIndex}] must be [x, y, z] numbers: ${path}`);
+        }
+        return point as [number, number, number];
+      });
+      if (managedPath.classname !== undefined && (typeof managedPath.classname !== "string" || !managedPath.classname)) {
+        throw new Error(`managedPaths[${index}].classname must be a non-empty string: ${path}`);
+      }
+      if (
+        managedPath.startIndex !== undefined &&
+        (!Number.isInteger(managedPath.startIndex) || (managedPath.startIndex as number) < 0)
+      ) {
+        throw new Error(`managedPaths[${index}].startIndex must be a non-negative integer: ${path}`);
+      }
+      if (managedPath.loop !== undefined && typeof managedPath.loop !== "boolean") {
+        throw new Error(`managedPaths[${index}].loop must be a boolean: ${path}`);
+      }
+      if (managedPath.angles !== undefined && typeof managedPath.angles !== "string") {
+        throw new Error(`managedPaths[${index}].angles must be a string: ${path}`);
+      }
+      const properties = scalarProperties(
+        managedPath.properties,
+        `managedPaths[${index}].properties`,
+        path,
+      );
+      if (properties?.target !== undefined || properties?.targetname !== undefined) {
+        throw new Error(
+          `managedPaths[${index}].properties cannot set target or targetname; links are generated: ${path}`,
+        );
+      }
+      return {
+        name: managedPath.name,
+        points,
+        classname: managedPath.classname as string | undefined,
+        startIndex: managedPath.startIndex as number | undefined,
+        loop: managedPath.loop as boolean | undefined,
+        angles: managedPath.angles as string | undefined,
+        properties,
+      };
+    });
+  }
+  const contract = {
+    map: raw.map as string | undefined,
+    requiredEntities,
+    managedEntities,
+    managedPaths,
+  };
+  const names = new Set<string>();
+  for (const managed of managedEntitiesForContract(contract)) {
+    if (names.has(managed.targetname)) {
+      throw new Error(`Managed contract contains duplicate targetname "${managed.targetname}": ${path}`);
+    }
+    names.add(managed.targetname);
+  }
+  return contract;
 }
 
 export async function loadMapContract(

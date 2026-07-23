@@ -178,3 +178,99 @@ test("reconcileMapEntities refuses ambiguous duplicate targetnames", () => {
   assert.deepEqual(result.added, []);
   assert.deepEqual(result.updated, []);
 });
+
+test("reconcileMapEntities removes properties managed as absent", () => {
+  const text = buildEntityBlock(
+    {
+      classname: "path_corner",
+      origin: "100 200 128",
+      properties: {
+        targetname: "route_3",
+        target: "old_route_4",
+      },
+    },
+    3,
+  );
+  const first = reconcileMapEntities(text, [
+    {
+      targetname: "route_3",
+      classname: "path_corner",
+      origin: "100 200 128",
+      removeProperties: ["target"],
+    },
+  ]);
+  assert.deepEqual(first.updated, ["route_3"]);
+  assert.equal(parseMapEntities(first.text)[0].target, undefined);
+
+  const second = reconcileMapEntities(first.text, [
+    {
+      targetname: "route_3",
+      classname: "path_corner",
+      origin: "100 200 128",
+      removeProperties: ["target"],
+    },
+  ]);
+  assert.deepEqual(second.unchanged, ["route_3"]);
+});
+
+test("reconcileMapEntities prunes obsolete numbered nodes owned by a managed path", () => {
+  const entities = [
+    buildEntityBlock(
+      {
+        classname: "path_corner",
+        origin: "0 0 128",
+        properties: { targetname: "route_1", target: "route_2" },
+      },
+      1,
+    ),
+    buildEntityBlock(
+      {
+        classname: "path_corner",
+        origin: "100 0 128",
+        properties: { targetname: "route_2", target: "route_3" },
+      },
+      2,
+    ),
+    buildEntityBlock(
+      {
+        classname: "path_corner",
+        origin: "200 0 128",
+        properties: { targetname: "route_3" },
+      },
+      3,
+    ),
+    buildEntityBlock(
+      {
+        classname: "info_target",
+        origin: "500 0 128",
+        properties: { targetname: "unrelated_marker" },
+      },
+      4,
+    ),
+  ];
+  const text = `"world" "CMapWorld"\n{\n"children" "element_array"\n[\n${entities.join(",\n")}\n]\n}\n`;
+  const result = reconcileMapEntities(
+    text,
+    [
+      {
+        targetname: "route_1",
+        classname: "path_corner",
+        origin: "0 0 128",
+        properties: { target: "route_2" },
+      },
+      {
+        targetname: "route_2",
+        classname: "path_corner",
+        origin: "100 0 128",
+        removeProperties: ["target"],
+      },
+    ],
+    { prunePrefixes: ["route"] },
+  );
+  assert.deepEqual(result.removed, ["route_3"]);
+  assert.deepEqual(
+    parseMapEntities(result.text).map((entity) => entity.targetname),
+    ["route_1", "route_2", "unrelated_marker"],
+  );
+  assert.equal(parseMapEntities(result.text)[1].target, undefined);
+});
