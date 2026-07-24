@@ -39,7 +39,7 @@ fallback for non-tstl addons.
 | **In-game DebugSDK** | `addon_attach_debug_sdk`, `addon_detach_debug_sdk`, `dota_lua_eval`, `dota_debug_dump`, `dota_selftest` |
 | **Reference library** | `ref_harvest`, `ref_harvest_top`, `ref_list`, `ref_search`, `ref_find`, `ref_passport`, `ref_inspect`, `ref_get`, `ref_recipe`, `ref_curate`, `ref_stats`, `asset_db` (SQLite index: fast structured search by kind/ext/name) |
 | **Docs & references** | `docs_search`, `docs_get`, `docs_list`, `dota_patterns`, `panorama_api_search`, `panorama_api_get`, `tools_catalog` |
-| **Maps** | `map_create`, `map_add_entity`, `map_patch_entities`, `map_sync_contract`, `map_rewrite_path`, `map_to_text`, `map_from_text`, `map_compile`, `map_list`, `map_validate` |
+| **Maps** | `map_create`, `map_add_entity`, `map_inspect`, `map_patch_entities`, `map_sync_contract`, `map_rewrite_path`, `map_to_text`, `map_from_text`, `map_compile`, `map_list`, `map_validate` |
 | **Map generation** | `map_build`, `map_terrain`, `map_preview`, `map_tile_to_world`, `entity_catalog`, `scaffold_td` |
 | **Reference games** | `workshop_search`, `workshop_download`, `workshop_list`, `workshop_inspect`, `workshop_read`, `workshop_grep`, `panorama_decompile` |
 | **Asset preview (out of engine)** | `asset_preview` (particles/textures/models → inline contact-sheet image + HTML gallery), `sound_preview` (sounds → inline waveform/icon image + playable HTML soundboard + inline audio), `preview_studio` / `preview_studio_stop` (interactive gallery + public share link: animated particles, 3D models, audio players, click-to-select), `preview_pick` / `preview_selections` (resolve the IDs the user picked/clicked → game + asset path) — decoded via ValveResourceFormat, no Dota launch |
@@ -292,6 +292,10 @@ playable `.vpk` — a pipeline verified end to end.
   addon and register it in `addoninfo.txt`. Pass `compile: true` to produce the `.vpk` immediately.
 - **`map_add_entity`** — place any entity (`info_player_start_*`, `npc_dota_spawner`, `env_*`,
   `prop_dynamic`, `point_*`, …) with origin/angles/properties.
+- **`map_inspect`** — return compact structured map data without launching Dota: filterable named
+  entities, class counts, complete path-chain summaries, tile-grid bounds/height/water/tilesets, and
+  broken-link or out-of-bounds findings. Use `includePathNodes:true` only when individual waypoints
+  are needed.
 - **`map_patch_entities`** — batch-convert named layout markers into real gameplay entities and
   update their class, name, transform, and keyvalues without disturbing unrelated map data.
 - **`map_sync_contract`** — preview or apply desired-state `managedEntities` and compact

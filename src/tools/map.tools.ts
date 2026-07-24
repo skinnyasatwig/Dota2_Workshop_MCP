@@ -17,6 +17,7 @@ import {
 import { readAddonInfo, registerMapFile } from "../dota/addoninfo.js";
 import { compileProjectMap, projectMapPaths } from "../dota/map-project.js";
 import { loadMapContract, managedEntitiesForContract } from "../dota/map-contract.js";
+import { inspectMapText } from "../dota/map-inspect.js";
 import { pathExists } from "../util/fsx.js";
 import { json, text, error, guard, ToolResult } from "../util/result.js";
 
@@ -118,6 +119,80 @@ export function registerMapTools(server: McpServer) {
       const txt = await vmapToText(dota.dmxconvertExe, p.contentVmap);
       return json({ map, length: txt.length }, txt);
     }),
+  );
+
+  server.registerTool(
+    "map_inspect",
+    {
+      title: "Inspect a map as structured data",
+      description:
+        "Return a compact semantic map report instead of the full DMX text: entity/class counts, filterable named " +
+        "entity summaries, linked path_corner/path_track chains, tile-grid bounds/height/water/tilesets, and static " +
+        "broken-link or out-of-bounds findings. Does not launch Dota.",
+      inputSchema: {
+        projectRoot: z.string().optional(),
+        map: z.string(),
+        classname: z.string().optional().describe("Return only entities with this exact classname."),
+        targetname: z.string().optional().describe("Return only this exact targetname."),
+        targetnamePrefix: z.string().optional().describe("Return only targetnames beginning with this prefix."),
+        namedOnly: z.boolean().optional().describe("Exclude unnamed entities (default true)."),
+        includeProperties: z.boolean().optional().describe("Include all parsed string keyvalues (default false)."),
+        includePathNodes: z.boolean().optional().describe("Include every node in each path-chain summary (default false)."),
+        limit: z.number().int().min(1).max(1000).optional().describe("Maximum returned entities (default 200)."),
+      },
+    },
+    guard(
+      async ({
+        projectRoot,
+        map,
+        classname,
+        targetname,
+        targetnamePrefix,
+        namedOnly,
+        includeProperties,
+        includePathNodes,
+        limit,
+      }): Promise<ToolResult> => {
+        const dota = await requireDotaPaths();
+        const project = await resolveProject(projectRoot);
+        const p = projectMapPaths(dota, project, map);
+        if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}.`);
+        const report = inspectMapText(await vmapToText(dota.dmxconvertExe, p.contentVmap), {
+          classname,
+          targetname,
+          targetnamePrefix,
+          namedOnly,
+          includeProperties,
+          includePathNodes,
+          limit,
+        });
+        const classSummary = Object.entries(report.classCounts)
+          .sort(([, a], [, b]) => b - a)
+          .slice(0, 12)
+          .map(([name, count]) => `${name}:${count}`)
+          .join(", ");
+        const pathSummary = report.paths.length
+          ? report.paths
+              .map((path) => `${path.start} -> ${path.end} (${path.nodeCount}${path.loop ? ", loop" : ""})`)
+              .join("\n")
+          : "No named path chains.";
+        const terrainSummary = report.terrain
+          ? `${report.terrain.width}x${report.terrain.height} tiles, ` +
+            `world ${report.terrain.worldBounds.min.join(",")} -> ${report.terrain.worldBounds.max.join(",")}`
+          : "No Dota tile grid found.";
+        return json(
+          { map, ...report },
+          [
+            `${map}: ${report.entityCount} entities (${report.namedEntityCount} named); ` +
+              `${report.returnedCount}/${report.matchedCount} filter matches returned.`,
+            `Classes: ${classSummary || "none"}`,
+            `Terrain: ${terrainSummary}`,
+            `Paths:\n${pathSummary}`,
+            `Findings: ${report.findings.length}`,
+          ].join("\n"),
+        );
+      },
+    ),
   );
 
   server.registerTool(
