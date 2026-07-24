@@ -213,7 +213,8 @@ walk — tower defense"* into a real map:
 - **`map_preview`** — render the map top-down to an **image straight from the data**, no game launch —
   the fast way to iterate on a layout (water = blue, road = tan, grass = green, shaded by height).
 - **`entity_catalog`** — the placeable-entity reference (spawners, `path_track` waypoints, triggers,
-  lights, props, …) so you know what to place.
+  lights, props, …) so you know what to place. Text searches augment the curated list with classes
+  and keyvalues parsed from the installed official `dota.fgd`.
 - **`map_tile_to_world`** — convert tile coords to world units so terrain and entities line up.
 
 Coordinates: terrain ops use tile units (default 64×64 grid; world = origin + tile×256); entity/path

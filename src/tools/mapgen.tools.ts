@@ -3,8 +3,9 @@ import { z } from "zod";
 import { join } from "node:path";
 import { readFile } from "node:fs/promises";
 import { resolveProject } from "../config.js";
-import { requireDotaPaths } from "../dota/paths.js";
+import { requireDotaPaths, resolveDotaPaths } from "../dota/paths.js";
 import { vmapToText, textToVmap, cloneVmap, buildEntityBlock, insertEntity, maxNodeId } from "../dota/vmap.js";
+import { categoryForFgdEntity, parseFgdEntities } from "../dota/fgd.js";
 import { parseTileGrid, applyTileGrid, setHeight, setWater, setTileset, fill, tileToWorld, vIndex, cIndex, Shape } from "../dota/tilegrid.js";
 import { registerMapFile } from "../dota/addoninfo.js";
 import { compileProjectMap, projectMapPaths } from "../dota/map-project.js";
@@ -285,22 +286,70 @@ export function registerMapGenTools(server: McpServer) {
     {
       title: "Dota map entity catalog",
       description:
-        "List the catalog of placeable Dota map entities (classname + purpose + key keyvalues), so you know what " +
-        "objects exist for map_add_entity / map_build. Filter by query or category (spawn, marker, path, trigger, " +
-        "logic, light, env, prop, dota, fx, vision, world).",
-      inputSchema: { query: z.string().optional(), category: z.string().optional() },
+        "List placeable Dota map entities (classname + purpose + key keyvalues). Text searches also consult the " +
+        "installed official dota.fgd, so engine entities missing from the curated catalog can still be discovered. " +
+        "Filter by query or category (spawn, marker, path, trigger, logic, light, env, prop, dota, fx, vision, world).",
+      inputSchema: {
+        query: z.string().optional(),
+        category: z.string().optional(),
+        includeOfficial: z
+          .boolean()
+          .optional()
+          .describe("Include all installed dota.fgd classes even without a text query (default false)."),
+        limit: z.number().int().positive().max(500).optional(),
+      },
     },
-    guard(async ({ query, category }): Promise<ToolResult> => {
+    guard(async ({ query, category, includeOfficial, limit }): Promise<ToolResult> => {
       const data = JSON.parse(await readFile(await resolveDataPath("entity-catalog.json"), "utf8"));
-      let list = data.entities as { name: string; category: string; purpose: string; keyValues?: string }[];
+      type CatalogEntry = {
+        name: string;
+        category: string;
+        purpose: string;
+        keyValues?: string;
+        source?: "curated" | "official-fgd";
+        classType?: string;
+        bases?: string[];
+      };
+      let list: CatalogEntry[] = (data.entities as CatalogEntry[]).map((entry) => ({
+        ...entry,
+        source: "curated",
+      }));
+      if (query || includeOfficial) {
+        const dota = await resolveDotaPaths();
+        const fgdPath = dota ? join(dota.dotaGameDir, "dota.fgd") : undefined;
+        if (fgdPath && (await pathExists(fgdPath))) {
+          const known = new Set(list.map((entry) => entry.name));
+          const official = parseFgdEntities(await readFile(fgdPath, "utf8"))
+            .filter((entry) => !known.has(entry.name))
+            .map<CatalogEntry>((entry) => ({
+              name: entry.name,
+              category: categoryForFgdEntity(entry.name),
+              purpose: entry.description || `Official ${entry.classType} from dota.fgd.`,
+              keyValues: entry.properties
+                .map((property) => `${property.kind === "keyvalue" ? "" : `${property.kind} `}${property.name}`)
+                .join(", "),
+              source: "official-fgd",
+              classType: entry.classType,
+              bases: entry.bases,
+            }));
+          list.push(...official);
+        }
+      }
       if (category) list = list.filter((e) => e.category.toLowerCase() === category.toLowerCase());
       if (query) {
         const q = query.toLowerCase();
         list = list.filter((e) => e.name.toLowerCase().includes(q) || e.purpose.toLowerCase().includes(q) || (e.keyValues ?? "").toLowerCase().includes(q));
       }
+      list = list.slice(0, limit ?? 100);
       return json(
         { count: list.length, entities: list },
-        list.map((e) => `[${e.category}] ${e.name}\n    ${e.purpose}\n    keys: ${e.keyValues ?? "(position only)"}`).join("\n") || "No entities match.",
+        list
+          .map(
+            (e) =>
+              `[${e.category}] ${e.name}${e.source === "official-fgd" ? " (official FGD)" : ""}\n` +
+              `    ${e.purpose}\n    keys: ${e.keyValues || "(position only)"}`,
+          )
+          .join("\n") || "No entities match.",
       );
     }),
   );
