@@ -8,11 +8,24 @@ import {
   Shape,
 } from "./tilegrid.js";
 
+export type ManagedTerrainShape =
+  | Shape
+  | {
+      kind: "managedPath";
+      name: string;
+      width: number;
+    };
+
 export type ManagedTerrainOperation =
   | { op: "fill"; level?: number; water?: boolean; tileset?: number }
-  | { op: "height"; shape: Shape; level: number; dome?: boolean }
-  | { op: "water"; shape: Shape; on?: boolean; invert?: boolean }
-  | { op: "tileset"; shape: Shape; tileset: number };
+  | { op: "height"; shape: ManagedTerrainShape; level: number; dome?: boolean }
+  | { op: "water"; shape: ManagedTerrainShape; on?: boolean; invert?: boolean }
+  | { op: "tileset"; shape: ManagedTerrainShape; tileset: number };
+
+export interface TerrainPathReference {
+  name: string;
+  points: [number, number, number][];
+}
 
 export interface TerrainReconcileResult {
   text: string;
@@ -43,12 +56,20 @@ function integer(value: unknown, field: string, path: string, minimum?: number):
   return parsed;
 }
 
-function shape(value: unknown, field: string, path: string): Shape {
+function shape(value: unknown, field: string, path: string): ManagedTerrainShape {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`${field} must be a shape object: ${path}`);
   }
   const raw = value as Record<string, unknown>;
   switch (raw.kind) {
+    case "managedPath": {
+      if (typeof raw.name !== "string" || !raw.name) {
+        throw new Error(`${field}.name must be a non-empty string: ${path}`);
+      }
+      const width = finiteNumber(raw.width, `${field}.width`, path);
+      if (width <= 0) throw new Error(`${field}.width must be positive: ${path}`);
+      return { kind: "managedPath", name: raw.name, width };
+    }
     case "rect":
       return {
         kind: "rect",
@@ -99,7 +120,7 @@ function shape(value: unknown, field: string, path: string): Shape {
       return { kind: "path", points, width };
     }
     default:
-      throw new Error(`${field}.kind must be rect, circle, ring, or path: ${path}`);
+      throw new Error(`${field}.kind must be rect, circle, ring, path, or managedPath: ${path}`);
   }
 }
 
@@ -180,6 +201,7 @@ function changedValues(before: number[], after: number[]): number {
 export function reconcileMapTerrain(
   text: string,
   operations: ManagedTerrainOperation[],
+  pathReferences: TerrainPathReference[] = [],
 ): TerrainReconcileResult {
   if (!operations.length) {
     return {
@@ -196,6 +218,22 @@ export function reconcileMapTerrain(
   const beforeWater = [...terrain.water];
   const beforeTileset = [...terrain.tileset];
   const results: TerrainReconcileResult["operations"] = [];
+  const pathsByName = new Map(pathReferences.map((path) => [path.name, path]));
+  const concreteShape = (managedShape: ManagedTerrainShape): Shape => {
+    if (managedShape.kind !== "managedPath") return managedShape;
+    const reference = pathsByName.get(managedShape.name);
+    if (!reference) {
+      throw new Error(`Managed terrain references missing path "${managedShape.name}".`);
+    }
+    return {
+      kind: "path",
+      points: reference.points.map(([x, y]) => [
+        (x - terrain.origin[0]) / terrain.tileSize,
+        (y - terrain.origin[1]) / terrain.tileSize,
+      ]),
+      width: managedShape.width,
+    };
+  };
 
   for (const [index, operation] of operations.entries()) {
     let touched = 0;
@@ -212,18 +250,23 @@ export function reconcileMapTerrain(
           (operation.tileset === undefined ? 0 : terrain.tileset.length);
         break;
       case "height":
-        touched = setHeight(terrain, operation.shape, operation.level, operation.dome === true);
+        touched = setHeight(
+          terrain,
+          concreteShape(operation.shape),
+          operation.level,
+          operation.dome === true,
+        );
         break;
       case "water":
         touched = setWater(
           terrain,
-          operation.shape,
+          concreteShape(operation.shape),
           operation.on !== false,
           operation.invert === true,
         );
         break;
       case "tileset":
-        touched = setTileset(terrain, operation.shape, operation.tileset);
+        touched = setTileset(terrain, concreteShape(operation.shape), operation.tileset);
         break;
     }
     results.push({ index, op: operation.op, touched });

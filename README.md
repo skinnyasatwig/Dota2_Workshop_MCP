@@ -325,7 +325,9 @@ checks all expanded entities. `managedTerrain` is an ordered list of the same id
 operations accepted by `map_terrain`: `fill`, `height`, `water`, and `tileset`, using `rect`,
 `circle`, `ring`, or `path` shapes in tile coordinates. Contract sync previews exact height-vertex,
 water-vertex, and tileset-cell drift before writing; undeclared terrain remains untouched unless the
-contract explicitly uses `fill`.
+contract explicitly uses `fill`. A terrain shape can also use
+`{"kind":"managedPath","name":"path_name","width":2}` to derive its tile-space stroke from an
+existing managed world-space path, keeping roads synchronized with route edits.
 
 Map registration supports both legacy KeyValues 1 and the KV3 `addoninfo.txt` produced by current
 Workshop Tools. Source-controlled layouts under `game/dota_addons/<addon>` and

@@ -89,3 +89,31 @@ test("parseManagedTerrain validates destructive scope and shape geometry", () =>
     /at least 0/,
   );
 });
+
+test("reconcileMapTerrain resolves managed path references in world coordinates", () => {
+  const operations = parseManagedTerrain(
+    [
+      {
+        op: "tileset",
+        tileset: 1,
+        shape: { kind: "managedPath", name: "lane", width: 0.9 },
+      },
+    ],
+    "managedTerrain",
+    "fixture.json",
+  )!;
+  const result = reconcileMapTerrain(tileGridFixture(), operations, [
+    {
+      name: "lane",
+      points: [
+        [-128, -128, 0],
+        [128, -128, 0],
+      ],
+    },
+  ]);
+  assert.equal(result.changedTilesetCells, 2);
+  assert.throws(
+    () => reconcileMapTerrain(tileGridFixture(), operations),
+    /references missing path "lane"/,
+  );
+});

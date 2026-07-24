@@ -321,7 +321,11 @@ export function registerMapTools(server: McpServer) {
         );
       }
 
-      const terrain = reconcileMapTerrain(result.text, terrainOperations);
+      const terrain = reconcileMapTerrain(
+        result.text,
+        terrainOperations,
+        resolved.contract.managedPaths ?? [],
+      );
       const changedEntities = result.added.length + result.updated.length + result.removed.length;
       const changed = changedEntities + (terrain.changed ? 1 : 0);
       if (apply && changed) await textToVmap(dota.dmxconvertExe, terrain.text, p.contentVmap);
@@ -576,7 +580,11 @@ export function registerMapTools(server: McpServer) {
         entities = parseMapEntities(mapText);
         const managedTerrain = resolvedContract?.contract.managedTerrain ?? [];
         if (managedTerrain.length) {
-          const terrain = reconcileMapTerrain(mapText, managedTerrain);
+          const terrain = reconcileMapTerrain(
+            mapText,
+            managedTerrain,
+            resolvedContract?.contract.managedPaths ?? [],
+          );
           if (terrain.changed) {
             terrainDrift = {
               changedHeightVertices: terrain.changedHeightVertices,

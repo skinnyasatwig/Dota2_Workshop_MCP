@@ -328,12 +328,22 @@ function validateContract(value: unknown, path: string): MapContract {
       }
     }
   }
+  const managedTerrain = parseManagedTerrain(raw.managedTerrain, "managedTerrain", path);
+  const managedPathNames = new Set((managedPaths ?? []).map((managedPath) => managedPath.name));
+  for (const [index, operation] of (managedTerrain ?? []).entries()) {
+    if (operation.op === "fill" || operation.shape.kind !== "managedPath") continue;
+    if (!managedPathNames.has(operation.shape.name)) {
+      throw new Error(
+        `managedTerrain[${index}] references missing managedPath "${operation.shape.name}": ${path}`,
+      );
+    }
+  }
   const contract = {
     map: raw.map as string | undefined,
     requiredEntities,
     managedEntities,
     managedPaths,
-    managedTerrain: parseManagedTerrain(raw.managedTerrain, "managedTerrain", path),
+    managedTerrain,
   };
   const names = new Set<string>();
   for (const managed of managedEntitiesForContract(contract)) {
