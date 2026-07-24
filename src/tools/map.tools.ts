@@ -13,6 +13,8 @@ import {
   patchMapEntities,
   reconcileMapEntities,
   rewriteWaypointPath,
+  absentSelectorLabel,
+  matchesAbsentSelector,
 } from "../dota/vmap.js";
 import { readAddonInfo, registerMapFile } from "../dota/addoninfo.js";
 import { compileProjectMap, projectMapPaths } from "../dota/map-project.js";
@@ -281,7 +283,8 @@ export function registerMapTools(server: McpServer) {
     {
       title: "Synchronize a map with its managed contract",
       description:
-        "Preview or apply desired managedEntities, compact managedPaths, and managedTerrain operations from " +
+        "Preview or apply desired managedEntities, managedAbsentEntities, compact managedPaths, and managedTerrain " +
+        "operations from " +
         ".dota-workshop/map-contract.json. Paths expand into complete linked waypoint chains. Missing named entities " +
         "are created; existing named entities are repaired; obsolete managed path nodes are removed; and declared " +
         "terrain shapes are restored while terrain outside those shapes is preserved. The operation is idempotent and " +
@@ -305,16 +308,20 @@ export function registerMapTools(server: McpServer) {
       const resolved = await loadMapContract(project.root, map, contractFile);
       if (!resolved) return error(`Map contract not found under ${project.root}.`);
       const specs = managedEntitiesForContract(resolved.contract);
+      const absentEntities = resolved.contract.managedAbsentEntities ?? [];
       const terrainOperations = resolved.contract.managedTerrain ?? [];
-      if (!specs.length && !terrainOperations.length) {
+      if (!specs.length && !absentEntities.length && !terrainOperations.length) {
         return error(
-          `Contract has no managedEntities, managedPaths, or managedTerrain to synchronize: ${resolved.path}`,
+          `Contract has no managedEntities, managedAbsentEntities, managedPaths, or managedTerrain to synchronize: ${resolved.path}`,
         );
       }
 
       const current = await vmapToText(dota.dmxconvertExe, p.contentVmap);
       const prunePrefixes = (resolved.contract.managedPaths ?? []).map((path) => path.name);
-      const result = reconcileMapEntities(current, specs, { prunePrefixes });
+      const result = reconcileMapEntities(current, specs, {
+        prunePrefixes,
+        absentEntities,
+      });
       if (result.conflicts.length) {
         return error(
           `No changes written. Duplicate targetnames make these managed entities ambiguous: ${result.conflicts.join(", ")}`,
@@ -330,7 +337,8 @@ export function registerMapTools(server: McpServer) {
       const changed = changedEntities + (terrain.changed ? 1 : 0);
       if (apply && changed) await textToVmap(dota.dmxconvertExe, terrain.text, p.contentVmap);
       const steps = [
-        `${apply ? "Synchronized" : "Previewed"} ${specs.length} managed entities in "${map}".`,
+        `${apply ? "Synchronized" : "Previewed"} ${specs.length} desired entities and ` +
+          `${absentEntities.length} absence selectors in "${map}".`,
         `Add ${result.added.length}, update ${result.updated.length}, remove ${result.removed.length}, ` +
           `unchanged ${result.unchanged.length}.`,
         `Terrain: ${terrainOperations.length} operations; change ${terrain.changedHeightVertices} height vertices, ` +
@@ -578,6 +586,18 @@ export function registerMapTools(server: McpServer) {
       if (source) {
         const mapText = await vmapToText(dota.dmxconvertExe, p.contentVmap);
         entities = parseMapEntities(mapText);
+        for (const selector of resolvedContract?.contract.managedAbsentEntities ?? []) {
+          const matches = entities.filter((entity) => matchesAbsentSelector(entity, selector));
+          if (matches.length) {
+            findings.push({
+              severity: "error",
+              code: "managed-absent-entity-present",
+              message:
+                `Entity required absent by contract is present (${matches.length} match` +
+                `${matches.length === 1 ? "" : "es"}): ${absentSelectorLabel(selector)}.`,
+            });
+          }
+        }
         const managedTerrain = resolvedContract?.contract.managedTerrain ?? [];
         if (managedTerrain.length) {
           const terrain = reconcileMapTerrain(

@@ -32,6 +32,12 @@ test("loadMapContract loads and validates the project default", async () => {
           properties: { enabled: true },
         },
       ],
+      managedAbsentEntities: [
+        {
+          classname: "info_player_start_goodguys",
+          origin: "-128 -64 128",
+        },
+      ],
       managedPaths: [
         {
           name: "path_radiant_north",
@@ -65,6 +71,7 @@ test("loadMapContract loads and validates the project default", async () => {
   assert.equal(resolved?.contract.requiredEntities[0].properties?.teamnumber, "2");
   assert.equal(resolved?.contract.managedEntities?.[0].origin, "-1024 512 128");
   assert.equal(resolved?.contract.managedEntities?.[0].properties?.enabled, "true");
+  assert.equal(resolved?.contract.managedAbsentEntities?.length, 1);
   assert.equal(resolved?.contract.managedTerrain?.length, 3);
   assert.equal(resolved?.contract.managedTerrain?.[1].op, "tileset");
   const managed = managedEntitiesForContract(resolved!.contract);
@@ -217,6 +224,43 @@ test("loadMapContract rejects terrain references to missing managed paths", asyn
   await assert.rejects(
     () => loadMapContract(root, "twin_gates"),
     /references missing managedPath "missing_lane"/,
+  );
+  await rm(root, { recursive: true, force: true });
+});
+
+test("loadMapContract requires exact absence selectors", async () => {
+  const root = await freshRoot();
+  await writeFile(
+    join(root, ".dota-workshop", "map-contract.json"),
+    JSON.stringify({
+      requiredEntities: [],
+      managedAbsentEntities: [{ classname: "info_target" }],
+    }),
+  );
+  await assert.rejects(
+    () => loadMapContract(root, "twin_gates"),
+    /must set targetname or origin/,
+  );
+  await rm(root, { recursive: true, force: true });
+});
+
+test("loadMapContract rejects desired and absent targetname conflicts", async () => {
+  const root = await freshRoot();
+  await writeFile(
+    join(root, ".dota-workshop", "map-contract.json"),
+    JSON.stringify({
+      requiredEntities: [],
+      managedEntities: [
+        { targetname: "spawn", classname: "info_target", origin: "0 0 0" },
+      ],
+      managedAbsentEntities: [
+        { targetname: "spawn", classname: "info_target" },
+      ],
+    }),
+  );
+  await assert.rejects(
+    () => loadMapContract(root, "twin_gates"),
+    /both requires and removes targetname "spawn"/,
   );
   await rm(root, { recursive: true, force: true });
 });

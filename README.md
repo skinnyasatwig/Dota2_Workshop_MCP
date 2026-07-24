@@ -316,7 +316,9 @@ playable `.vpk` — a pipeline verified end to end.
 
 Contract entries under `requiredEntities` are validation-only. Entries under `managedEntities`
 are declarative desired state and require `targetname`, `classname`, and `origin`; `angles` and
-`properties` / `removeProperties` are optional. A `managedPaths` entry takes a `name` plus
+`properties` / `removeProperties` are optional. `managedAbsentEntities` removes exact template
+leftovers by `classname` plus `targetname` or `origin`; ambiguous matches are refused and validation
+reports any selector that still matches. A `managedPaths` entry takes a `name` plus
 `points: [[x,y,z], ...]` and expands to `name_1`, `name_2`, and so on with generated `target` links;
 the terminal node explicitly removes stale `target` values (`startIndex`, `classname`, `loop`,
 `angles`, and shared `properties` are optional). `maxSegmentLength` rejects accidental large jumps;

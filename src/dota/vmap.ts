@@ -231,6 +231,13 @@ export interface ManagedEntitySpec {
   removeProperties?: string[];
 }
 
+export interface ManagedAbsentEntitySpec {
+  classname: string;
+  targetname?: string;
+  origin?: string;
+  angles?: string;
+}
+
 export interface MapEntityReconcileResult {
   text: string;
   added: string[];
@@ -240,10 +247,10 @@ export interface MapEntityReconcileResult {
   conflicts: string[];
 }
 
-function removeEntityBlocks(text: string, targetnames: Set<string>): string {
-  const ranges = entityBlockRanges(text).filter(
-    (range) => range.entity.targetname && targetnames.has(range.entity.targetname),
-  );
+function removeEntityRanges(
+  text: string,
+  ranges: { start: number; end: number }[],
+): string {
   let out = text;
   for (const range of ranges.sort((a, b) => b.start - a.start)) {
     let start = range.start;
@@ -260,11 +267,44 @@ function removeEntityBlocks(text: string, targetnames: Set<string>): string {
   return out;
 }
 
+function removeEntityBlocks(text: string, targetnames: Set<string>): string {
+  const ranges = entityBlockRanges(text).filter(
+    (range) => range.entity.targetname && targetnames.has(range.entity.targetname),
+  );
+  return removeEntityRanges(text, ranges);
+}
+
+export function absentSelectorLabel(selector: ManagedAbsentEntitySpec): string {
+  return [
+    selector.classname,
+    selector.targetname ? `targetname=${selector.targetname}` : undefined,
+    selector.origin ? `origin=${selector.origin}` : undefined,
+    selector.angles ? `angles=${selector.angles}` : undefined,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+export function matchesAbsentSelector(
+  entity: ParsedMapEntity,
+  selector: ManagedAbsentEntitySpec,
+): boolean {
+  return (
+    entity.classname === selector.classname &&
+    (selector.targetname === undefined || entity.targetname === selector.targetname) &&
+    (selector.origin === undefined || entity.origin === selector.origin) &&
+    (selector.angles === undefined || entity.angles === selector.angles)
+  );
+}
+
 /** Make named entities match a desired-state contract without removing unrelated map data. */
 export function reconcileMapEntities(
   text: string,
   specs: ManagedEntitySpec[],
-  options: { prunePrefixes?: string[] } = {},
+  options: {
+    prunePrefixes?: string[];
+    absentEntities?: ManagedAbsentEntitySpec[];
+  } = {},
 ): MapEntityReconcileResult {
   const parsed = parseMapEntities(text);
   const byTargetname = new Map<string, ParsedMapEntity[]>();
@@ -340,6 +380,28 @@ export function reconcileMapEntities(
     out = removeEntityBlocks(out, staleNames);
     removed.push(...staleNames);
   }
+  const absentRanges: { start: number; end: number }[] = [];
+  const claimedAbsentRanges = new Set<number>();
+  for (const selector of options.absentEntities ?? []) {
+    const label = absentSelectorLabel(selector);
+    const matches = entityBlockRanges(out).filter((range) =>
+      matchesAbsentSelector(range.entity, selector),
+    );
+    if (matches.length > 1) {
+      conflicts.push(label);
+      continue;
+    }
+    if (!matches.length) continue;
+    const match = matches[0];
+    if (claimedAbsentRanges.has(match.start)) {
+      conflicts.push(label);
+      continue;
+    }
+    claimedAbsentRanges.add(match.start);
+    absentRanges.push({ start: match.start, end: match.end });
+    removed.push(label);
+  }
+  if (absentRanges.length) out = removeEntityRanges(out, absentRanges);
   let nodeId = maxNodeId(out);
   for (const spec of missing) {
     const properties = { ...(spec.properties ?? {}), targetname: spec.targetname };

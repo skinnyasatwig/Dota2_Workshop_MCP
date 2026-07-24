@@ -274,3 +274,50 @@ test("reconcileMapEntities prunes obsolete numbered nodes owned by a managed pat
   );
   assert.equal(parseMapEntities(result.text)[1].target, undefined);
 });
+
+test("reconcileMapEntities removes exact unnamed template entities idempotently", () => {
+  const entities = [
+    buildEntityBlock(
+      { classname: "info_player_start_goodguys", origin: "-128 -64 128" },
+      1,
+    ),
+    buildEntityBlock(
+      { classname: "info_player_start_badguys", origin: "128 -64 128" },
+      2,
+    ),
+  ];
+  const text = `"world" "CMapWorld"\n{\n"children" "element_array"\n[\n${entities.join(",\n")}\n]\n}\n`;
+  const options = {
+    absentEntities: [
+      {
+        classname: "info_player_start_goodguys",
+        origin: "-128 -64 128",
+      },
+    ],
+  };
+  const first = reconcileMapEntities(text, [], options);
+  assert.deepEqual(first.removed, [
+    "info_player_start_goodguys origin=-128 -64 128",
+  ]);
+  assert.deepEqual(
+    parseMapEntities(first.text).map((entity) => entity.classname),
+    ["info_player_start_badguys"],
+  );
+
+  const second = reconcileMapEntities(first.text, [], options);
+  assert.deepEqual(second.removed, []);
+  assert.equal(second.text, first.text);
+});
+
+test("reconcileMapEntities refuses ambiguous absence selectors", () => {
+  const duplicate = buildEntityBlock(
+    { classname: "info_target", origin: "0 0 0" },
+    1,
+  );
+  const result = reconcileMapEntities(`${duplicate}\n${duplicate}`, [], {
+    absentEntities: [{ classname: "info_target", origin: "0 0 0" }],
+  });
+  assert.deepEqual(result.conflicts, ["info_target origin=0 0 0"]);
+  assert.deepEqual(result.removed, []);
+  assert.equal(parseMapEntities(result.text).length, 2);
+});

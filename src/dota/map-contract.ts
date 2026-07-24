@@ -21,6 +21,13 @@ export interface ManagedMapEntity {
   removeProperties?: string[];
 }
 
+export interface ManagedAbsentMapEntity {
+  classname: string;
+  targetname?: string;
+  origin?: string;
+  angles?: string;
+}
+
 export interface ManagedMapPath {
   name: string;
   points: [number, number, number][];
@@ -38,6 +45,7 @@ export interface MapContract {
   map?: string;
   requiredEntities: MapEntityRequirement[];
   managedEntities?: ManagedMapEntity[];
+  managedAbsentEntities?: ManagedAbsentMapEntity[];
   managedPaths?: ManagedMapPath[];
   managedTerrain?: ManagedTerrainOperation[];
 }
@@ -183,6 +191,49 @@ function validateContract(value: unknown, path: string): MapContract {
     });
   }
   let managedPaths: ManagedMapPath[] | undefined;
+  let managedAbsentEntities: ManagedAbsentMapEntity[] | undefined;
+  if (raw.managedAbsentEntities !== undefined) {
+    if (!Array.isArray(raw.managedAbsentEntities)) {
+      throw new Error(`Map contract "managedAbsentEntities" must be an array: ${path}`);
+    }
+    managedAbsentEntities = raw.managedAbsentEntities.map((entry, index) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        throw new Error(`managedAbsentEntities[${index}] must be an object: ${path}`);
+      }
+      const selector = entry as Record<string, unknown>;
+      if (typeof selector.classname !== "string" || !selector.classname) {
+        throw new Error(
+          `managedAbsentEntities[${index}].classname must be a non-empty string: ${path}`,
+        );
+      }
+      for (const key of ["targetname", "origin", "angles"]) {
+        if (selector[key] !== undefined && (typeof selector[key] !== "string" || !selector[key])) {
+          throw new Error(
+            `managedAbsentEntities[${index}].${key} must be a non-empty string: ${path}`,
+          );
+        }
+      }
+      if (selector.targetname === undefined && selector.origin === undefined) {
+        throw new Error(
+          `managedAbsentEntities[${index}] must set targetname or origin for exact matching: ${path}`,
+        );
+      }
+      return {
+        classname: selector.classname,
+        targetname: selector.targetname as string | undefined,
+        origin: selector.origin as string | undefined,
+        angles: selector.angles as string | undefined,
+      };
+    });
+    const selectorKeys = new Set<string>();
+    for (const selector of managedAbsentEntities) {
+      const key = JSON.stringify(selector);
+      if (selectorKeys.has(key)) {
+        throw new Error(`managedAbsentEntities contains a duplicate selector ${key}: ${path}`);
+      }
+      selectorKeys.add(key);
+    }
+  }
   if (raw.managedPaths !== undefined) {
     if (!Array.isArray(raw.managedPaths)) {
       throw new Error(`Map contract "managedPaths" must be an array: ${path}`);
@@ -342,6 +393,7 @@ function validateContract(value: unknown, path: string): MapContract {
     map: raw.map as string | undefined,
     requiredEntities,
     managedEntities,
+    managedAbsentEntities,
     managedPaths,
     managedTerrain,
   };
@@ -351,6 +403,13 @@ function validateContract(value: unknown, path: string): MapContract {
       throw new Error(`Managed contract contains duplicate targetname "${managed.targetname}": ${path}`);
     }
     names.add(managed.targetname);
+  }
+  for (const absent of managedAbsentEntities ?? []) {
+    if (absent.targetname && names.has(absent.targetname)) {
+      throw new Error(
+        `Managed contract both requires and removes targetname "${absent.targetname}": ${path}`,
+      );
+    }
   }
   return contract;
 }
