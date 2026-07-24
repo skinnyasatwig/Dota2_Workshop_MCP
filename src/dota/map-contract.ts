@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { pathExists } from "../util/fsx.js";
+import { ManagedTerrainOperation, parseManagedTerrain } from "./map-terrain.js";
 
 export interface MapEntityRequirement {
   targetname: string;
@@ -38,6 +39,7 @@ export interface MapContract {
   requiredEntities: MapEntityRequirement[];
   managedEntities?: ManagedMapEntity[];
   managedPaths?: ManagedMapPath[];
+  managedTerrain?: ManagedTerrainOperation[];
 }
 
 export interface ResolvedMapContract {
@@ -331,6 +333,7 @@ function validateContract(value: unknown, path: string): MapContract {
     requiredEntities,
     managedEntities,
     managedPaths,
+    managedTerrain: parseManagedTerrain(raw.managedTerrain, "managedTerrain", path),
   };
   const names = new Set<string>();
   for (const managed of managedEntitiesForContract(contract)) {

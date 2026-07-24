@@ -44,6 +44,14 @@ test("loadMapContract loads and validates the project default", async () => {
           ],
         },
       ],
+      managedTerrain: [
+        { op: "fill", water: false },
+        {
+          op: "tileset",
+          tileset: 1,
+          shape: { kind: "path", points: [[4, 32], [60, 32]], width: 4 },
+        },
+      ],
     }),
   );
   const resolved = await loadMapContract(root, "twin_gates");
@@ -52,6 +60,8 @@ test("loadMapContract loads and validates the project default", async () => {
   assert.equal(resolved?.contract.requiredEntities[0].properties?.teamnumber, "2");
   assert.equal(resolved?.contract.managedEntities?.[0].origin, "-1024 512 128");
   assert.equal(resolved?.contract.managedEntities?.[0].properties?.enabled, "true");
+  assert.equal(resolved?.contract.managedTerrain?.length, 2);
+  assert.equal(resolved?.contract.managedTerrain?.[1].op, "tileset");
   const managed = managedEntitiesForContract(resolved!.contract);
   assert.equal(managed.length, 4);
   assert.deepEqual(

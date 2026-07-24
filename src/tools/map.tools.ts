@@ -18,6 +18,7 @@ import { readAddonInfo, registerMapFile } from "../dota/addoninfo.js";
 import { compileProjectMap, projectMapPaths } from "../dota/map-project.js";
 import { loadMapContract, managedEntitiesForContract } from "../dota/map-contract.js";
 import { inspectMapText } from "../dota/map-inspect.js";
+import { reconcileMapTerrain } from "../dota/map-terrain.js";
 import { pathExists } from "../util/fsx.js";
 import { json, text, error, guard, ToolResult } from "../util/result.js";
 
@@ -280,11 +281,11 @@ export function registerMapTools(server: McpServer) {
     {
       title: "Synchronize a map with its managed contract",
       description:
-        "Preview or apply desired managedEntities and compact managedPaths from " +
+        "Preview or apply desired managedEntities, compact managedPaths, and managedTerrain operations from " +
         ".dota-workshop/map-contract.json. Paths expand into complete linked waypoint chains. Missing named entities " +
-        "are created; existing named entities are repaired to the declared class, transform, links, and keyvalues; " +
-        "obsolete numbered nodes under managed path prefixes are removed. The operation is idempotent, preserves " +
-        "unrelated map data, and refuses ambiguous duplicate targetnames. Defaults to preview-only; pass apply=true.",
+        "are created; existing named entities are repaired; obsolete managed path nodes are removed; and declared " +
+        "terrain shapes are restored while terrain outside those shapes is preserved. The operation is idempotent and " +
+        "refuses ambiguous duplicate targetnames. Defaults to preview-only; pass apply=true.",
       inputSchema: {
         projectRoot: z.string().optional(),
         map: z.string(),
@@ -304,8 +305,11 @@ export function registerMapTools(server: McpServer) {
       const resolved = await loadMapContract(project.root, map, contractFile);
       if (!resolved) return error(`Map contract not found under ${project.root}.`);
       const specs = managedEntitiesForContract(resolved.contract);
-      if (!specs.length) {
-        return error(`Contract has no managedEntities or managedPaths to synchronize: ${resolved.path}`);
+      const terrainOperations = resolved.contract.managedTerrain ?? [];
+      if (!specs.length && !terrainOperations.length) {
+        return error(
+          `Contract has no managedEntities, managedPaths, or managedTerrain to synchronize: ${resolved.path}`,
+        );
       }
 
       const current = await vmapToText(dota.dmxconvertExe, p.contentVmap);
@@ -317,12 +321,16 @@ export function registerMapTools(server: McpServer) {
         );
       }
 
-      const changed = result.added.length + result.updated.length + result.removed.length;
-      if (apply && changed) await textToVmap(dota.dmxconvertExe, result.text, p.contentVmap);
+      const terrain = reconcileMapTerrain(result.text, terrainOperations);
+      const changedEntities = result.added.length + result.updated.length + result.removed.length;
+      const changed = changedEntities + (terrain.changed ? 1 : 0);
+      if (apply && changed) await textToVmap(dota.dmxconvertExe, terrain.text, p.contentVmap);
       const steps = [
         `${apply ? "Synchronized" : "Previewed"} ${specs.length} managed entities in "${map}".`,
         `Add ${result.added.length}, update ${result.updated.length}, remove ${result.removed.length}, ` +
           `unchanged ${result.unchanged.length}.`,
+        `Terrain: ${terrainOperations.length} operations; change ${terrain.changedHeightVertices} height vertices, ` +
+          `${terrain.changedWaterVertices} water vertices, ${terrain.changedTilesetCells} tileset cells.`,
       ];
       if (!apply && changed) steps.push("No files changed. Pass apply=true to write this plan.");
       if (apply && recompile) {
@@ -335,10 +343,18 @@ export function registerMapTools(server: McpServer) {
           contract: resolved.path,
           applied: apply === true,
           changed,
+          changedEntities,
           added: result.added,
           updated: result.updated,
           removed: result.removed,
           unchanged: result.unchanged,
+          terrain: {
+            changed: terrain.changed,
+            changedHeightVertices: terrain.changedHeightVertices,
+            changedWaterVertices: terrain.changedWaterVertices,
+            changedTilesetCells: terrain.changedTilesetCells,
+            operations: terrain.operations,
+          },
           recompiled: apply === true && recompile === true,
         },
         steps.join("\n"),
@@ -475,7 +491,8 @@ export function registerMapTools(server: McpServer) {
       description:
         "Static preflight for autonomous map work (does not launch Dota): checks source/registration/compiled state, " +
         "extracts entities, finds duplicate targetnames and broken path_corner/path_track links, and verifies required " +
-        "targetname/classname pairs used by game scripts.",
+        "targetname/classname pairs used by game scripts. When a project contract declares managedTerrain, validation " +
+        "also reports tile-grid drift without writing it.",
       inputSchema: {
         projectRoot: z.string().optional(),
         map: z.string(),
@@ -547,8 +564,35 @@ export function registerMapTools(server: McpServer) {
       }
 
       let entities: ReturnType<typeof parseMapEntities> = [];
+      let terrainDrift:
+        | {
+            changedHeightVertices: number;
+            changedWaterVertices: number;
+            changedTilesetCells: number;
+          }
+        | undefined;
       if (source) {
-        entities = parseMapEntities(await vmapToText(dota.dmxconvertExe, p.contentVmap));
+        const mapText = await vmapToText(dota.dmxconvertExe, p.contentVmap);
+        entities = parseMapEntities(mapText);
+        const managedTerrain = resolvedContract?.contract.managedTerrain ?? [];
+        if (managedTerrain.length) {
+          const terrain = reconcileMapTerrain(mapText, managedTerrain);
+          if (terrain.changed) {
+            terrainDrift = {
+              changedHeightVertices: terrain.changedHeightVertices,
+              changedWaterVertices: terrain.changedWaterVertices,
+              changedTilesetCells: terrain.changedTilesetCells,
+            };
+            findings.push({
+              severity: "error",
+              code: "managed-terrain-drift",
+              message:
+                `Managed terrain drift: ${terrain.changedHeightVertices} height vertices, ` +
+                `${terrain.changedWaterVertices} water vertices, and ` +
+                `${terrain.changedTilesetCells} tileset cells differ from the contract.`,
+            });
+          }
+        }
         const byTargetname = new Map<string, typeof entities>();
         for (const entity of entities) {
           if (!entity.targetname) continue;
@@ -668,6 +712,7 @@ export function registerMapTools(server: McpServer) {
           entityCount: entities.length,
           contract: resolvedContract?.path ?? null,
           requirementCount: requirements.length,
+          terrainDrift: terrainDrift ?? null,
           findings,
         },
         `${header}${body ? `\n${body}` : ""}`,

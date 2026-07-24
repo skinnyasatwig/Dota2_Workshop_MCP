@@ -321,7 +321,11 @@ are declarative desired state and require `targetname`, `classname`, and `origin
 the terminal node explicitly removes stale `target` values (`startIndex`, `classname`, `loop`,
 `angles`, and shared `properties` are optional). `maxSegmentLength` rejects accidental large jumps;
 `mirrorOf` plus `mirrorAxis` (`x`, `y`, or `xy`) enforces exact route symmetry. `map_validate`
-checks all expanded entities.
+checks all expanded entities. `managedTerrain` is an ordered list of the same idempotent tile-grid
+operations accepted by `map_terrain`: `fill`, `height`, `water`, and `tileset`, using `rect`,
+`circle`, `ring`, or `path` shapes in tile coordinates. Contract sync previews exact height-vertex,
+water-vertex, and tileset-cell drift before writing; undeclared terrain remains untouched unless the
+contract explicitly uses `fill`.
 
 Map registration supports both legacy KeyValues 1 and the KV3 `addoninfo.txt` produced by current
 Workshop Tools. Source-controlled layouts under `game/dota_addons/<addon>` and
@@ -330,9 +334,9 @@ the real link operation refuses to overwrite conflicting folders.
 
 Then launch it: `addon_launch_custom_game map="<name>"`.
 
-> Limitation: bespoke **geometry** (terrain/brushwork — the `CDmePolygonMesh` half-edge data) is
-> authored in **Hammer**. The MCP builds maps by cloning a working base and placing entities; it
-> doesn't sculpt arbitrary meshes from scratch.
+> Limitation: bespoke **polygon-mesh geometry** (the `CDmePolygonMesh` half-edge data) is authored
+> in **Hammer**. The MCP can now reconcile Dota tile-grid terrain, but it does not yet
+> sculpt arbitrary polygon meshes such as bespoke walls, bridges, or cliff brushwork.
 
 ## Notes & limitations
 
