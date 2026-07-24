@@ -295,7 +295,9 @@ playable `.vpk` — a pipeline verified end to end.
 - **`map_inspect`** — return compact structured map data without launching Dota: filterable named
   entities, class counts, complete path-chain summaries, tile-grid bounds/height/water/tilesets, and
   broken-link or out-of-bounds findings. Use `includePathNodes:true` only when individual waypoints
-  are needed.
+  are needed. By default it also samples every path against the tile grid and flags terrain-boundary
+  exits, water crossings, and abrupt height-level changes. This is a fast structural heuristic;
+  final Valve navmesh behavior still needs compilation or an in-game self-test.
 - **`map_patch_entities`** — batch-convert named layout markers into real gameplay entities and
   update their class, name, transform, and keyvalues without disturbing unrelated map data.
 - **`map_sync_contract`** — preview or apply desired-state `managedEntities` and compact

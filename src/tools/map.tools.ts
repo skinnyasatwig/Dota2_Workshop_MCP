@@ -138,6 +138,21 @@ export function registerMapTools(server: McpServer) {
         namedOnly: z.boolean().optional().describe("Exclude unnamed entities (default true)."),
         includeProperties: z.boolean().optional().describe("Include all parsed string keyvalues (default false)."),
         includePathNodes: z.boolean().optional().describe("Include every node in each path-chain summary (default false)."),
+        checkPathability: z
+          .boolean()
+          .optional()
+          .describe("Sample path chains against tile-grid bounds, water, and terrain height (default true)."),
+        pathSampleSpacing: z
+          .number()
+          .min(16)
+          .max(4096)
+          .optional()
+          .describe("World-unit spacing between terrain samples along paths (default 128)."),
+        maxTerrainStep: z
+          .number()
+          .min(0)
+          .optional()
+          .describe("Maximum allowed terrain height-level change between route samples (default 1)."),
         limit: z.number().int().min(1).max(1000).optional().describe("Maximum returned entities (default 200)."),
       },
     },
@@ -151,6 +166,9 @@ export function registerMapTools(server: McpServer) {
         namedOnly,
         includeProperties,
         includePathNodes,
+        checkPathability,
+        pathSampleSpacing,
+        maxTerrainStep,
         limit,
       }): Promise<ToolResult> => {
         const dota = await requireDotaPaths();
@@ -164,6 +182,9 @@ export function registerMapTools(server: McpServer) {
           namedOnly,
           includeProperties,
           includePathNodes,
+          checkPathability,
+          pathSampleSpacing,
+          maxTerrainStep,
           limit,
         });
         const classSummary = Object.entries(report.classCounts)
@@ -173,7 +194,12 @@ export function registerMapTools(server: McpServer) {
           .join(", ");
         const pathSummary = report.paths.length
           ? report.paths
-              .map((path) => `${path.start} -> ${path.end} (${path.nodeCount}${path.loop ? ", loop" : ""})`)
+              .map((path) => {
+                const terrain = path.terrain
+                  ? `, terrain=${path.terrain.passable ? "clear" : "warning"}`
+                  : "";
+                return `${path.start} -> ${path.end} (${path.nodeCount}${path.loop ? ", loop" : ""}${terrain})`;
+              })
               .join("\n")
           : "No named path chains.";
         const terrainSummary = report.terrain

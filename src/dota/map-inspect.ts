@@ -1,4 +1,4 @@
-import { parseTileGrid } from "./tilegrid.js";
+import { parseTileGrid, TileGrid, vIndex } from "./tilegrid.js";
 import { ParsedMapEntity, parseMapEntities } from "./vmap.js";
 
 export interface MapInspectOptions {
@@ -8,6 +8,9 @@ export interface MapInspectOptions {
   namedOnly?: boolean;
   includeProperties?: boolean;
   includePathNodes?: boolean;
+  checkPathability?: boolean;
+  pathSampleSpacing?: number;
+  maxTerrainStep?: number;
   limit?: number;
 }
 
@@ -34,7 +37,20 @@ export interface InspectedPathChain {
   end: string;
   loop: boolean;
   brokenTarget?: string;
+  terrain?: RouteTerrainInspection;
   nodes?: InspectedPathNode[];
+}
+
+export interface RouteTerrainInspection {
+  passable: boolean;
+  sampleSpacing: number;
+  heightStepLimit: number;
+  sampleCount: number;
+  minHeightLevel?: number;
+  maxHeightLevel?: number;
+  maxHeightStep: number;
+  waterSampleCount: number;
+  outOfBoundsSampleCount: number;
 }
 
 export interface TerrainInspection {
@@ -63,7 +79,12 @@ export interface MapInspection {
   paths: InspectedPathChain[];
   terrain?: TerrainInspection;
   findings: {
-    code: "broken-path-target" | "entity-out-of-bounds";
+    code:
+      | "broken-path-target"
+      | "entity-out-of-bounds"
+      | "path-out-of-bounds"
+      | "path-crosses-water"
+      | "path-steep-terrain";
     targetname: string;
     detail: string;
   }[];
@@ -149,6 +170,102 @@ function vector3(value: string | undefined): [number, number, number] | undefine
   return coordinates as [number, number, number];
 }
 
+interface TerrainSample {
+  height: number;
+  water: boolean;
+}
+
+function sampleTerrain(terrain: TileGrid, x: number, y: number): TerrainSample | undefined {
+  const gridX = (x - terrain.origin[0]) / terrain.tileSize;
+  const gridY = (y - terrain.origin[1]) / terrain.tileSize;
+  if (gridX < 0 || gridX > terrain.width || gridY < 0 || gridY > terrain.height) return undefined;
+
+  const x0 = Math.floor(gridX);
+  const y0 = Math.floor(gridY);
+  const x1 = Math.min(terrain.width, x0 + 1);
+  const y1 = Math.min(terrain.height, y0 + 1);
+  const tx = gridX - x0;
+  const ty = gridY - y0;
+  const weights = [
+    [(1 - tx) * (1 - ty), x0, y0],
+    [tx * (1 - ty), x1, y0],
+    [(1 - tx) * ty, x0, y1],
+    [tx * ty, x1, y1],
+  ] as const;
+  let height = 0;
+  let water = 0;
+  for (const [weight, vx, vy] of weights) {
+    const index = vIndex(terrain, vx, vy);
+    height += (terrain.heights[index] ?? 0) * weight;
+    water += (terrain.water[index] ?? 0) * weight;
+  }
+  return { height, water: water >= 0.5 };
+}
+
+function inspectRouteTerrain(
+  terrain: TileGrid,
+  nodes: InspectedPathNode[],
+  sampleSpacing: number,
+  heightStepLimit: number,
+): RouteTerrainInspection | undefined {
+  const points = nodes.map((node) => vector3(node.origin)).filter((point) => point !== undefined);
+  if (!points.length) return undefined;
+
+  const samples: [number, number][] = [];
+  if (points.length === 1) {
+    samples.push([points[0][0], points[0][1]]);
+  } else {
+    for (let segment = 0; segment < points.length - 1; segment++) {
+      const from = points[segment];
+      const to = points[segment + 1];
+      const distance = Math.hypot(to[0] - from[0], to[1] - from[1]);
+      const steps = Math.max(1, Math.ceil(distance / sampleSpacing));
+      for (let step = segment === 0 ? 0 : 1; step <= steps; step++) {
+        const amount = step / steps;
+        samples.push([
+          from[0] + (to[0] - from[0]) * amount,
+          from[1] + (to[1] - from[1]) * amount,
+        ]);
+      }
+    }
+  }
+
+  const heights: number[] = [];
+  let waterSampleCount = 0;
+  let outOfBoundsSampleCount = 0;
+  let maxHeightStep = 0;
+  let previousHeight: number | undefined;
+  for (const [x, y] of samples) {
+    const sample = sampleTerrain(terrain, x, y);
+    if (!sample) {
+      outOfBoundsSampleCount++;
+      previousHeight = undefined;
+      continue;
+    }
+    heights.push(sample.height);
+    if (sample.water) waterSampleCount++;
+    if (previousHeight !== undefined) {
+      maxHeightStep = Math.max(maxHeightStep, Math.abs(sample.height - previousHeight));
+    }
+    previousHeight = sample.height;
+  }
+
+  return {
+    passable:
+      outOfBoundsSampleCount === 0 &&
+      waterSampleCount === 0 &&
+      maxHeightStep <= heightStepLimit,
+    sampleSpacing,
+    heightStepLimit,
+    sampleCount: samples.length,
+    minHeightLevel: heights.length ? Math.min(...heights) : undefined,
+    maxHeightLevel: heights.length ? Math.max(...heights) : undefined,
+    maxHeightStep,
+    waterSampleCount,
+    outOfBoundsSampleCount,
+  };
+}
+
 function terrainInspection(text: string): TerrainInspection | undefined {
   try {
     const terrain = parseTileGrid(text);
@@ -195,8 +312,18 @@ export function inspectMapText(text: string, options: MapInspectOptions = {}): M
   const limit = Math.max(1, Math.min(1000, options.limit ?? 200));
   const selected = matching.slice(0, limit);
   const terrain = terrainInspection(text);
+  let tileGrid: TileGrid | undefined;
+  if (terrain && options.checkPathability !== false) {
+    try {
+      tileGrid = parseTileGrid(text);
+    } catch {
+      tileGrid = undefined;
+    }
+  }
   const findings: MapInspection["findings"] = [];
-  const paths = inspectPathChains(all, options.includePathNodes === true);
+  const paths = inspectPathChains(all, true);
+  const sampleSpacing = Math.max(16, Math.min(4096, options.pathSampleSpacing ?? 128));
+  const heightStepLimit = Math.max(0, options.maxTerrainStep ?? 1);
   for (const path of paths) {
     if (path.brokenTarget) {
       findings.push({
@@ -205,6 +332,33 @@ export function inspectMapText(text: string, options: MapInspectOptions = {}): M
         detail: `Targets missing waypoint "${path.brokenTarget}".`,
       });
     }
+    if (tileGrid && path.nodes) {
+      path.terrain = inspectRouteTerrain(tileGrid, path.nodes, sampleSpacing, heightStepLimit);
+      if (path.terrain?.outOfBoundsSampleCount) {
+        findings.push({
+          code: "path-out-of-bounds",
+          targetname: path.start,
+          detail: `${path.terrain.outOfBoundsSampleCount}/${path.terrain.sampleCount} route samples are outside the terrain grid.`,
+        });
+      }
+      if (path.terrain?.waterSampleCount) {
+        findings.push({
+          code: "path-crosses-water",
+          targetname: path.start,
+          detail: `${path.terrain.waterSampleCount}/${path.terrain.sampleCount} route samples cross water.`,
+        });
+      }
+      if (path.terrain && path.terrain.maxHeightStep > heightStepLimit) {
+        findings.push({
+          code: "path-steep-terrain",
+          targetname: path.start,
+          detail:
+            `Maximum sampled terrain-height step ${path.terrain.maxHeightStep.toFixed(2)} exceeds ` +
+            `the configured limit ${heightStepLimit}.`,
+        });
+      }
+    }
+    if (options.includePathNodes !== true) path.nodes = undefined;
   }
   if (terrain) {
     const [minX, minY] = terrain.worldBounds.min;

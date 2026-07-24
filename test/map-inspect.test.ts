@@ -69,6 +69,9 @@ test("inspectMapText summarizes terrain, classes, paths, and findings", () => {
   assert.equal(route?.nodeCount, 2);
   assert.equal(route?.end, "route_2");
   assert.deepEqual(route?.nodes?.map((node) => node.targetname), ["route_1", "route_2"]);
+  assert.equal(route?.terrain?.sampleSpacing, 128);
+  assert.ok((route?.terrain?.waterSampleCount ?? 0) > 0);
+  assert.equal(route?.terrain?.passable, false);
   assert.ok(
     report.findings.some(
       (finding) => finding.code === "broken-path-target" && finding.targetname === "broken_1",
@@ -77,6 +80,11 @@ test("inspectMapText summarizes terrain, classes, paths, and findings", () => {
   assert.ok(
     report.findings.some(
       (finding) => finding.code === "entity-out-of-bounds" && finding.targetname === "outside_marker",
+    ),
+  );
+  assert.ok(
+    report.findings.some(
+      (finding) => finding.code === "path-crosses-water" && finding.targetname === "route_1",
     ),
   );
 });
@@ -92,4 +100,45 @@ test("inspectMapText filters named entities and respects limits", () => {
   assert.equal(report.truncated, true);
   assert.equal(report.entities[0].targetname, "route_1");
   assert.equal(report.entities[0].properties?.target, "route_2");
+  assert.equal(report.paths[0].nodes, undefined);
+});
+
+test("inspectMapText can disable route terrain sampling", () => {
+  const report = inspectMapText(fixture(), { checkPathability: false });
+  assert.ok(report.paths.every((path) => path.terrain === undefined));
+  assert.ok(
+    report.findings.every(
+      (finding) => !finding.code.startsWith("path-") || finding.code === "broken-path-target",
+    ),
+  );
+});
+
+test("inspectMapText flags abrupt sampled terrain changes", () => {
+  const report = inspectMapText(fixture(), { maxTerrainStep: 0.1 });
+  assert.ok(
+    report.findings.some(
+      (finding) => finding.code === "path-steep-terrain" && finding.targetname === "route_1",
+    ),
+  );
+});
+
+test("inspectMapText flags path samples outside the tile grid", () => {
+  const outside = buildEntityBlock(
+    {
+      classname: "path_corner",
+      origin: "400 100 0",
+      properties: { targetname: "outside_route_1" },
+    },
+    5,
+  );
+  const text = fixture().replace(
+    '\n]\n}\n"tileGrid"',
+    `,\n${outside}\n]\n}\n"tileGrid"`,
+  );
+  const report = inspectMapText(text);
+  assert.ok(
+    report.findings.some(
+      (finding) => finding.code === "path-out-of-bounds" && finding.targetname === "outside_route_1",
+    ),
+  );
 });
