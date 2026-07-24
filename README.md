@@ -312,7 +312,9 @@ playable `.vpk` — a pipeline verified end to end.
 - **`map_list`** — list maps with source/compiled status.
 - **`map_validate`** — no-game preflight: verify map registration, source/compiled state, required
   script-facing entities, duplicate target names, and broken `path_corner`/`path_track` chains. It
-  automatically loads `.dota-workshop/map-contract.json` when the project provides one.
+  reports when the compiled VPK is older than the VMAP source; `requireCompiled:true` makes a missing
+  or stale build an error. It automatically loads `.dota-workshop/map-contract.json` when the project
+  provides one.
 
 Contract entries under `requiredEntities` are validation-only. Entries under `managedEntities`
 are declarative desired state and require `targetname`, `classname`, and `origin`; `angles` and

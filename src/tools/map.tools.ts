@@ -21,6 +21,7 @@ import { compileProjectMap, projectMapPaths } from "../dota/map-project.js";
 import { loadMapContract, managedEntitiesForContract } from "../dota/map-contract.js";
 import { inspectMapText } from "../dota/map-inspect.js";
 import { reconcileMapTerrain } from "../dota/map-terrain.js";
+import { inspectMapArtifactFreshness } from "../dota/map-freshness.js";
 import { pathExists } from "../util/fsx.js";
 import { json, text, error, guard, ToolResult } from "../util/result.js";
 
@@ -471,7 +472,8 @@ export function registerMapTools(server: McpServer) {
     "map_list",
     {
       title: "List addon maps",
-      description: "List the addon's maps (from addoninfo.txt) with their source (.vmap) and compiled (.vpk) status.",
+      description:
+        "List the addon's maps (from addoninfo.txt) with source (.vmap), compiled (.vpk), and compiled-freshness status.",
       inputSchema: { projectRoot: z.string().optional() },
     },
     guard(async ({ projectRoot }): Promise<ToolResult> => {
@@ -485,12 +487,31 @@ export function registerMapTools(server: McpServer) {
       const maps = [];
       for (const name of names) {
         const p = projectMapPaths(dota, project, name);
-        maps.push({ name, source: await pathExists(p.contentVmap), compiled: await pathExists(p.gameVpk) });
+        const [source, compiled] = await Promise.all([
+          pathExists(p.contentVmap),
+          pathExists(p.gameVpk),
+        ]);
+        const freshness =
+          source && compiled
+            ? await inspectMapArtifactFreshness(p.contentVmap, p.gameVpk)
+            : undefined;
+        maps.push({
+          name,
+          source,
+          compiled,
+          compiledFresh: freshness?.fresh ?? null,
+        });
       }
       return json(
         { count: maps.length, maps },
         maps.length
-          ? maps.map((m) => `  ${m.name}  [source: ${m.source ? "yes" : "no"}, compiled: ${m.compiled ? "yes" : "no"}]`).join("\n")
+          ? maps
+              .map(
+                (m) =>
+                  `  ${m.name}  [source: ${m.source ? "yes" : "no"}, ` +
+                  `compiled: ${!m.compiled ? "no" : m.compiledFresh ? "yes, fresh" : "yes, stale"}]`,
+              )
+              .join("\n")
           : "No maps registered in addoninfo.txt.",
       );
     }),
@@ -501,7 +522,8 @@ export function registerMapTools(server: McpServer) {
     {
       title: "Validate a map and its script contract",
       description:
-        "Static preflight for autonomous map work (does not launch Dota): checks source/registration/compiled state, " +
+        "Static preflight for autonomous map work (does not launch Dota): checks source/registration/compiled presence " +
+        "and whether the compiled VPK is older than its VMAP source, " +
         "extracts entities, finds duplicate targetnames and broken path_corner/path_track links, and verifies required " +
         "targetname/classname pairs used by game scripts. When a project contract declares managedTerrain, validation " +
         "also reports tile-grid drift without writing it.",
@@ -525,7 +547,10 @@ export function registerMapTools(server: McpServer) {
           .string()
           .optional()
           .describe("JSON contract path. Defaults to .dota-workshop/map-contract.json when present."),
-        requireCompiled: z.boolean().optional().describe("Treat a missing compiled VPK as an error (default false)."),
+        requireCompiled: z
+          .boolean()
+          .optional()
+          .describe("Treat a missing or stale compiled VPK as an error (default false)."),
       },
     },
     guard(async ({ projectRoot, map, requiredEntities, contractFile, requireCompiled }): Promise<ToolResult> => {
@@ -556,6 +581,8 @@ export function registerMapTools(server: McpServer) {
 
       const source = await pathExists(p.contentVmap);
       const compiled = await pathExists(p.gameVpk);
+      const compiledFreshness =
+        source && compiled ? await inspectMapArtifactFreshness(p.contentVmap, p.gameVpk) : undefined;
       if (!source) {
         findings.push({ severity: "error", code: "source-missing", message: `Map source not found: ${p.contentVmap}` });
       }
@@ -572,6 +599,14 @@ export function registerMapTools(server: McpServer) {
           severity: requireCompiled ? "error" : "warn",
           code: "compiled-missing",
           message: `Compiled map not found: ${p.gameVpk}`,
+        });
+      } else if (compiledFreshness && !compiledFreshness.fresh) {
+        findings.push({
+          severity: requireCompiled ? "error" : "warn",
+          code: "compiled-stale",
+          message:
+            `Compiled map is older than its source by ` +
+            `${Math.ceil(Math.abs(compiledFreshness.ageDeltaMs) / 1000)} second(s): ${p.gameVpk}`,
         });
       }
 
@@ -737,6 +772,13 @@ export function registerMapTools(server: McpServer) {
           source,
           registered,
           compiled,
+          compiledFresh: compiledFreshness?.fresh ?? null,
+          sourceModifiedAt: compiledFreshness
+            ? new Date(compiledFreshness.sourceModifiedMs).toISOString()
+            : null,
+          compiledModifiedAt: compiledFreshness
+            ? new Date(compiledFreshness.compiledModifiedMs).toISOString()
+            : null,
           entityCount: entities.length,
           contract: resolvedContract?.path ?? null,
           requirementCount: requirements.length,
