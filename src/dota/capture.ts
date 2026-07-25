@@ -85,6 +85,9 @@ if ($Focus -eq 'true') {
   [void][WinCap]::AttachThreadInput($tCur, $tFg, $false)
   Start-Sleep -Milliseconds 250
 }
+if ($Mode -ne 'print' -and [WinCap]::GetForegroundWindow() -ne $h) {
+  throw 'Could not bring dota2 to the foreground; refusing screen capture to avoid capturing another application'
+}
 $r = New-Object WinCap+RECT
 [void][WinCap]::GetWindowRect($h, [ref]$r)
 $w = $r.Right - $r.Left; $ht = $r.Bottom - $r.Top

@@ -74,6 +74,7 @@ end
 -- Game-state helpers.
 ----------------------------------------------------------------------
 local function firstHero()
+  if PlayerResource == nil then return nil, nil end
   for pid = 0, 23 do
     if PlayerResource:IsValidPlayerID(pid) then
       local h = PlayerResource:GetSelectedHeroEntity(pid)
@@ -84,6 +85,7 @@ local function firstHero()
 end
 
 local function heroForPid(pid)
+  if PlayerResource == nil then return nil, nil end
   if pid == nil then return firstHero() end
   pid = tonumber(pid)
   if pid == nil or not PlayerResource:IsValidPlayerID(pid) then return nil, nil end
@@ -92,18 +94,20 @@ end
 
 local function snapshotState()
   local players = {}
-  for pid = 0, 23 do
-    if PlayerResource:IsValidPlayerID(pid) then
-      local h = PlayerResource:GetSelectedHeroEntity(pid)
-      players[#players + 1] = {
-        pid = pid,
-        team = PlayerResource:GetTeam(pid),
-        gold = PlayerResource:GetGold(pid),
-        hero = (h and not h:IsNull()) and h:GetUnitName() or nil,
-        level = (h and not h:IsNull()) and h:GetLevel() or nil,
-        alive = (h and not h:IsNull()) and h:IsAlive() or false,
-        hp = (h and not h:IsNull()) and h:GetHealth() or nil,
-      }
+  if PlayerResource ~= nil then
+    for pid = 0, 23 do
+      if PlayerResource:IsValidPlayerID(pid) then
+        local h = PlayerResource:GetSelectedHeroEntity(pid)
+        players[#players + 1] = {
+          pid = pid,
+          team = PlayerResource:GetTeam(pid),
+          gold = PlayerResource:GetGold(pid),
+          hero = (h and not h:IsNull()) and h:GetUnitName() or nil,
+          level = (h and not h:IsNull()) and h:GetLevel() or nil,
+          alive = (h and not h:IsNull()) and h:IsAlive() or false,
+          hp = (h and not h:IsNull()) and h:GetHealth() or nil,
+        }
+      end
     end
   end
   local unitCount = 0

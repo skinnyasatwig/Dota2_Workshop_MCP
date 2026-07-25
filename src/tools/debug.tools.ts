@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { resolveProject } from "../config.js";
 import { requireDotaPaths, DotaPaths } from "../dota/paths.js";
 import { getVConsole, defaultVconPort, ConsoleLine } from "../dota/vconsole.js";
-import { buildLaunchArgs } from "../dota/launch.js";
+import { buildDotaLaunchTarget, buildLaunchArgs } from "../dota/launch.js";
 import { run, spawnDetached, killProcess, npmCommand } from "../dota/process.js";
 import { ensureDir } from "../util/fsx.js";
 import { captureWindowPng } from "../dota/capture.js";
@@ -44,11 +44,11 @@ export async function restartGame(
   reconnect: boolean,
 ): Promise<{ pid?: number; command: string; killed: boolean; reconnected: boolean }> {
   const args = buildLaunchArgs({ addon, map, insecure: true, dev: true, cheats, vconPort: port });
-  const command = `"${dota.dota2Exe}" ${args.join(" ")}`;
+  const target = buildDotaLaunchTarget(dota.root, dota.dota2Exe, args, { steamExe: dota.steamExe });
   getVConsole(port).disconnect();
   const kill = await killProcess("dota2.exe");
   await sleep(1500); // let the OS release file locks
-  const { pid } = spawnDetached(dota.dota2Exe, args, dota.binWin64);
+  const { pid, command } = spawnDetached(target.executable, target.args, target.cwd);
   let reconnected = false;
   if (reconnect) {
     try {
@@ -175,7 +175,8 @@ export function registerDebugTools(server: McpServer) {
       const port = vconPort ?? defaultVconPort();
       if (dryRun) {
         const args = buildLaunchArgs({ addon: name, map, insecure: true, dev: true, cheats: cheats !== false, vconPort: port });
-        return text(`[dry run]\ntaskkill /F /IM dota2.exe\n"${dota.dota2Exe}" ${args.join(" ")}`);
+        const target = buildDotaLaunchTarget(dota.root, dota.dota2Exe, args, { steamExe: dota.steamExe });
+        return text(`[dry run]\ntaskkill /F /IM dota2.exe\n"${target.executable}" ${target.args.join(" ")}`);
       }
       const r = await restartGame(dota, name, map, port, cheats !== false, reconnect !== false);
       return json(
@@ -259,13 +260,14 @@ export function registerDebugTools(server: McpServer) {
       title: "Capture a screenshot",
       description:
         "Screenshot the running game — two distinct variants:\n" +
-        "• method 'game' (a.k.a. 'console'): the in-game RENDER via the `jpeg` console command — the true rendered " +
-        "frame, highest fidelity, best when a map is actually rendering.\n" +
+        "• method 'game' (a.k.a. 'console'): the in-game RENDER via the `jpeg` console command. This is explicit-only " +
+        "because some Workshop sessions crash inside Dota's JPEG renderer.\n" +
         "• method 'window': the dota2 WINDOW via the OS, captured with real screen pixels (CopyFromScreen) so the 3D " +
         "viewport is NOT black; it is focused first by default (focus:false to skip). Works in menus/tools/Panorama too.\n" +
         "• method 'print': offscreen PrintWindow capture (grabs an occluded/background window, but a GPU 3D viewport " +
         "may come back black).\n" +
-        "• method 'auto' (default): tries the in-game render, then falls back to a window capture.",
+        "• method 'auto' (default): safely tries a focused window capture, then an offscreen PrintWindow fallback. " +
+        "It never sends the in-game `jpeg` command.",
       inputSchema: {
         method: z.enum(["auto", "game", "console", "window", "print"]).optional(),
         quality: z.number().int().min(1).max(100).optional().describe("JPEG quality for the in-game render method (default 90)."),
@@ -280,7 +282,7 @@ export function registerDebugTools(server: McpServer) {
       const mode = raw === "game" ? "console" : raw;
 
       // In-game render: send `jpeg`, then read the new file from the screenshots dir.
-      if (mode === "console" || mode === "auto") {
+      if (mode === "console") {
         const vc = getVConsole(vconPort);
         let connected = vc.isConnected();
         if (!connected) {
@@ -288,7 +290,7 @@ export function registerDebugTools(server: McpServer) {
             await vc.connect();
             connected = true;
           } catch {
-            /* fall through to window capture in auto mode */
+            /* handled below */
           }
         }
         if (connected) {
@@ -324,23 +326,24 @@ export function registerDebugTools(server: McpServer) {
             const mimeType = /\.png$/i.test(found) ? "image/png" : "image/jpeg";
             return image(buf.toString("base64"), mimeType, `Screenshot (console): ${fp} (${Math.round(buf.length / 1024)} KB)`);
           }
-          if (mode === "console") {
-            return error(`Sent 'jpeg' but no new screenshot appeared in ${dota.screenshotsDir}. Is a map rendering? Try method 'window'.`);
-          }
-        } else if (mode === "console") {
+          return error(`Sent 'jpeg' but no new screenshot appeared in ${dota.screenshotsDir}. Is a map rendering? Try method 'window'.`);
+        } else {
           return error(VCON_HINT);
         }
       }
 
-      // Window capture (and the auto fallback): grab the dota2 window via the OS.
+      // Safe OS capture. Auto never invokes Dota's crash-prone in-game JPEG path.
       const captureMode = raw === "print" ? "print" : "screen";
-      const res = await captureWindowPng(captureMode, focus !== false);
+      let res = await captureWindowPng(captureMode, focus !== false);
+      if ((!res.buf || !res.buf.length) && raw === "auto") {
+        res = await captureWindowPng("print", false);
+      }
       if (res.buf && res.buf.length) {
-        const label = captureMode === "print" ? "PrintWindow, may be black for 3D" : "real screen pixels";
+        const label = res.mode === "print" ? "PrintWindow, may be black for 3D" : "real screen pixels";
         return image(res.buf.toString("base64"), "image/png", `Screenshot (window: ${label}, ${Math.round(res.buf.length / 1024)} KB)`);
       }
       return error(
-        `Could not capture the dota2 window (${captureMode}). ${res.error ?? ""}`.trim() +
+        `Could not capture the dota2 window (${res.mode}). ${res.error ?? ""}`.trim() +
           " Is dota2.exe running with a visible window?",
       );
     }),

@@ -16,6 +16,7 @@ import { requireDotaPaths, resolveDotaPaths } from "../dota/paths.js";
 import { getVConsole, defaultVconPort, ConsoleLine } from "../dota/vconsole.js";
 import { runWin32Spec, dotaWindowInfo, escapeSendKeys, InputAction, Win32Spec, Button } from "../dota/win32.js";
 import { captureWindowPng } from "../dota/capture.js";
+import { loadSelftestSpec } from "../dota/selftest-spec.js";
 import { restartGame } from "./debug.tools.js";
 import { quoteLua } from "./debugsdk.tools.js";
 import { json, image, error, guard, ToolResult } from "../util/result.js";
@@ -24,6 +25,13 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const ERROR_RE =
   /(script error|stack traceback|attempt to (call|index|perform|concatenate)|assertion failed|lua runtime error|[^A-Za-z]Error:|\.lua:\d+:)/i;
+
+export function gameStateFromPong(text: string): number | undefined {
+  const match = /\bstate=(\d+)\b/.exec(text);
+  if (!match) return undefined;
+  const state = Number(match[1]);
+  return Number.isFinite(state) ? state : undefined;
+}
 
 function fmtWindow(r: { window?: any; client?: any; foreground?: boolean; minimized?: boolean; handle?: string; pid?: number }): string {
   if (!r.window) return "(no window geometry)";
@@ -299,26 +307,88 @@ export function registerControlTools(server: McpServer) {
         "(addon_attach_debug_sdk).",
       inputSchema: {
         projectRoot: z.string().optional(),
+        testFile: z
+          .string()
+          .optional()
+          .describe("Reusable JSON test recipe. Defaults to .dota-workshop/selftest.json when present."),
         map: z.string().optional().describe("Map to (re)launch on when launch:true."),
         launch: z.boolean().optional().describe("Relaunch the game on `map` before testing (default false)."),
+        setupCommands: z
+          .array(z.string())
+          .optional()
+          .describe("Commands to run after setupGameState but before waiting for readyGameState."),
         commands: z.array(z.string()).optional().describe("Console commands to run (e.g. ['mcp_spawn npc_dota_creep_badguys 3'])."),
         asserts: z.array(z.string()).optional().describe("Lua boolean expressions checked via mcp_assert."),
+        setupGameState: z
+          .number()
+          .int()
+          .min(1)
+          .max(9)
+          .optional()
+          .describe("Minimum game state before setupCommands run (default 1; hero selection is 3)."),
+        readyGameState: z
+          .number()
+          .int()
+          .min(1)
+          .max(9)
+          .optional()
+          .describe("Minimum game state required before assertions run (default 1; pregame is 6)."),
+        readyAssert: z
+          .string()
+          .optional()
+          .describe("Optional Lua boolean expression to poll after setup before running the assertion list."),
+        readyTimeoutMs: z
+          .number()
+          .int()
+          .min(1000)
+          .max(180000)
+          .optional()
+          .describe("When launching, wait this long for the DebugSDK to report an in-map state (default 120000)."),
         errorWindowMs: z.number().int().min(0).max(60000).optional().describe("Collect console output this long, then scan for errors (default 3000)."),
         screenshot: z.boolean().optional().describe("Capture a final screenshot (default true)."),
         vconPort: z.number().int().min(1).max(65535).optional(),
       },
     },
-    guard(async ({ projectRoot, map, launch, commands, asserts, errorWindowMs, screenshot, vconPort }): Promise<ToolResult> => {
+    guard(async ({
+      projectRoot,
+      testFile,
+      map,
+      launch,
+      setupCommands,
+      commands,
+      asserts,
+      setupGameState,
+      readyGameState,
+      readyAssert,
+      readyTimeoutMs,
+      errorWindowMs,
+      screenshot,
+      vconPort,
+    }): Promise<ToolResult> => {
       const steps: { step: string; ok: boolean; detail?: string }[] = [];
       const port = vconPort ?? defaultVconPort();
       const project = await resolveProject(projectRoot);
+      const resolvedSpec = await loadSelftestSpec(project.root, testFile);
+      const chosenMap = map ?? resolvedSpec?.spec.map;
+      const chosenSetupCommands = setupCommands ?? resolvedSpec?.spec.setupCommands ?? [];
+      const chosenCommands = commands ?? resolvedSpec?.spec.commands ?? [];
+      const chosenAsserts = asserts ?? resolvedSpec?.spec.asserts ?? [];
+      const chosenSetupState = setupGameState ?? resolvedSpec?.spec.setupGameState ?? 1;
+      const chosenReadyState = readyGameState ?? resolvedSpec?.spec.readyGameState ?? 1;
+      const chosenReadyAssert = readyAssert ?? resolvedSpec?.spec.readyAssert;
+      const chosenReadyTimeout = readyTimeoutMs ?? resolvedSpec?.spec.readyTimeoutMs;
+      const chosenErrorWindow = errorWindowMs ?? resolvedSpec?.spec.errorWindowMs;
+      const chosenScreenshot = screenshot ?? resolvedSpec?.spec.screenshot;
+      if (resolvedSpec) {
+        steps.push({ step: "load test recipe", ok: true, detail: resolvedSpec.path });
+      }
 
       // 1) Launch if requested.
       if (launch) {
-        if (!map) return error("launch:true needs a `map` to relaunch on.");
+        if (!chosenMap) return error("launch:true needs a `map` argument or a map in the self-test recipe.");
         const dota = await requireDotaPaths();
-        const r = await restartGame(dota, project.addonName, map, port, true, true);
-        steps.push({ step: `launch ${map}`, ok: r.reconnected, detail: `pid ${r.pid}, reconnected ${r.reconnected}` });
+        const r = await restartGame(dota, project.addonName, chosenMap, port, true, true);
+        steps.push({ step: `launch ${chosenMap}`, ok: r.reconnected, detail: `pid ${r.pid}, reconnected ${r.reconnected}` });
       }
 
       // 2) Connect.
@@ -331,27 +401,118 @@ export function registerControlTools(server: McpServer) {
         return finish(steps, [], undefined);
       }
 
-      // 3) DebugSDK ping (informational).
+      // 3) DebugSDK/map setup readiness. VConsole opens before the custom map
+      // is ready, and hero-selection commands must not be sent before state 3.
+      const readyDeadline = Date.now() + (launch ? (chosenReadyTimeout ?? 120000) : 3000);
       {
-        const pong = vc.waitForLine((l) => l.text.includes("[MCP] PONG"), 1500);
-        try {
-          vc.send("mcp_ping");
-        } catch {
-          /* ignore */
+        let got: ConsoleLine | undefined;
+        while (!got && Date.now() < readyDeadline) {
+          const remaining = readyDeadline - Date.now();
+          const pong = vc.waitForLine(
+            (l) =>
+              l.text.includes("[MCP] PONG") &&
+              (!launch || (gameStateFromPong(l.text) ?? 0) >= chosenSetupState),
+            Math.min(1500, remaining),
+          );
+          try {
+            vc.send("mcp_ping");
+          } catch {
+            /* reconnect is reported above */
+          }
+          got = await pong;
+          if (!got && Date.now() < readyDeadline) await sleep(250);
         }
-        const got = await pong;
-        steps.push({ step: "DebugSDK ping", ok: !!got, detail: got ? got.text : "no PONG — asserts need the DebugSDK attached" });
+        steps.push({
+          step: launch ? `map setup state >= ${chosenSetupState}` : "DebugSDK ping",
+          ok: !!got,
+          detail: got
+            ? got.text
+            : launch
+              ? `map never reached game state ${chosenSetupState}`
+              : "no PONG — asserts need the DebugSDK attached",
+        });
+        if (launch && !got) return finish(steps, [], undefined);
       }
 
-      // 4) Commands.
-      for (const cmd of commands ?? []) {
+      // 4) Setup commands, such as choosing a hero.
+      for (const cmd of chosenSetupCommands) {
+        const out = await vc.sendAndCapture(cmd, `MCP_SELFTEST_SETUP_${steps.length}`, 2000);
+        const errored = out.some((l) => ERROR_RE.test(l.text));
+        steps.push({
+          step: `setup cmd: ${cmd}`,
+          ok: !errored,
+          detail: out.slice(0, 3).map((l) => l.text).join(" | "),
+        });
+      }
+
+      // 5) Wait for the requested post-setup state. This closes the old gap
+      // where a test could pass during hero selection and miss a spawn crash.
+      if (launch && chosenReadyState > chosenSetupState) {
+        let got: ConsoleLine | undefined;
+        while (!got && Date.now() < readyDeadline) {
+          const remaining = readyDeadline - Date.now();
+          const pong = vc.waitForLine(
+            (l) =>
+              l.text.includes("[MCP] PONG") &&
+              (gameStateFromPong(l.text) ?? 0) >= chosenReadyState,
+            Math.min(1500, remaining),
+          );
+          try {
+            vc.send("mcp_ping");
+          } catch {
+            /* a crash or disconnect becomes a failed readiness step */
+          }
+          got = await pong;
+          if (!got && Date.now() < readyDeadline) await sleep(250);
+        }
+        steps.push({
+          step: `game state >= ${chosenReadyState}`,
+          ok: !!got,
+          detail: got ? got.text : `game never reached state ${chosenReadyState}`,
+        });
+        if (!got) return finish(steps, [], undefined);
+      }
+
+      // Some engine objects (notably the selected hero entity) appear shortly
+      // after the game-state transition. Poll a project-defined Lua condition
+      // so the assertion list starts only when those objects actually exist.
+      if (chosenReadyAssert) {
+        const norm = chosenReadyAssert.replace(/\r?\n/g, " ").replace(/"/g, "'");
+        let passedLine: ConsoleLine | undefined;
+        while (!passedLine && Date.now() < readyDeadline) {
+          const remaining = readyDeadline - Date.now();
+          const want = vc.waitForLine(
+            (line) =>
+              line.text.includes("[MCP] ASSERT") &&
+              line.text.includes(norm.slice(0, 40)),
+            Math.min(4000, remaining),
+          );
+          try {
+            vc.send(`mcp_assert ${quoteLua(chosenReadyAssert)}`);
+          } catch {
+            /* a crash or disconnect is reported as a failed readiness step */
+          }
+          const line = await want;
+          if (line && /\[MCP\] ASSERT PASS/.test(line.text)) passedLine = line;
+          if (!passedLine && Date.now() < readyDeadline) await sleep(250);
+        }
+        steps.push({
+          step: `ready assert: ${chosenReadyAssert}`,
+          ok: !!passedLine,
+          detail: passedLine?.text ?? "condition did not become true before timeout",
+        });
+        if (!passedLine) return finish(steps, [], undefined);
+      }
+
+      // 6) Commands.
+      for (const cmd of chosenCommands) {
         const out = await vc.sendAndCapture(cmd, `MCP_SELFTEST_${steps.length}`, 2000);
         const errored = out.some((l) => ERROR_RE.test(l.text));
         steps.push({ step: `cmd: ${cmd}`, ok: !errored, detail: out.slice(0, 3).map((l) => l.text).join(" | ") });
       }
 
-      // 5) Asserts via mcp_assert.
-      for (const expr of asserts ?? []) {
+      // 7) Asserts via mcp_assert.
+      for (const expr of chosenAsserts) {
         // Send as ONE quoted token (like dota_lua_eval) so multi-token/quoted/multiline
         // asserts survive the console; match on the same normalized form the SDK echoes.
         const norm = expr.replace(/\r?\n/g, " ").replace(/"/g, "'");
@@ -366,19 +527,24 @@ export function registerControlTools(server: McpServer) {
         steps.push({ step: `assert: ${expr}`, ok: pass, detail: line?.text ?? "no response from DebugSDK" });
       }
 
-      // 6) Error watch.
+      // 8) Error watch.
       vc.clearRing();
-      const win = errorWindowMs ?? 3000;
+      const win = chosenErrorWindow ?? 3000;
       if (win > 0) await sleep(win);
       const errors = vc.recent(1000).filter((l) => ERROR_RE.test(l.text)).map((l) => l.text);
       steps.push({ step: `error watch (${win}ms)`, ok: errors.length === 0, detail: errors.length ? `${errors.length} error line(s)` : "clean" });
 
-      // 7) Screenshot.
+      // 9) Screenshot.
       let shot: { buf: Buffer } | undefined;
-      if (screenshot !== false) {
-        const cap = await captureWindowPng("screen", true);
+      if (chosenScreenshot !== false) {
+        let cap = await captureWindowPng("screen", true);
+        if (!cap.buf) cap = await captureWindowPng("print", false);
         if (cap.buf) shot = { buf: cap.buf };
-        steps.push({ step: "screenshot", ok: !!cap.buf, detail: cap.buf ? `${Math.round(cap.buf.length / 1024)} KB` : cap.error });
+        steps.push({
+          step: "screenshot",
+          ok: !!cap.buf,
+          detail: cap.buf ? `${Math.round(cap.buf.length / 1024)} KB (${cap.mode})` : cap.error,
+        });
       }
 
       return finish(steps, errors, shot);

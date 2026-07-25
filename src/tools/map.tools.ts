@@ -22,6 +22,10 @@ import { loadMapContract, managedEntitiesForContract } from "../dota/map-contrac
 import { inspectMapText } from "../dota/map-inspect.js";
 import { reconcileMapTerrain } from "../dota/map-terrain.js";
 import { inspectMapArtifactFreshness } from "../dota/map-freshness.js";
+import {
+  validateDotaBuildingEntities,
+  validateDotaNeutralSpawners,
+} from "../dota/map-semantics.js";
 import { pathExists } from "../util/fsx.js";
 import { json, text, error, guard, ToolResult } from "../util/result.js";
 
@@ -621,6 +625,8 @@ export function registerMapTools(server: McpServer) {
       if (source) {
         const mapText = await vmapToText(dota.dmxconvertExe, p.contentVmap);
         entities = parseMapEntities(mapText);
+        findings.push(...validateDotaBuildingEntities(entities));
+        findings.push(...validateDotaNeutralSpawners(entities));
         for (const selector of resolvedContract?.contract.managedAbsentEntities ?? []) {
           const matches = entities.filter((entity) => matchesAbsentSelector(entity, selector));
           if (matches.length) {

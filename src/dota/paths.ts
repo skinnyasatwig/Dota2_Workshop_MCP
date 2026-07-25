@@ -16,6 +16,7 @@ const execFileAsync = promisify(execFile);
 
 export interface DotaPaths {
   root: string;
+  steamExe: string;
   binWin64: string;
   dota2Exe: string;
   resourceCompilerExe: string;
@@ -34,10 +35,11 @@ export interface DotaPaths {
 
 const DEFAULT_ROOT = "C:\\Program Files (x86)\\Steam\\steamapps\\common\\dota 2 beta";
 
-function derive(root: string, source: string): DotaPaths {
+function derive(root: string, source: string, steamRoot?: string): DotaPaths {
   const binWin64 = join(root, "game", "bin", "win64");
   return {
     root,
+    steamExe: steamRoot ? join(steamRoot, "steam.exe") : join(root, "..", "..", "..", "steam.exe"),
     binWin64,
     dota2Exe: join(binWin64, "dota2.exe"),
     resourceCompilerExe: join(binWin64, "resourcecompiler.exe"),
@@ -108,9 +110,10 @@ let cached: DotaPaths | undefined;
 export async function resolveDotaPaths(force = false): Promise<DotaPaths | undefined> {
   if (cached && !force) return cached;
 
+  const steam = await findSteamRoot();
   const tryRoot = async (root: string | undefined, source: string): Promise<DotaPaths | undefined> => {
     if (!root) return undefined;
-    const p = derive(root, source);
+    const p = derive(root, source, steam);
     if (await pathExists(p.dota2Exe)) return p;
     return undefined;
   };
@@ -121,7 +124,6 @@ export async function resolveDotaPaths(force = false): Promise<DotaPaths | undef
     undefined;
 
   if (!result) {
-    const steam = await findSteamRoot();
     if (steam) {
       const viaLib = await findDotaViaLibraryFolders(steam);
       result =

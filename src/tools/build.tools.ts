@@ -3,9 +3,9 @@ import { z } from "zod";
 import { join } from "node:path";
 import { resolveProject } from "../config.js";
 import { requireDotaPaths } from "../dota/paths.js";
-import { run, spawnDetached, npmCommand } from "../dota/process.js";
+import { run, spawnDetached, npmCommand, formatCommand } from "../dota/process.js";
 import { AddonProject } from "../dota/project.js";
-import { buildLaunchArgs } from "../dota/launch.js";
+import { buildDotaLaunchTarget, buildLaunchArgs } from "../dota/launch.js";
 import { defaultVconPort } from "../dota/vconsole.js";
 import { pathExists } from "../util/fsx.js";
 import { createProjectLink, inspectProjectLink } from "../dota/project-link.js";
@@ -112,10 +112,14 @@ export function registerBuildTools(server: McpServer) {
         dev: true,
         vconPort: vconPort ?? defaultVconPort(),
       });
-      const cmd = `"${dota.dota2Exe}" ${args.join(" ")}`;
+      const target = buildDotaLaunchTarget(dota.root, dota.dota2Exe, args, { steamExe: dota.steamExe });
+      const cmd = formatCommand(target.executable, target.args);
       if (dryRun) return text(`[dry run]\n${cmd}`);
-      const { pid } = spawnDetached(dota.dota2Exe, args, dota.binWin64);
-      return json({ command: cmd, pid, addon: name }, `Launched Workshop Tools (pid ${pid}):\n${cmd}`);
+      const { pid } = spawnDetached(target.executable, target.args, target.cwd);
+      return json(
+        { command: cmd, pid, addon: name, launchMethod: target.method },
+        `Launched Workshop Tools via ${target.method} (pid ${pid}):\n${cmd}`,
+      );
     }),
   );
 
@@ -146,10 +150,14 @@ export function registerBuildTools(server: McpServer) {
         cheats: cheats !== false,
         vconPort: vconPort ?? defaultVconPort(),
       });
-      const cmd = `"${dota.dota2Exe}" ${args.join(" ")}`;
+      const target = buildDotaLaunchTarget(dota.root, dota.dota2Exe, args, { steamExe: dota.steamExe });
+      const cmd = formatCommand(target.executable, target.args);
       if (dryRun) return text(`[dry run]\n${cmd}`);
-      const { pid } = spawnDetached(dota.dota2Exe, args, dota.binWin64);
-      return json({ command: cmd, pid, addon: name, map }, `Launching custom game "${name}" on "${map}" (pid ${pid}):\n${cmd}`);
+      const { pid } = spawnDetached(target.executable, target.args, target.cwd);
+      return json(
+        { command: cmd, pid, addon: name, map, launchMethod: target.method },
+        `Launching custom game "${name}" on "${map}" via ${target.method} (pid ${pid}):\n${cmd}`,
+      );
     }),
   );
 

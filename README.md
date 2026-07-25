@@ -118,7 +118,7 @@ Use [`examples/cursor.mcp.json`](examples/cursor.mcp.json) at `.cursor/mcp.json`
    `npc_abilities_custom.txt` block, and localization tokens.
 3. `lua_api_search` / `lua_api_get` — look up the exact VScript signatures while writing the logic.
 4. `addon_build` — compile TypeScript → Lua (`npm run build`).
-5. `addon_launch_custom_game` `{ map: "..." }` — boot tools mode and start the map.
+5. `addon_launch_custom_game` `{ map: "..." }` — boot tools mode through Steam and start the map.
 
 All build/launch tools accept `dryRun: true` to preview the exact command without running it.
 
@@ -138,9 +138,9 @@ The launch tools already pass `-tools` (and `-vconport`), so the channel is avai
 - **`dota_reload_scripts`** — compile + `script_reload` (hot-reload Lua without relaunch).
 - **`dota_restart_game`** — `taskkill` + relaunch + reconnect (for changes that can't hot-reload).
 - **`dota_dev_cycle`** — one call: build, then pick the cheapest apply path (with `autoRestart` if a reload errors).
-- **`dota_screenshot`** — two variants: **`game`** = the in-game render via the `jpeg` console command (the true
-  rendered frame); **`window`** = the dota2 window captured with **real screen pixels** (so the 3D viewport is *not*
-  black — unlike `PrintWindow`), focusing the window first. (`print` = offscreen PrintWindow for occluded windows.)
+- **`dota_screenshot`** — default **`auto`** safely captures the focused Dota window, then tries offscreen
+  `PrintWindow` if Windows refuses focus. It will not capture another foreground application. **`game`** explicitly
+  invokes Dota's `jpeg` command, but is not used automatically because that engine path can crash some Workshop sessions.
 - **`dota_watch_errors`** — scan the live console for Lua/engine errors (script error, stack traceback, *.lua:NN, …).
 - **`dota_wait_for`** — block until a console line matches (optionally after sending a command) — for sequencing tests.
 
@@ -181,8 +181,10 @@ self-testing (no pixel guessing).
   bootstrap (TS *or* Lua). Idempotent; `addon_detach_debug_sdk` reverses it. Then `addon_build` (tstl) + `dota_restart_game`.
 - **`dota_lua_eval`** — run a Lua snippet on the live server and get the JSON result (`mcp_eval`).
 - **`dota_debug_dump`** — dump game state as JSON: `state` (time/phase/players), `heroes`, `units` (`mcp_dump`).
-- **`dota_selftest`** — one orchestrated smoke run: optionally launch a map, ping the SDK, run `commands`, check
-  `asserts` (Lua booleans → PASS/FAIL via `mcp_assert`), watch for errors, and screenshot — returns a single pass/fail report.
+- **`dota_selftest`** — one orchestrated smoke run: optionally launch a map, wait until the SDK reports that the map
+  is genuinely loaded, run `commands`, check `asserts` (Lua booleans → PASS/FAIL via `mcp_assert`), watch for errors,
+  and safely screenshot — returns a single pass/fail report. A project can save these settings in
+  `.dota-workshop/selftest.json`; explicit tool arguments override the recipe.
 
 The SDK also exposes `mcp_spawn`, `mcp_gold`, `mcp_level`, `mcp_item`, `mcp_event` (fire a custom UI event), `mcp_hud`
 (clean screenshots) and `mcp_pause` — all callable via `dota_send_console_command` too.
