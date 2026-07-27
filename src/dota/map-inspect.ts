@@ -11,6 +11,7 @@ export interface MapInspectOptions {
   checkPathability?: boolean;
   pathSampleSpacing?: number;
   maxTerrainStep?: number;
+  maxCellHeightSpan?: number;
   limit?: number;
 }
 
@@ -64,6 +65,8 @@ export interface TerrainInspection {
   };
   minHeight: number;
   maxHeight: number;
+  maxCellHeightSpan: number;
+  abruptCellCount: number;
   waterVertexCount: number;
   tilesets: Record<string, number>;
 }
@@ -84,7 +87,8 @@ export interface MapInspection {
       | "entity-out-of-bounds"
       | "path-out-of-bounds"
       | "path-crosses-water"
-      | "path-steep-terrain";
+      | "path-steep-terrain"
+      | "terrain-abrupt-cell";
     targetname: string;
     detail: string;
   }[];
@@ -266,13 +270,28 @@ function inspectRouteTerrain(
   };
 }
 
-function terrainInspection(text: string): TerrainInspection | undefined {
+function terrainInspection(text: string, maxAllowedCellHeightSpan: number): TerrainInspection | undefined {
   try {
     const terrain = parseTileGrid(text);
     const tilesets: Record<string, number> = {};
     for (const tileset of terrain.tileset) {
       const key = String(tileset);
       tilesets[key] = (tilesets[key] ?? 0) + 1;
+    }
+    let maxCellHeightSpan = 0;
+    let abruptCellCount = 0;
+    for (let y = 0; y < terrain.height; y++) {
+      for (let x = 0; x < terrain.width; x++) {
+        const corners = [
+          terrain.heights[vIndex(terrain, x, y)],
+          terrain.heights[vIndex(terrain, x + 1, y)],
+          terrain.heights[vIndex(terrain, x, y + 1)],
+          terrain.heights[vIndex(terrain, x + 1, y + 1)],
+        ];
+        const span = Math.max(...corners) - Math.min(...corners);
+        maxCellHeightSpan = Math.max(maxCellHeightSpan, span);
+        if (span > maxAllowedCellHeightSpan) abruptCellCount++;
+      }
     }
     return {
       width: terrain.width,
@@ -288,6 +307,8 @@ function terrainInspection(text: string): TerrainInspection | undefined {
       },
       minHeight: terrain.heights.length ? Math.min(...terrain.heights) : 0,
       maxHeight: terrain.heights.length ? Math.max(...terrain.heights) : 0,
+      maxCellHeightSpan,
+      abruptCellCount,
       waterVertexCount: terrain.water.filter(Boolean).length,
       tilesets,
     };
@@ -311,7 +332,8 @@ export function inspectMapText(text: string, options: MapInspectOptions = {}): M
   });
   const limit = Math.max(1, Math.min(1000, options.limit ?? 200));
   const selected = matching.slice(0, limit);
-  const terrain = terrainInspection(text);
+  const maxAllowedCellHeightSpan = Math.max(0, options.maxCellHeightSpan ?? 1);
+  const terrain = terrainInspection(text, maxAllowedCellHeightSpan);
   let tileGrid: TileGrid | undefined;
   if (terrain && options.checkPathability !== false) {
     try {
@@ -361,6 +383,15 @@ export function inspectMapText(text: string, options: MapInspectOptions = {}): M
     if (options.includePathNodes !== true) path.nodes = undefined;
   }
   if (terrain) {
+    if (terrain.abruptCellCount > 0) {
+      findings.push({
+        code: "terrain-abrupt-cell",
+        targetname: "tile_grid",
+        detail:
+          `${terrain.abruptCellCount} terrain cell(s) span more than ` +
+          `${maxAllowedCellHeightSpan} height level(s); maximum span is ${terrain.maxCellHeightSpan}.`,
+      });
+    }
     const [minX, minY] = terrain.worldBounds.min;
     const [maxX, maxY] = terrain.worldBounds.max;
     for (const entity of all) {

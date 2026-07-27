@@ -161,6 +161,11 @@ export function registerMapTools(server: McpServer) {
           .min(0)
           .optional()
           .describe("Maximum allowed terrain height-level change between route samples (default 1)."),
+        maxCellHeightSpan: z
+          .number()
+          .min(0)
+          .optional()
+          .describe("Maximum allowed height-level span across one terrain tile (default 1)."),
         limit: z.number().int().min(1).max(1000).optional().describe("Maximum returned entities (default 200)."),
       },
     },
@@ -177,6 +182,7 @@ export function registerMapTools(server: McpServer) {
         checkPathability,
         pathSampleSpacing,
         maxTerrainStep,
+        maxCellHeightSpan,
         limit,
       }): Promise<ToolResult> => {
         const dota = await requireDotaPaths();
@@ -193,6 +199,7 @@ export function registerMapTools(server: McpServer) {
           checkPathability,
           pathSampleSpacing,
           maxTerrainStep,
+          maxCellHeightSpan,
           limit,
         });
         const classSummary = Object.entries(report.classCounts)
@@ -627,6 +634,23 @@ export function registerMapTools(server: McpServer) {
         entities = parseMapEntities(mapText);
         findings.push(...validateDotaBuildingEntities(entities));
         findings.push(...validateDotaNeutralSpawners(entities));
+        const geometryReport = inspectMapText(mapText, {
+          namedOnly: false,
+          includePathNodes: false,
+          checkPathability: true,
+          pathSampleSpacing: 128,
+          maxTerrainStep: 1,
+          maxCellHeightSpan: 1,
+          limit: 1,
+        });
+        for (const finding of geometryReport.findings) {
+          if (finding.code === "broken-path-target") continue;
+          findings.push({
+            severity: "error",
+            code: finding.code,
+            message: `${finding.targetname}: ${finding.detail}`,
+          });
+        }
         for (const selector of resolvedContract?.contract.managedAbsentEntities ?? []) {
           const matches = entities.filter((entity) => matchesAbsentSelector(entity, selector));
           if (matches.length) {

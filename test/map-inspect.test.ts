@@ -62,6 +62,8 @@ test("inspectMapText summarizes terrain, classes, paths, and findings", () => {
     worldBounds: { min: [-256, -256], max: [256, 256] },
     minHeight: 0,
     maxHeight: 1,
+    maxCellHeightSpan: 1,
+    abruptCellCount: 0,
     waterVertexCount: 1,
     tilesets: { "0": 2, "1": 2 },
   });
@@ -118,6 +120,21 @@ test("inspectMapText flags abrupt sampled terrain changes", () => {
   assert.ok(
     report.findings.some(
       (finding) => finding.code === "path-steep-terrain" && finding.targetname === "route_1",
+    ),
+  );
+});
+
+test("inspectMapText flags terrain cells that skip height levels", () => {
+  const text = fixture().replace(
+    '"verticesHeight" "int_array" [ "0", "0", "1"',
+    '"verticesHeight" "int_array" [ "0", "0", "3"',
+  );
+  const report = inspectMapText(text);
+  assert.equal(report.terrain?.maxCellHeightSpan, 3);
+  assert.ok((report.terrain?.abruptCellCount ?? 0) > 0);
+  assert.ok(
+    report.findings.some(
+      (finding) => finding.code === "terrain-abrupt-cell" && finding.targetname === "tile_grid",
     ),
   );
 });
