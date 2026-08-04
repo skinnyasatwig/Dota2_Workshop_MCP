@@ -36,6 +36,10 @@ import {
   RECIPE_VERIFICATION_BASELINE,
   verifyInstalledRecipeVersion,
 } from "../dota/recipe-version.js";
+import {
+  buildRecipeRefreshReport,
+  RECIPE_REFRESH_EVIDENCE_IDS,
+} from "../dota/recipe-refresh.js";
 import { writeTextFile, pathExists } from "../util/fsx.js";
 import { json, text, image, error, guard, ToolResult } from "../util/result.js";
 
@@ -360,6 +364,39 @@ export function registerMapGenTools(server: McpServer) {
           `${!category || category === "volume" ? Object.keys(MAP_VOLUME_RECIPES).length : 0} checked volume recipes. ` +
           `Baseline Dota build ${RECIPE_VERIFICATION_BASELINE.appBuildId}` +
           `${recipeVerification ? `; installed recipe status: ${recipeVerification.status}` : ""}.`,
+      );
+    }),
+  );
+
+  server.registerTool(
+    "map_recipe_refresh_report",
+    {
+      title: "Plan a safe Valve recipe baseline refresh",
+      description:
+        "Read-only maintenance report for Valve/Workshop Tools updates. It compares authoritative files and metadata, " +
+        "identifies affected recipe families, prepares a candidate fingerprint, and gates manual recording on explicit " +
+        "build/test/compiler/acceptance evidence. It never edits or automatically blesses the trusted baseline.",
+      inputSchema: {
+        evidence: z.array(z.object({
+          id: z.enum(RECIPE_REFRESH_EVIDENCE_IDS),
+          status: z.enum(["passed", "failed", "skipped"]),
+          command: z.string().optional(),
+          detail: z.string().optional(),
+          observedAt: z.string().optional(),
+        }).strict()).optional().describe("Optional results from the guided checks; omitted checks remain pending."),
+      },
+    },
+    guard(async ({ evidence }): Promise<ToolResult> => {
+      const dota = await requireDotaPaths();
+      const verification = await verifyInstalledRecipeVersion(dota);
+      const report = buildRecipeRefreshReport(verification, evidence);
+      const pending = report.checks.filter((check) => check.required && check.status !== "passed").length;
+      return json(
+        report as unknown as Record<string, unknown>,
+        report.disposition === "no-refresh-needed"
+          ? `Recipe baseline remains trustworthy (${verification.status}); no refresh should be recorded.`
+          : `Recipe refresh status: ${report.disposition}. ${report.changedFamilies.length} affected family/families; ` +
+            `${pending} required check(s) are not passing. Automatic baseline recording is disabled.`,
       );
     }),
   );

@@ -70,7 +70,7 @@ async function main() {
     "lua_api_get", "scaffold_ability", "scaffold_modifier", "addon_build", "addon_launch_tools",
     "dota_send_console_command", "dota_read_console_log", "dota_reload_scripts",
     "dota_restart_game", "dota_dev_cycle", "dota_screenshot", "dota_watch_errors",
-    "docs_search", "docs_get", "docs_list", "dota_patterns", "panorama_api_search", "panorama_api_get", "tools_catalog", "map_recipe_catalog",
+    "docs_search", "docs_get", "docs_list", "dota_patterns", "panorama_api_search", "panorama_api_get", "tools_catalog", "map_recipe_catalog", "map_recipe_refresh_report",
     "map_create", "map_add_entity", "map_to_text", "map_from_text", "map_compile", "map_list",
     "map_engine_nav_test",
     "kv3_read", "soundevents_list", "soundevents_get", "soundevents_upsert",
@@ -207,6 +207,12 @@ async function main() {
   check("tools_catalog official lists VConsole/Hammer", /VConsole|Hammer/.test(textOf(cat)));
   const mapRecipes = await client.callTool({ name: "map_recipe_catalog", arguments: { verifyInstalled: true } });
   check("map_recipe_catalog reports its verified Dota baseline", /Baseline Dota build/.test(textOf(mapRecipes)));
+  const recipeRefresh = await client.callTool({ name: "map_recipe_refresh_report", arguments: {} });
+  check(
+    "map_recipe_refresh_report is read-only and refuses unnecessary baseline churn",
+    !recipeRefresh.isError && /no refresh should be recorded|Automatic baseline recording is disabled/.test(textOf(recipeRefresh)),
+    textOf(recipeRefresh),
+  );
 
   // 10b) design patterns knowledge base
   const patAll = await client.callTool({ name: "dota_patterns", arguments: {} });

@@ -7,6 +7,10 @@ import {
   RecipeBuildFingerprint,
   RecipeVerificationBaseline,
 } from "../src/dota/recipe-version.js";
+import {
+  buildRecipeRefreshReport,
+  RecipeRefreshEvidence,
+} from "../src/dota/recipe-refresh.js";
 
 const baseline: RecipeVerificationBaseline = {
   verifiedAt: "2026-08-04",
@@ -76,4 +80,73 @@ test("missing install metadata is reported without pretending verification", () 
   const report = compareRecipeBuildFingerprint(installed({ appBuildId: undefined }), baseline);
   assert.equal(report.status, "incomplete");
   assert.equal(report.findings[0]?.code, "metadata-missing");
+});
+
+test("refresh reports do not replace a compatible baseline", () => {
+  const verification = compareRecipeBuildFingerprint(
+    installed({ appBuildId: "101", sourceRevision: "501" }),
+    baseline,
+  );
+  const report = buildRecipeRefreshReport(verification, [], "2026-08-05");
+  assert.equal(report.disposition, "no-refresh-needed");
+  assert.equal(report.candidateBaseline, null);
+  assert.equal(report.recording.allowed, false);
+  assert.ok(report.checks.every((check) => check.status === "not-required"));
+});
+
+test("changed recipe files produce a candidate but require all evidence", () => {
+  const verification = compareRecipeBuildFingerprint(installed({
+    appBuildId: "101",
+    clientVersion: "11",
+    serverVersion: "11",
+    sourceRevision: "501",
+    versionDate: "Aug 05 2026",
+    versionTime: "14:00:00",
+    sourceHashes: { "content/dota/maps/tilesets/test.vmap": "DEF456" },
+  }), baseline);
+  const report = buildRecipeRefreshReport(verification, [], "2026-08-05");
+  assert.equal(report.disposition, "reverification-required");
+  assert.deepEqual(report.changedFamilies, ["terrain"]);
+  assert.equal(report.candidateBaseline?.sources[0]?.sha256, "DEF456");
+  assert.equal(report.recording.allowed, false);
+  assert.equal(report.checks.filter((check) => check.status === "pending").length, 5);
+});
+
+test("only complete passing evidence makes a changed baseline ready for manual recording", () => {
+  const verification = compareRecipeBuildFingerprint(installed({
+    toolsDepotManifest: "9001",
+    sourceHashes: { "content/dota/maps/tilesets/test.vmap": "DEF456" },
+  }), baseline);
+  const evidence: RecipeRefreshEvidence[] = [
+    { id: "typescript-build", status: "passed" },
+    { id: "unit-tests", status: "passed" },
+    { id: "mcp-smoke", status: "passed" },
+    { id: "compiler-fixture", status: "passed" },
+    { id: "acceptance-map", status: "passed", detail: "Known-good 3v3 map compiled and reviewed." },
+  ];
+  const report = buildRecipeRefreshReport(verification, evidence, "2026-08-05");
+  assert.equal(report.disposition, "ready-for-manual-recording");
+  assert.deepEqual(report.changedFamilies, ["compiler", "entity", "terrain", "volume"]);
+  assert.equal(report.recording.allowed, true);
+  assert.equal(report.recording.automatic, false);
+  assert.deepEqual(report.recording.blockers, []);
+});
+
+test("missing metadata prevents a refresh candidate even with passing evidence", () => {
+  const verification = compareRecipeBuildFingerprint(installed({
+    appBuildId: undefined,
+    toolsDepotManifest: "9001",
+  }), baseline);
+  const evidence = [
+    { id: "typescript-build", status: "passed" },
+    { id: "unit-tests", status: "passed" },
+    { id: "mcp-smoke", status: "passed" },
+    { id: "compiler-fixture", status: "passed" },
+    { id: "acceptance-map", status: "passed" },
+  ] as const;
+  const report = buildRecipeRefreshReport(verification, evidence, "2026-08-05");
+  assert.equal(report.disposition, "reverification-required");
+  assert.equal(report.candidateBaseline, null);
+  assert.equal(report.recording.allowed, false);
+  assert.match(report.recording.blockers.join(" "), /metadata/i);
 });
