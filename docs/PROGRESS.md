@@ -4,21 +4,26 @@ Last updated: 2026-08-04
 
 ## Verified milestones
 
-1. `1110197` — unified map tools around one validated specification.
-2. `5bb15e6` — added dry-run reports, transactions, backups, and rollback.
-3. `3c48eff` — added diagnostic previews and offline whole-map reachability.
-4. `e348177` — added reusable components, checked Dota structures, Valve terrain/prefab recipes, and official FGD validation.
-5. `bdec2f0` — added guarded one-launch GridNav testing and automatic shutdown.
-6. `b877b03` — added a bounded Steam-to-direct launch fallback when Steam ignores `-applaunch`.
-7. Working tree — added and live-tested a dedicated one-launch readiness probe with state timeline,
+1. `1110197` - unified map tools around one validated specification.
+2. `5bb15e6` - added dry-run reports, transactions, backups, and rollback.
+3. `3c48eff` - added diagnostic previews and offline whole-map reachability.
+4. `e348177` - added reusable components, checked Dota structures, Valve terrain/prefab recipes, and official FGD validation.
+5. `bdec2f0` - added guarded one-launch GridNav testing and automatic shutdown.
+6. `b877b03` - added a bounded Steam-to-direct launch fallback when Steam ignores `-applaunch`.
+7. `4c50e6a` - added and live-tested a dedicated one-launch readiness probe with state timeline,
    console filtering, early fatal/modal detection, dialog/process diagnosis, screenshot capture, checked
    DX11/Vulkan overrides, and mandatory shutdown.
+8. `3250aa7` - added Valve-derived rectangular solid-volume authoring for camp bounds, checked triggers,
+   no-ward zones, boss-attack areas, and player blockers; integrated volumes into the unified specification,
+   mirroring, dry-run/sync reporting, validation, preview, reachability, reusable camps, and the recipe catalog.
 
 ## Current verification record
 
 - TypeScript build passes.
-- 172 unit and integration tests pass.
+- 179 unit and integration tests pass.
 - MCP smoke suite: 193 passed, 0 failed, 1 skipped because the remote Steam Workshop search service was unavailable.
+- Valve's installed `dmxconvert.exe` successfully round-trips generated camp, no-ward, and player-clip volumes
+  from text to binary VMAP and back during the integration suite.
 - Real Dota 3v3 contract: 86 managed entities, 4 managed paths, 97 terrain operations, and zero desired-state drift.
 - Offline 3v3 terrain: zero holes; only two known isolated regions (a tiny shelf and a deliberate off-map strip).
 - Official entity definitions: all 157 map entities recognized; zero invalid known property values.
