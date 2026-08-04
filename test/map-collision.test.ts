@@ -188,6 +188,39 @@ test("pitched and rolled PHYS bounds project all eight corners conservatively", 
   assert.match(obstacles[3].reason, /malformed or degenerate transform/);
 });
 
+test("exact PHYS hull vertices replace the enclosing bounds projection", async () => {
+  const prop = entity("prop_static", "exact_hull", {
+    solid: "6",
+    model: "models/props/exact.vmdl",
+  });
+  prop.origin = "0 0 0";
+  const [obstacle] = await resolveMapCollisionObstacles(
+    [prop],
+    "test.vpk",
+    async (_vpk, model) => ({
+      model,
+      status: "physical-bounds",
+      bounds: [{
+        min: [-10, -10, 0],
+        max: [10, 10, 20],
+        vertices: [[-10, -10, 0], [10, -10, 0], [0, 10, 0], [0, 0, 20]],
+      }],
+      source: "vrf-phys",
+      fromCache: false,
+      detail: "exact PHYS hull",
+    }),
+  );
+
+  assert.equal(obstacle.physicalFootprints?.[0].projection, "exact-hull");
+  assert.deepEqual(obstacle.physicalFootprints?.[0].points, [
+    [-10, -10],
+    [10, -10],
+    [0, 10],
+  ]);
+  assert.equal(physicalObstacleContainsPoint(obstacle, [0, 0], 10), true);
+  assert.equal(physicalObstacleContainsPoint(obstacle, [8, 8], 10), false);
+});
+
 test("loose compiled addon models take precedence over the base VPK", async () => {
   const root = await mkdtemp(join(tmpdir(), "d2-addon-model-"));
   const compiled = join(root, "models", "props", "test.vmdl_c");

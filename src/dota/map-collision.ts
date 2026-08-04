@@ -16,11 +16,12 @@ export type MapCollisionConfidence =
   | "unknown-model-bounds";
 
 export interface MapCollisionFootprint {
-  /** Conservative convex XY projection derived from one physical hull's local bounds. */
+  /** Convex XY projection of exact hull vertices when available, otherwise its conservative bounds. */
   points: [number, number][];
   minZ: number;
   maxZ: number;
   localBounds: ModelPhysicsBounds;
+  projection: "exact-hull" | "bounds";
 }
 
 export interface MapCollisionObstacle {
@@ -255,12 +256,22 @@ function transformedFootprints(
     const xs = [localBounds.min[0] * scales[0], localBounds.max[0] * scales[0]];
     const ys = [localBounds.min[1] * scales[1], localBounds.max[1] * scales[1]];
     const zs = [localBounds.min[2] * scales[2], localBounds.max[2] * scales[2]];
-    const transformed: [number, number, number][] = [];
-    for (const x of xs) {
-      for (const y of ys) {
-        for (const z of zs) transformed.push(transformSourcePoint(matrix, [x, y, z], origin));
+    const localPoints: [number, number, number][] = localBounds.vertices?.length
+      ? localBounds.vertices.map((vertex) => [
+          vertex[0] * scales[0],
+          vertex[1] * scales[1],
+          vertex[2] * scales[2],
+        ])
+      : [];
+    if (!localPoints.length) {
+      for (const x of xs) {
+        for (const y of ys) {
+          for (const z of zs) localPoints.push([x, y, z]);
+        }
       }
     }
+    const transformed: [number, number, number][] = [];
+    for (const point of localPoints) transformed.push(transformSourcePoint(matrix, point, origin));
     if (transformed.some((point) => point.some((coordinate) => !Number.isFinite(coordinate)))) {
       return undefined;
     }
@@ -271,6 +282,7 @@ function transformedFootprints(
       minZ: Math.min(...transformed.map((point) => point[2])),
       maxZ: Math.max(...transformed.map((point) => point[2])),
       localBounds,
+      projection: localBounds.vertices?.length ? "exact-hull" : "bounds",
     };
   });
   if (footprints.some((footprint) => footprint === undefined)) return undefined;

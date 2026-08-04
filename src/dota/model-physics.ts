@@ -14,6 +14,8 @@ export type Vector3 = [number, number, number];
 export interface ModelPhysicsBounds {
   min: Vector3;
   max: Vector3;
+  /** Exact local-space vertices when VRF exposes a decoded convex RnHull_t. */
+  vertices?: Vector3[];
 }
 
 export interface ModelPhysicsInspection {
@@ -34,11 +36,11 @@ interface CachedInspection {
 }
 
 interface PhysicsCacheFile {
-  version: 1;
+  version: 2;
   entries: Record<string, CachedInspection>;
 }
 
-const cacheFile = join(vrfDir(), "model-physics-cache-v1.json");
+const cacheFile = join(vrfDir(), "model-physics-cache-v2.json");
 let cache: PhysicsCacheFile | undefined;
 let cacheWrite = Promise.resolve();
 const pending = new Map<string, Promise<ModelPhysicsInspection>>();
@@ -49,19 +51,106 @@ function vector(text: string): Vector3 | undefined {
   return values as Vector3;
 }
 
-/** Parse only bounds nested in a decompiled PHYS block. */
+function assignedObjectBlocks(text: string, property: string): string[] {
+  const blocks: string[] = [];
+  const assignment = new RegExp(`\\b${property}\\s*=\\s*\\{`, "g");
+  for (const match of text.matchAll(assignment)) {
+    const open = text.indexOf("{", match.index!);
+    let depth = 0;
+    let quoted = false;
+    let escaped = false;
+    for (let index = open; index < text.length; index++) {
+      const character = text[index];
+      if (quoted) {
+        if (escaped) escaped = false;
+        else if (character === "\\") escaped = true;
+        else if (character === '"') quoted = false;
+        continue;
+      }
+      if (character === '"') quoted = true;
+      else if (character === "{") depth++;
+      else if (character === "}" && --depth === 0) {
+        blocks.push(text.slice(open, index + 1));
+        break;
+      }
+    }
+  }
+  return blocks;
+}
+
+function parseBounds(block: string): ModelPhysicsBounds | undefined {
+  const match = /m_vMinBounds\s*=\s*\[\s*([^\]]+)\][\s\S]*?m_vMaxBounds\s*=\s*\[\s*([^\]]+)\]/.exec(block);
+  const min = match && vector(match[1]);
+  const max = match && vector(match[2]);
+  if (!min || !max || min.some((value, index) => value > max[index])) return undefined;
+  return { min, max };
+}
+
+function parseFloat3Blob(block: string, property: string): Vector3[] | undefined {
+  const match = new RegExp(`\\b${property}\\s*=\\s*#\\[([\\s\\S]*?)\\]`).exec(block);
+  if (!match) return undefined;
+  const bytes = match[1].match(/\b[0-9A-Fa-f]{2}\b/g) ?? [];
+  if (bytes.length < 36 || bytes.length % 12 !== 0 || bytes.length / 12 > 255) return undefined;
+  const binary = Buffer.from(bytes.join(""), "hex");
+  const vertices: Vector3[] = [];
+  for (let offset = 0; offset < binary.length; offset += 12) {
+    const vertex: Vector3 = [
+      binary.readFloatLE(offset),
+      binary.readFloatLE(offset + 4),
+      binary.readFloatLE(offset + 8),
+    ];
+    if (vertex.some((coordinate) => !Number.isFinite(coordinate))) return undefined;
+    vertices.push(vertex);
+  }
+  return vertices;
+}
+
+function parseHullVertices(block: string): Vector3[] | undefined {
+  // Newer resources keep byte-sized vertex indices in m_Vertices and float positions in
+  // m_VertexPositions. Older resources store the float positions directly in m_Vertices.
+  return parseFloat3Blob(block, "m_VertexPositions") ?? parseFloat3Blob(block, "m_Vertices");
+}
+
+function verticesFitBounds(vertices: readonly Vector3[], bounds: ModelPhysicsBounds): boolean {
+  return vertices.every((vertex) => vertex.every((coordinate, axis) => {
+    const tolerance = Math.max(1e-3, Math.abs(bounds.max[axis] - bounds.min[axis]) * 1e-4);
+    return coordinate >= bounds.min[axis] - tolerance && coordinate <= bounds.max[axis] + tolerance;
+  }));
+}
+
+/** Parse bounds and, when safely available, exact convex-hull vertices from a PHYS block. */
 export function parseVrfPhysicsBounds(text: string): ModelPhysicsBounds[] {
   const marker = text.indexOf('--- Data for block "PHYS" ---');
   if (marker < 0) return [];
   const block = text.slice(marker);
   const bounds: ModelPhysicsBounds[] = [];
   const seen = new Set<string>();
+  // Bind-pose matrices move hull-local vertices. Until those per-part matrices are paired here,
+  // retain bounds only rather than labelling untransformed vertices exact.
+  const identityPartSpace = !/m_bindPose\s*=\s*\[(?!\s*\])/.test(block);
+  const hullBlocks = assignedObjectBlocks(block, "m_Hull");
+  for (const hull of hullBlocks) {
+    const parsed = parseBounds(hull);
+    if (!parsed) continue;
+    const candidateVertices = identityPartSpace ? parseHullVertices(hull) : undefined;
+    const vertices = candidateVertices && verticesFitBounds(candidateVertices, parsed)
+      ? candidateVertices
+      : undefined;
+    const result = vertices ? { ...parsed, vertices } : parsed;
+    const key = `${parsed.min.join(",")}|${parsed.max.join(",")}|${JSON.stringify(vertices ?? [])}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    bounds.push(result);
+  }
+  // Mesh shapes and older/unknown layouts retain the established conservative-bounds fallback.
+  let nonHullBlock = block;
+  for (const hull of hullBlocks) nonHullBlock = nonHullBlock.replace(hull, "");
   const pattern = /m_vMinBounds\s*=\s*\[\s*([^\]]+)\][\s\S]*?m_vMaxBounds\s*=\s*\[\s*([^\]]+)\]/g;
-  for (const match of block.matchAll(pattern)) {
+  for (const match of nonHullBlock.matchAll(pattern)) {
     const min = vector(match[1]);
     const max = vector(match[2]);
     if (!min || !max || min.some((value, index) => value > max[index])) continue;
-    const key = `${min.join(",")}|${max.join(",")}`;
+    const key = `${min.join(",")}|${max.join(",")}|[]`;
     if (seen.has(key)) continue;
     seen.add(key);
     bounds.push({ min, max });
@@ -82,9 +171,9 @@ async function loadCache(): Promise<PhysicsCacheFile> {
   if (cache) return cache;
   try {
     const parsed = JSON.parse(await readFile(cacheFile, "utf8")) as PhysicsCacheFile;
-    cache = parsed.version === 1 && parsed.entries ? parsed : { version: 1, entries: {} };
+    cache = parsed.version === 2 && parsed.entries ? parsed : { version: 2, entries: {} };
   } catch {
-    cache = { version: 1, entries: {} };
+    cache = { version: 2, entries: {} };
   }
   return cache;
 }
@@ -152,6 +241,7 @@ async function inspectVrfResource(
     }
 
     const bounds = parseVrfPhysicsBounds(result.stdout);
+    const exactHullCount = bounds.filter((entry) => entry.vertices?.length).length;
     const stored: CachedInspection = bounds.length
       ? {
           model,
@@ -160,7 +250,8 @@ async function inspectVrfResource(
           source: "vrf-phys",
           detail:
             `${bounds.length} conservative physical hull bound(s) recovered from the ` +
-            `${options.sourceLabel} model PHYS block.`,
+            `${options.sourceLabel} model PHYS block` +
+            `${exactHullCount ? `; ${exactHullCount} include exact convex-hull vertices` : ""}.`,
         }
       : {
           model,

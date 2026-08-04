@@ -83,6 +83,8 @@ export interface MapReachabilityReport {
   volumeBlockedCellCount: number;
   collisionObstacleCount: number;
   physicalBoundsCollisionObstacleCount: number;
+  exactHullProjectionCount: number;
+  boundsProjectionCount: number;
   approximatedCollisionObstacleCount: number;
   unknownBoundsCollisionObstacleCount: number;
   modelCollisionBlockedCellCount: number;
@@ -518,6 +520,16 @@ export function analyzeTileGridReachability(
     physicalBoundsCollisionObstacleCount: collisionObstacles.filter(
       (obstacle) => obstacle.confidence === "physical-model-bounds",
     ).length,
+    exactHullProjectionCount: collisionObstacles.reduce(
+      (count, obstacle) => count +
+        (obstacle.physicalFootprints?.filter((footprint) => footprint.projection === "exact-hull").length ?? 0),
+      0,
+    ),
+    boundsProjectionCount: collisionObstacles.reduce(
+      (count, obstacle) => count +
+        (obstacle.physicalFootprints?.filter((footprint) => footprint.projection === "bounds").length ?? 0),
+      0,
+    ),
     approximatedCollisionObstacleCount: collisionObstacles.filter(
       (obstacle) => obstacle.confidence === "class-approximation",
     ).length,

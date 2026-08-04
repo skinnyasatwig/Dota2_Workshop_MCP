@@ -325,6 +325,7 @@ export function registerMapTools(server: McpServer) {
             `${report.holeCellCount} hole, ${report.volumeBlockedCellCount} volume-blocked, ` +
             `${report.unreachableCellCount} unreachable cells.`,
           `Collision inventory: ${report.physicalBoundsCollisionObstacleCount} PHYS-bound prop(s), ` +
+            `${report.exactHullProjectionCount} exact hull and ${report.boundsProjectionCount} bounds-only projection(s), ` +
             `${report.approximatedCollisionObstacleCount} known-class approximation(s), ` +
             `${report.unknownBoundsCollisionObstacleCount} solid prop(s) with unknown model bounds; ` +
             `${report.modelCollisionBlockedCellCount} terrain cell(s) conservatively blocked by PHYS bounds.`,
@@ -1364,6 +1365,8 @@ export function registerMapTools(server: McpServer) {
             volumeBlockedCellCount: number;
             collisionObstacleCount: number;
             physicalBoundsCollisionObstacleCount: number;
+            exactHullProjectionCount: number;
+            boundsProjectionCount: number;
             approximatedCollisionObstacleCount: number;
             unknownBoundsCollisionObstacleCount: number;
             modelCollisionBlockedCellCount: number;
@@ -1427,6 +1430,8 @@ export function registerMapTools(server: McpServer) {
           volumeBlockedCellCount: reachability.volumeBlockedCellCount,
           collisionObstacleCount: reachability.collisionObstacleCount,
           physicalBoundsCollisionObstacleCount: reachability.physicalBoundsCollisionObstacleCount,
+          exactHullProjectionCount: reachability.exactHullProjectionCount,
+          boundsProjectionCount: reachability.boundsProjectionCount,
           approximatedCollisionObstacleCount: reachability.approximatedCollisionObstacleCount,
           unknownBoundsCollisionObstacleCount: reachability.unknownBoundsCollisionObstacleCount,
           modelCollisionBlockedCellCount: reachability.modelCollisionBlockedCellCount,

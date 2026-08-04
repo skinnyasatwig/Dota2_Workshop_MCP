@@ -319,6 +319,8 @@ out-of-engine via [ValveResourceFormat](https://github.com/ValveResourceFormat/V
 contact sheet), so previews are viewable **over remote-access** where opening a browser isn't possible,
 *and* write a self-contained HTML page for richer local viewing.
 
+Powered by [Source 2 Viewer](https://s2v.app) ([ValveResourceFormat](https://github.com/ValveResourceFormat/ValveResourceFormat)).
+
 - **`asset_preview`** — find matching particles (`.vpcf`), textures (`.vtex`) or models (`.vmdl`),
   decode them (textures → PNG, models → GLB, particles → their sprite texture), and return a numbered
   contact-sheet image inline + an HTML gallery with interactive 3D `<model-viewer>` for models. e.g.
