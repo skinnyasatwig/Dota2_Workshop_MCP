@@ -42,6 +42,14 @@
             "comment": "Reusable marker placed as @local:marker"
           }
         }
+      ],
+      "managedVolumes": [
+        {
+          "targetname": "interaction_bounds",
+          "recipe": "heroTrigger",
+          "center": [0, 0, 128],
+          "size": [512, 512, 256]
+        }
       ]
     }
   },

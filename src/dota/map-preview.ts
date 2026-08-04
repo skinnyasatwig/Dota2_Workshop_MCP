@@ -6,6 +6,7 @@ import {
 } from "./map-reachability.js";
 import { cIndex, parseTileGrid, TileGrid, vIndex } from "./tilegrid.js";
 import { parseMapEntities, ParsedMapEntity } from "./vmap.js";
+import { parseMapBoxVolumes, ParsedMapBoxVolume } from "./map-volume.js";
 
 export interface MapPreviewOptions {
   scale?: number;
@@ -20,6 +21,7 @@ export interface MapPreviewOptions {
   showCurrents?: boolean;
   showMinimapBounds?: boolean;
   showReachability?: boolean;
+  showVolumes?: boolean;
 }
 
 export interface MapPreviewStats {
@@ -41,6 +43,8 @@ export interface MapPreviewStats {
     objectives: number;
     currents: number;
     minimapBounds: number;
+    volumes: number;
+    blockingVolumes: number;
   };
   legend: Record<string, string>;
 }
@@ -68,12 +72,13 @@ function drawPreview(
   grid: TileGrid,
   entities: ParsedMapEntity[],
   options: MapPreviewOptions,
+  volumes: readonly ParsedMapBoxVolume[] = [],
 ): RenderedMapPreview {
   const scale = Math.max(2, Math.min(16, Math.floor(options.scale ?? 8)));
   const width = grid.width * scale;
   const height = grid.height * scale;
   const rgba = Buffer.alloc(width * height * 4);
-  const reachability = analyzeTileGridReachability(grid, entities);
+  const reachability = analyzeTileGridReachability(grid, entities, { blockingVolumes: volumes });
   const reachableComponents = new Set(reachability.spawnComponents.length
     ? reachability.spawnComponents
     : reachability.primaryComponent === undefined ? [] : [reachability.primaryComponent]);
@@ -180,6 +185,35 @@ function drawPreview(
       }
       if (cell.y + 1 < grid.height && Math.abs(cell.height - cells[index + grid.width].height) > 0.01) {
         line(imageX, imageY, imageX + scale - 1, imageY, [245, 239, 196], 0.55);
+      }
+    }
+  }
+
+  if (options.showVolumes !== false) {
+    for (const volume of volumes) {
+      const radians = (volume.yaw * Math.PI) / 180;
+      const corners: [number, number, number][] = [
+        [-volume.size[0] / 2, -volume.size[1] / 2, 0],
+        [volume.size[0] / 2, -volume.size[1] / 2, 0],
+        [volume.size[0] / 2, volume.size[1] / 2, 0],
+        [-volume.size[0] / 2, volume.size[1] / 2, 0],
+      ].map(([localX, localY]) => [
+        volume.center[0] + localX * Math.cos(radians) - localY * Math.sin(radians),
+        volume.center[1] + localX * Math.sin(radians) + localY * Math.cos(radians),
+        volume.center[2],
+      ]);
+      const pixels = corners.map(worldPixel);
+      const color: Color = volume.blocking
+        ? [255, 55, 120]
+        : volume.recipe === "noWards"
+          ? [182, 92, 255]
+          : volume.recipe === "camp"
+            ? [255, 166, 48]
+            : [57, 232, 255];
+      for (let index = 0; index < pixels.length; index++) {
+        const from = pixels[index];
+        const to = pixels[(index + 1) % pixels.length];
+        line(from[0], from[1], to[0], to[1], color, 0.9, volume.blocking ? 2 : 1);
       }
     }
   }
@@ -293,6 +327,8 @@ function drawPreview(
       objectives: objectiveCount,
       currents: currentCount,
       minimapBounds,
+      volumes: volumes.length,
+      blockingVolumes: volumes.filter((volume) => volume.blocking).length,
     },
     legend: {
       water: "blue",
@@ -306,19 +342,21 @@ function drawPreview(
       objectives: "yellow/purple markers",
       currents: "cyan arrows",
       minimapBounds: "magenta rectangle",
+      volumes: "orange camp, purple no-ward, cyan trigger, pink player blocker outlines",
     },
   };
   return { png: encodeRgbaPng(width, height, rgba), stats, reachability };
 }
 
 export function renderMapPreview(text: string, options: MapPreviewOptions = {}): RenderedMapPreview {
-  return drawPreview(parseTileGrid(text), parseMapEntities(text), options);
+  return drawPreview(parseTileGrid(text), parseMapEntities(text), options, parseMapBoxVolumes(text));
 }
 
 export function renderTileGridPreview(
   grid: TileGrid,
   entities: ParsedMapEntity[],
   options: MapPreviewOptions = {},
+  volumes: readonly ParsedMapBoxVolume[] = [],
 ): RenderedMapPreview {
-  return drawPreview(grid, entities, options);
+  return drawPreview(grid, entities, options, volumes);
 }

@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { pathExists } from "../util/fsx.js";
 import { ManagedTerrainOperation, parseManagedTerrain } from "./map-terrain.js";
+import { ManagedMapVolume, parseManagedMapVolumes } from "./map-volume.js";
 
 export interface MapEntityRequirement {
   targetname: string;
@@ -48,6 +49,7 @@ export interface MapContract {
   managedAbsentEntities?: ManagedAbsentMapEntity[];
   managedPaths?: ManagedMapPath[];
   managedTerrain?: ManagedTerrainOperation[];
+  managedVolumes?: ManagedMapVolume[];
 }
 
 export interface ResolvedMapContract {
@@ -382,6 +384,7 @@ export function parseMapContract(value: unknown, path: string): MapContract {
     }
   }
   const managedTerrain = parseManagedTerrain(raw.managedTerrain, "managedTerrain", path);
+  const managedVolumes = parseManagedMapVolumes(raw.managedVolumes, "managedVolumes", path);
   const managedPathNames = new Set((managedPaths ?? []).map((managedPath) => managedPath.name));
   for (const [index, operation] of (managedTerrain ?? []).entries()) {
     if (operation.op === "fill" || operation.shape.kind !== "managedPath") continue;
@@ -398,6 +401,7 @@ export function parseMapContract(value: unknown, path: string): MapContract {
     managedAbsentEntities,
     managedPaths,
     managedTerrain,
+    managedVolumes,
   };
   const names = new Set<string>();
   for (const managed of managedEntitiesForContract(contract)) {
@@ -405,6 +409,12 @@ export function parseMapContract(value: unknown, path: string): MapContract {
       throw new Error(`Managed contract contains duplicate targetname "${managed.targetname}": ${path}`);
     }
     names.add(managed.targetname);
+  }
+  for (const volume of managedVolumes ?? []) {
+    if (names.has(volume.targetname)) {
+      throw new Error(`Managed contract contains duplicate targetname "${volume.targetname}": ${path}`);
+    }
+    names.add(volume.targetname);
   }
   for (const absent of managedAbsentEntities ?? []) {
     if (absent.targetname && names.has(absent.targetname)) {

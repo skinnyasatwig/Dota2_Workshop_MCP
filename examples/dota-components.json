@@ -60,7 +60,11 @@
       "origin": [-2400, -2800, 0],
       "size": "medium",
       "forcedSubtype": 7,
-      "volumeName": "west_bog_camp_volume"
+      "volumeName": "west_bog_camp_volume",
+      "volume": {
+        "size": [768, 640, 384],
+        "yaw": 10
+      }
     },
     {
       "kind": "bossPit",

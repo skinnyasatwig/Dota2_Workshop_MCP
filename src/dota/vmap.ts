@@ -143,7 +143,7 @@ export function parseMapEntities(text: string): ParsedMapEntity[] {
   return entities;
 }
 
-function entityBlockRanges(text: string): { start: number; end: number; block: string; entity: ParsedMapEntity }[] {
+export function entityBlockRanges(text: string): { start: number; end: number; block: string; entity: ParsedMapEntity }[] {
   const ranges: { start: number; end: number; block: string; entity: ParsedMapEntity }[] = [];
   const marker = /"CMapEntity"\s*\{/g;
   let match: RegExpExecArray | null;

@@ -23,6 +23,12 @@ import {
   dotaComponentInputSchema,
   expandDotaComponents,
 } from "./dota-components.js";
+import {
+  ManagedMapVolume,
+  managedMapVolumeInputSchema,
+  MapVolumeReconcileResult,
+  reconcileMapVolumes,
+} from "./map-volume.js";
 
 const scalar = z.union([z.string(), z.number(), z.boolean()]);
 const properties = z.record(scalar);
@@ -162,6 +168,7 @@ export const componentDefinitionInputSchema = z.object({
   managedAbsentEntities: z.array(managedAbsentEntityInputSchema).optional(),
   managedPaths: z.array(managedMapPathInputSchema).optional(),
   managedTerrain: z.array(terrainOperationInputSchema).optional(),
+  managedVolumes: z.array(managedMapVolumeInputSchema).optional(),
 }).strict();
 
 export const componentPlacementInputSchema = z.object({
@@ -179,6 +186,7 @@ export const mapSpecificationInputSchema = z.object({
   managedAbsentEntities: z.array(managedAbsentEntityInputSchema).optional(),
   managedPaths: z.array(managedMapPathInputSchema).optional(),
   managedTerrain: z.array(terrainOperationInputSchema).optional(),
+  managedVolumes: z.array(managedMapVolumeInputSchema).optional(),
   regions: z.record(regionDefinitionInputSchema).optional(),
   components: z.record(componentDefinitionInputSchema).optional(),
   placements: z.array(componentPlacementInputSchema).optional(),
@@ -396,7 +404,7 @@ function expandComponent(
   component: MapContract,
   placement: ComponentPlacementInput,
   path: string,
-): Pick<MapContract, "managedEntities" | "managedAbsentEntities" | "managedPaths" | "managedTerrain"> {
+): Pick<MapContract, "managedEntities" | "managedAbsentEntities" | "managedPaths" | "managedTerrain" | "managedVolumes"> {
   const worldOffset = placement.worldOffset ?? [0, 0, 0];
   const transformOrigin = (origin: string, field: string) =>
     transformVectorString(origin, placement.mirrorAxis, worldOffset, field, path);
@@ -445,12 +453,32 @@ function expandComponent(
     mirrorOf: undefined,
     mirrorAxis: undefined,
   });
+  const transformVolume = (volume: ManagedMapVolume): ManagedMapVolume => {
+    const transformedAngles = transformAngles(
+      `0 ${volume.yaw ?? 0} 0`,
+      placement.mirrorAxis,
+      `${fieldPrefix(placement)}.${volume.targetname}.yaw`,
+      path,
+    );
+    return {
+      ...volume,
+      targetname: localName(placement.name, volume.targetname),
+      center: [
+        (placement.mirrorAxis?.includes("x") ? -volume.center[0] : volume.center[0]) + worldOffset[0],
+        (placement.mirrorAxis?.includes("y") ? -volume.center[1] : volume.center[1]) + worldOffset[1],
+        volume.center[2] + worldOffset[2],
+      ],
+      yaw: transformedAngles ? parseVector(transformedAngles, "transformed volume yaw", path)[1] : volume.yaw,
+      properties: localProperties(volume.properties, placement.name),
+    };
+  };
   return {
     managedEntities: (component.managedEntities ?? []).map(transformEntity),
     managedAbsentEntities: (component.managedAbsentEntities ?? []).map(transformAbsent),
     managedPaths: (component.managedPaths ?? []).map(transformPath),
     managedTerrain: (component.managedTerrain ?? []).map((operation) =>
       transformComponentTerrain(operation, placement, path)),
+    managedVolumes: (component.managedVolumes ?? []).map(transformVolume),
   };
 }
 
@@ -484,6 +512,7 @@ export function parseMapSpecification(value: unknown, path = "inline map specifi
           managedAbsentEntities: definition.managedAbsentEntities,
           managedPaths: definition.managedPaths,
           managedTerrain,
+          managedVolumes: definition.managedVolumes,
         },
         `${path}, component "${name}"`,
       ),
@@ -527,6 +556,11 @@ export function parseMapSpecification(value: unknown, path = "inline map specifi
         ...dotaComponents.managedTerrain,
         ...expandedComponents.flatMap((component) => component.managedTerrain ?? []),
       ],
+      managedVolumes: [
+        ...(parsed.managedVolumes ?? []),
+        ...dotaComponents.managedVolumes,
+        ...expandedComponents.flatMap((component) => component.managedVolumes ?? []),
+      ],
     },
     path,
   );
@@ -537,6 +571,7 @@ export interface MapSpecificationReconcileResult {
   changed: boolean;
   entities: MapEntityReconcileResult;
   terrain: TerrainReconcileResult;
+  volumes: MapVolumeReconcileResult;
 }
 
 /** Apply the desired-state portions of one validated map specification. */
@@ -544,7 +579,8 @@ export function reconcileMapSpecification(
   text: string,
   specification: MapContract,
 ): MapSpecificationReconcileResult {
-  const entities = reconcileMapEntities(text, managedEntitiesForContract(specification), {
+  const volumes = reconcileMapVolumes(text, specification.managedVolumes ?? []);
+  const entities = reconcileMapEntities(volumes.text, managedEntitiesForContract(specification), {
     prunePrefixes: (specification.managedPaths ?? []).map((path) => path.name),
     absentEntities: specification.managedAbsentEntities ?? [],
   });
@@ -557,8 +593,10 @@ export function reconcileMapSpecification(
     text: terrain.text,
     changed:
       entities.added.length + entities.updated.length + entities.removed.length > 0 ||
+      volumes.added.length + volumes.updated.length > 0 ||
       terrain.changed,
     entities,
     terrain,
+    volumes,
   };
 }

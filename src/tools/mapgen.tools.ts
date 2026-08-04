@@ -22,6 +22,7 @@ import {
 import { resolveDataPath } from "../util/datapath.js";
 import { runMapTransaction } from "../dota/map-transaction.js";
 import { renderMapPreview } from "../dota/map-preview.js";
+import { MAP_VOLUME_RECIPES } from "../dota/map-volume.js";
 import {
   CLIFF_RECIPE_SETS,
   CORE_TERRAIN_RECIPES,
@@ -308,10 +309,11 @@ export function registerMapGenTools(server: McpServer) {
       title: "Known-good Dota map recipes",
       description:
         "List the MCP's validated Valve-derived terrain core, cliff decoration, ramp-safe fallback, and official " +
-        "prefab references. Optionally verify that referenced Valve prefabs are present in the installed Workshop content.",
+        "prefab references plus checked solid-volume recipes. Optionally verify that referenced Valve prefabs are " +
+        "present in the installed Workshop content.",
       inputSchema: {
         category: z
-          .enum(["base", "ancient", "tower", "fountain", "shop", "camp", "boss"])
+          .enum(["base", "ancient", "tower", "fountain", "shop", "camp", "boss", "volume"])
           .optional(),
         verifyInstalled: z.boolean().optional().describe("Check prefab paths under the installed Dota content tree."),
       },
@@ -321,7 +323,7 @@ export function registerMapGenTools(server: McpServer) {
       const dota = verifyInstalled ? await resolveDotaPaths() : undefined;
       const prefabs = await Promise.all(
         VALVE_PREFAB_RECIPES
-          .filter((recipe) => !category || recipe.category === category)
+          .filter((recipe) => !category || (category !== "volume" && recipe.category === category))
           .map(async (recipe) => ({
             ...recipe,
             installed:
@@ -337,12 +339,14 @@ export function registerMapGenTools(server: McpServer) {
           coreTerrain: CORE_TERRAIN_RECIPES,
           cliffSets: CLIFF_RECIPE_SETS,
           rampFallback: "Ramp cells use the matching core corner tile without decorative cliff layers.",
+          volumeRecipes: !category || category === "volume" ? MAP_VOLUME_RECIPES : {},
           prefabs,
           installVerified: verifyInstalled === true && Boolean(dota),
         },
         `Recipe library ${errors.length ? `has ${errors.length} validation error(s)` : "is valid"}: ` +
           `${CORE_TERRAIN_RECIPES.length} terrain cores, ${CLIFF_RECIPE_SETS.length} cliff sets, ` +
-          `${prefabs.length} Valve prefab references.`,
+          `${prefabs.length} Valve prefab references, ` +
+          `${!category || category === "volume" ? Object.keys(MAP_VOLUME_RECIPES).length : 0} checked volume recipes.`,
       );
     }),
   );
@@ -544,7 +548,8 @@ export function registerMapGenTools(server: McpServer) {
       title: "Build a map from a validated specification",
       description:
         "Generate a whole playable map in one call. Prefer specification, which uses the same validated desired-state " +
-        "format as map_sync_contract: managedTerrain, managedEntities, managedAbsentEntities, managedPaths, and " +
+        "format as map_sync_contract: managedTerrain, managedEntities, managedAbsentEntities, managedPaths, checked " +
+        "managedVolumes, and " +
         "requiredEntities, plus reusable regions, components, and transformed placements. Legacy terrain/entities/paths " +
         "remain supported. Terrain coordinates are tile units; entity/path coordinates are world units.",
       inputSchema: {
@@ -585,15 +590,39 @@ export function registerMapGenTools(server: McpServer) {
 
       const log: string[] = [`prepared "${name}" from the template`];
       let txt = await vmapToText(dota.dmxconvertExe, p.baseTemplate);
+      let specificationChangeReport: unknown;
       if (parsedSpecification) {
         const result = reconcileMapSpecification(txt, parsedSpecification);
         if (result.entities.conflicts.length) {
           return error(`Map specification has ambiguous duplicate targetnames: ${result.entities.conflicts.join(", ")}`);
         }
         txt = result.text;
+        specificationChangeReport = {
+          entities: {
+            added: result.entities.added,
+            updated: result.entities.updated,
+            removed: result.entities.removed,
+            unchanged: result.entities.unchanged,
+          },
+          volumes: {
+            added: result.volumes.added,
+            updated: result.volumes.updated,
+            unchanged: result.volumes.unchanged,
+          },
+          terrain: {
+            changed: result.terrain.changed,
+            changedHeightVertices: result.terrain.changedHeightVertices,
+            changedWaterVertices: result.terrain.changedWaterVertices,
+            changedTilesetCells: result.terrain.changedTilesetCells,
+            changedOrientationCells: result.terrain.changedOrientationCells,
+            changedConfigurationCells: result.terrain.changedConfigurationCells,
+            changedPathEdges: result.terrain.changedPathEdges,
+          },
+        };
         log.push(
           `specification: add ${result.entities.added.length}, update ${result.entities.updated.length}, ` +
-            `remove ${result.entities.removed.length}; terrain ${result.terrain.changed ? "changed" : "unchanged"}`,
+            `remove ${result.entities.removed.length}; volumes add ${result.volumes.added.length}, ` +
+            `update ${result.volumes.updated.length}; terrain ${result.terrain.changed ? "changed" : "unchanged"}`,
         );
       } else {
         if (terrain?.length) {
@@ -625,6 +654,7 @@ export function registerMapGenTools(server: McpServer) {
             wouldOverwrite: mapExists,
             wouldCompile: compile === true,
             vmap: p.contentVmap,
+            changes: specificationChangeReport,
           },
           log.join("\n"),
         );
@@ -694,7 +724,8 @@ export function registerMapGenTools(server: McpServer) {
       title: "Preview a map (top-down image)",
       description:
         "Render a diagnostic top-down image without launching Dota: terrain contours, cliffs, ramps, water, currents, " +
-        "entities, waypoint paths, tower ranges, camps, objectives, minimap bounds, terrain holes, and unreachable regions.",
+        "entities, waypoint paths, tower ranges, camps, objectives, minimap bounds, checked trigger/blocker volumes, " +
+        "terrain holes, and unreachable regions.",
       inputSchema: {
         projectRoot: z.string().optional(),
         map: z.string(),
@@ -710,6 +741,7 @@ export function registerMapGenTools(server: McpServer) {
         showCurrents: z.boolean().optional(),
         showMinimapBounds: z.boolean().optional(),
         showReachability: z.boolean().optional(),
+        showVolumes: z.boolean().optional(),
       },
     },
     guard(async ({
@@ -727,6 +759,7 @@ export function registerMapGenTools(server: McpServer) {
       showCurrents,
       showMinimapBounds,
       showReachability,
+      showVolumes,
     }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
@@ -745,12 +778,14 @@ export function registerMapGenTools(server: McpServer) {
         showCurrents,
         showMinimapBounds,
         showReachability,
+        showVolumes,
       });
       const reachability = {
         walkableCellCount: rendered.reachability.walkableCellCount,
         reachableCellCount: rendered.reachability.reachableCellCount,
         unreachableCellCount: rendered.reachability.unreachableCellCount,
         holeCellCount: rendered.reachability.holeCellCount,
+        volumeBlockedCellCount: rendered.reachability.volumeBlockedCellCount,
         regions: rendered.reachability.regions,
         findings: rendered.reachability.findings,
       };

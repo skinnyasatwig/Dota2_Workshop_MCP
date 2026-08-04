@@ -23,6 +23,7 @@ test("validated Dota point components expand to official map entity classes", ()
       size: "medium",
       volumeName: "bog_camp_volume",
       forcedSubtype: 7,
+      volume: { size: [768, 640, 384], yaw: 15 },
     },
     { kind: "playerStart", name: "radiant_start_1", team: "radiant", origin: [-1300, 0, 256] },
     { kind: "gate", name: "radiant_gate", team: "radiant", origin: [-1400, 800, 256] },
@@ -43,6 +44,13 @@ test("validated Dota point components expand to official map entity classes", ()
   assert.equal(expanded.managedEntities[4].properties?.NeutralType, "1");
   assert.equal(expanded.managedEntities[4].properties?.ForcedSubType, "7");
   assert.equal(expanded.managedEntities[4].properties?.VolumeName, "bog_camp_volume");
+  assert.deepEqual(expanded.managedVolumes, [{
+    targetname: "bog_camp_volume",
+    recipe: "camp",
+    center: [0, -1000, 0],
+    size: [768, 640, 384],
+    yaw: 15,
+  }]);
 });
 
 test("base components rotate explicit local members into a reusable assembly", () => {

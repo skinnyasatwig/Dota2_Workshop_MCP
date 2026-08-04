@@ -63,6 +63,14 @@ test("loadMapContract loads and validates the project default", async () => {
           shape: { kind: "managedPath", name: "path_radiant_north", width: 2 },
         },
       ],
+      managedVolumes: [
+        {
+          targetname: "north_camp_bounds",
+          recipe: "camp",
+          center: [512, 1024, 192],
+          size: [768, 640, 384],
+        },
+      ],
     }),
   );
   const resolved = await loadMapContract(root, "twin_gates");
@@ -74,6 +82,7 @@ test("loadMapContract loads and validates the project default", async () => {
   assert.equal(resolved?.contract.managedAbsentEntities?.length, 1);
   assert.equal(resolved?.contract.managedTerrain?.length, 3);
   assert.equal(resolved?.contract.managedTerrain?.[1].op, "tileset");
+  assert.equal(resolved?.contract.managedVolumes?.[0].targetname, "north_camp_bounds");
   const managed = managedEntitiesForContract(resolved!.contract);
   assert.equal(managed.length, 4);
   assert.deepEqual(
@@ -138,6 +147,29 @@ test("loadMapContract rejects duplicate managed targetnames", async () => {
     }),
   );
   await assert.rejects(() => loadMapContract(root, "twin_gates"), /duplicate targetname "spawn"/);
+  await rm(root, { recursive: true, force: true });
+});
+
+test("loadMapContract rejects volume names that collide with managed entities", async () => {
+  const root = await freshRoot();
+  await writeFile(
+    join(root, ".dota-workshop", "map-contract.json"),
+    JSON.stringify({
+      requiredEntities: [],
+      managedEntities: [
+        { targetname: "bounds", classname: "info_target", origin: "0 0 0" },
+      ],
+      managedVolumes: [
+        {
+          targetname: "bounds",
+          recipe: "trigger",
+          center: [0, 0, 128],
+          size: [256, 256, 256],
+        },
+      ],
+    }),
+  );
+  await assert.rejects(() => loadMapContract(root, "twin_gates"), /duplicate targetname "bounds"/);
   await rm(root, { recursive: true, force: true });
 });
 

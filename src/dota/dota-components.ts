@@ -1,9 +1,15 @@
 import { z } from "zod";
 import { ManagedMapEntity } from "./map-contract.js";
 import { ManagedTerrainOperation } from "./map-terrain.js";
+import { ManagedMapVolume } from "./map-volume.js";
 
 const point2 = z.tuple([z.number().finite(), z.number().finite()]);
 const point3 = z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]);
+const volumeSize = z.tuple([
+  z.number().finite().positive().max(32768),
+  z.number().finite().positive().max(32768),
+  z.number().finite().positive().max(32768),
+]);
 const teamSchema = z.enum(["radiant", "dire"]);
 const nameSchema = z.string().regex(/^[A-Za-z_][A-Za-z0-9_.-]*$/);
 const yawSchema = z.number().finite().optional();
@@ -68,6 +74,11 @@ const campComponentSchema = z.object({
   forcedSubtype: z.number().int().min(0).max(7).optional(),
   pullType: z.number().int().min(0).max(5).optional(),
   aggroType: z.number().int().min(0).max(1).optional(),
+  volume: z.object({
+    center: point3.optional(),
+    size: volumeSize,
+    yaw: z.number().finite().optional(),
+  }).strict().optional(),
 }).strict();
 
 const playerStartComponentSchema = z.object({
@@ -177,6 +188,7 @@ type Point3 = [number, number, number];
 export interface ExpandedDotaComponents {
   managedEntities: ManagedMapEntity[];
   managedTerrain: ManagedTerrainOperation[];
+  managedVolumes: ManagedMapVolume[];
 }
 
 function formatted(value: number): string {
@@ -304,6 +316,17 @@ function campEntity(component: z.infer<typeof campComponentSchema>): ManagedMapE
   };
 }
 
+function campVolume(component: z.infer<typeof campComponentSchema>): ManagedMapVolume | undefined {
+  if (!component.volume) return undefined;
+  return {
+    targetname: component.volumeName,
+    recipe: "camp",
+    center: component.volume.center ?? component.origin,
+    size: component.volume.size,
+    yaw: component.volume.yaw ?? component.yaw,
+  };
+}
+
 function playerStartEntity(component: z.infer<typeof playerStartComponentSchema>): ManagedMapEntity {
   return {
     targetname: component.name,
@@ -416,7 +439,7 @@ function pitOperations(component: z.infer<typeof bossPitComponentSchema>): Expan
       },
     });
   }
-  return { managedEntities, managedTerrain };
+  return { managedEntities, managedTerrain, managedVolumes: [] };
 }
 
 function rotateOffset(offset: Point3, yaw: number): Point3 {
@@ -501,6 +524,7 @@ function expandBase(component: z.infer<typeof baseComponentSchema>): ManagedMapE
 export function expandDotaComponents(components: DotaComponentInput[]): ExpandedDotaComponents {
   const managedEntities: ManagedMapEntity[] = [];
   const managedTerrain: ManagedTerrainOperation[] = [];
+  const managedVolumes: ManagedMapVolume[] = [];
   for (const component of components) {
     switch (component.kind) {
       case "ancient":
@@ -517,6 +541,7 @@ export function expandDotaComponents(components: DotaComponentInput[]): Expanded
         break;
       case "camp":
         managedEntities.push(campEntity(component));
+        if (component.volume) managedVolumes.push(campVolume(component)!);
         break;
       case "playerStart":
         managedEntities.push(playerStartEntity(component));
@@ -528,6 +553,7 @@ export function expandDotaComponents(components: DotaComponentInput[]): Expanded
         const pit = pitOperations(component);
         managedEntities.push(...pit.managedEntities);
         managedTerrain.push(...pit.managedTerrain);
+        managedVolumes.push(...pit.managedVolumes);
         break;
       }
       case "base":
@@ -535,5 +561,5 @@ export function expandDotaComponents(components: DotaComponentInput[]): Expanded
         break;
     }
   }
-  return { managedEntities, managedTerrain };
+  return { managedEntities, managedTerrain, managedVolumes };
 }

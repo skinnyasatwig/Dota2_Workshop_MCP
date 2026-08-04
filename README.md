@@ -212,9 +212,9 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
 
 - **`map_build`** — one call: clone the template, apply one validated desired-state map specification,
   register, and optionally compile it. The preferred `specification` object uses the same
-  `managedTerrain` / `managedEntities` / `managedPaths` vocabulary as `map_sync_contract`. A specification can
+  `managedTerrain` / `managedEntities` / `managedPaths` / `managedVolumes` vocabulary as `map_sync_contract`. A specification can
   also define reusable named `regions`, reusable `components`, and transformed `placements`; one component may
-  contain local entities, paths, and terrain, and every placement is automatically namespaced. Legacy
+  contain local entities, paths, terrain, and checked solid volumes, and every placement is automatically namespaced. Legacy
   `terrain` / `entities` / `paths` inputs remain compatible. See
   [`examples/map-specification.json`](examples/map-specification.json) for a complete starter. Pass
   `dryRun:true` to generate and report the plan without writing, registering, or compiling anything.
@@ -224,12 +224,13 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
   preview-only by default; pass `apply:true` after reviewing the exact change counts.
 - **`map_preview`** — render a diagnostic top-down **image straight from the data**, no game launch.
   In addition to shaded terrain and water it overlays contours, cliff cells, ramp cells, current arrows,
-  entities, complete waypoint paths, tower ranges, camps, objectives, minimap bounds, missing terrain
+  entities, complete waypoint paths, tower ranges, camps, objectives, minimap bounds, checked trigger/blocker volumes, missing terrain
   recipes, and regions unreachable from player/creep spawns. Every overlay family can be hidden.
 - **`map_reachability`** — analyze the whole tile grid offline and report missing terrain recipes,
   cliff-separated regions, trapped spawns, blocked entrances, inaccessible objectives or camps, and
-  waypoint segments that cross blocked cells. It recognizes generated ramps and treats Dota river water
-  as walkable. Mesh collision and Valve's final navmesh remain an engine-test responsibility.
+  waypoint segments that cross blocked cells. It recognizes generated ramps and checked player-blocking
+  volume footprints, and treats Dota river water as walkable. Other mesh collision and Valve's final navmesh
+  remain an engine-test responsibility.
 - **`map_engine_nav_test`** — close the offline-to-engine gap with one bounded Dota launch. It compiles
   first, reads routes from the unified map specification (or explicit input), asks Valve's real `GridNav`
   for endpoint and segment reachability/path lengths, returns structured failures, and automatically
@@ -237,7 +238,7 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
   Dota session unless that permission is explicit. Its default `auto` launcher gives Steam a bounded chance
   to start the game, then uses the installed executable only when Steam created no Dota process.
 - **`map_recipe_catalog`** — inspect the named terrain cores, Radiant/Dire cliff recipes, ramp-safe
-  fallbacks, and official Valve prefab references used by the generator. `verifyInstalled:true` checks
+  fallbacks, checked solid-volume recipes, and official Valve prefab references used by the generator. `verifyInstalled:true` checks
   the references against the current Workshop Tools install without opening Hammer.
 - **`entity_catalog`** — the placeable-entity reference (spawners, `path_track` waypoints, triggers,
   lights, props, …) so you know what to place. Text searches augment the curated list with classes
@@ -263,10 +264,10 @@ targets with `@local:name`; it becomes the correct namespaced target for each co
 For common gameplay structure, `dotaComponents` provides strongly checked `base`, `ancient`, `tower`, `fountain`,
 `shop`, `camp`, `bossPit`, `playerStart`, and `gate` entries. It derives team numbers, official entity classes,
 stock unit/model names, tower tier names, shop/camp numeric values, base member transforms, and boss-pit terrain.
-See [`examples/dota-components.json`](examples/dota-components.json). A real `camp` intentionally requires the name
-of an existing Hammer-authored camp volume; creating arbitrary solid brush volumes is not yet safe in the text-only
-pipeline. Likewise, a boss pit's no-wards radius currently creates a checked placement marker for a future
-`trigger_no_wards` solid rather than pretending that a point entity supplies the trigger volume.
+See [`examples/dota-components.json`](examples/dota-components.json). A `camp` can now include an optional checked
+rectangular `volume`, which creates the real `trigger_multiple` bounds referenced by its spawner. A boss pit's circular
+no-wards radius still creates a checked placement marker: the generator refuses to approximate a circle with a larger
+box and silently change gameplay. Use an explicit `managedVolumes` box only when a box is genuinely intended.
 
 ## Learn from other custom games
 
@@ -352,7 +353,7 @@ playable `.vpk` — a pipeline verified end to end.
 - **`map_sync_contract`** — preview or apply the same desired-state map specification accepted by
   `map_build`, conventionally stored in `.dota-workshop/map-contract.json`. It creates missing named entities, expands
   complete linked waypoint chains, repairs drifted class/position/rotation/keyvalues, prunes obsolete
-  numbered nodes owned by those paths, expands reusable regions/components/placements, preserves unrelated map data, and refuses ambiguous duplicate
+  numbered nodes owned by those paths, creates or repairs checked solid volumes, expands reusable regions/components/placements, preserves unrelated map data, and refuses ambiguous duplicate
   target names. Preview is the default; pass `apply:true` to write and `recompile:true` to compile.
   Applied map changes use a transaction: the current source map (and compiled map when relevant) is
   backed up under `.dota-workshop/backups`, conversion is staged before replacement, and a failed
@@ -396,6 +397,12 @@ contract explicitly uses `fill`. A terrain shape can also use
 `{"kind":"managedPath","name":"path_name","width":2}` to derive its tile-space stroke from an
 existing managed world-space path, keeping roads synchronized with route edits.
 
+`managedVolumes` adds named, axis-aligned or yaw-rotated rectangular solids in world coordinates. Each volume must use
+one checked Valve-derived recipe: `camp`, `trigger`, `heroTrigger`, `dotaTrigger`, `bossAttackable`, `noWards`, or
+`playerClip`. The recipe controls the entity class and tool material; contracts cannot override reserved class,
+transform, or brush fields. Preview and validation inspect the generated geometry, and `playerClip` footprints are
+included in offline reachability. Arbitrary solid classes and arbitrary polygon meshes are deliberately rejected.
+
 Map registration supports both legacy KeyValues 1 and the KV3 `addoninfo.txt` produced by current
 Workshop Tools. Source-controlled layouts under `game/dota_addons/<addon>` and
 `content/dota_addons/<addon>` are detected directly. `addon_link dryRun=true` previews safe junctions;
@@ -403,9 +410,8 @@ the real link operation refuses to overwrite conflicting folders.
 
 Then launch it: `addon_launch_custom_game map="<name>"`.
 
-> Limitation: bespoke **polygon-mesh geometry** (the `CDmePolygonMesh` half-edge data) is authored
-> in **Hammer**. The MCP can now reconcile Dota tile-grid terrain, but it does not yet
-> sculpt arbitrary polygon meshes such as bespoke walls, bridges, or cliff brushwork.
+> Limitation: the MCP can safely generate checked rectangular solid volumes, but bespoke **polygon-mesh geometry**
+> is still authored in **Hammer**. It does not yet sculpt arbitrary sloped/curved solids, bridges, or decorative cliff brushwork.
 
 ## Notes & limitations
 

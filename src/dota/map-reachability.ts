@@ -1,5 +1,6 @@
 import { cIndex, parseTileGrid, TileGrid, tileToWorld, vIndex } from "./tilegrid.js";
 import { parseMapEntities, ParsedMapEntity } from "./vmap.js";
+import { parseMapBoxVolumes, ParsedMapBoxVolume } from "./map-volume.js";
 
 export type ReachabilityEntityKind = "spawn" | "objective" | "entrance" | "camp" | "other";
 
@@ -14,6 +15,7 @@ export interface ReachabilityCell {
   cliff: boolean;
   hole: boolean;
   walkable: boolean;
+  blockingVolume?: string;
   component?: number;
 }
 
@@ -58,6 +60,7 @@ export interface MapReachabilityOptions {
   maxFlatStep?: number;
   maxRampStep?: number;
   minRegionCells?: number;
+  blockingVolumes?: readonly ParsedMapBoxVolume[];
 }
 
 export interface MapReachabilityReport {
@@ -67,6 +70,7 @@ export interface MapReachabilityReport {
   origin: [number, number, number];
   walkableCellCount: number;
   blockedCellCount: number;
+  volumeBlockedCellCount: number;
   cliffCellCount: number;
   rampCellCount: number;
   waterCellCount: number;
@@ -123,7 +127,16 @@ function cellPathEdgeCount(grid: TileGrid, x: number, y: number): number {
   ].reduce((count, index) => count + (grid.pathEdges[index] ? 1 : 0), 0);
 }
 
-function buildCells(grid: TileGrid): ReachabilityCell[] {
+function volumeContainsWorldPoint(volume: ParsedMapBoxVolume, x: number, y: number): boolean {
+  const radians = (-volume.yaw * Math.PI) / 180;
+  const dx = x - volume.center[0];
+  const dy = y - volume.center[1];
+  const localX = dx * Math.cos(radians) - dy * Math.sin(radians);
+  const localY = dx * Math.sin(radians) + dy * Math.cos(radians);
+  return Math.abs(localX) <= volume.size[0] / 2 && Math.abs(localY) <= volume.size[1] / 2;
+}
+
+function buildCells(grid: TileGrid, blockingVolumes: readonly ParsedMapBoxVolume[] = []): ReachabilityCell[] {
   const cells: ReachabilityCell[] = [];
   for (let y = 0; y < grid.height; y++) {
     for (let x = 0; x < grid.width; x++) {
@@ -143,6 +156,9 @@ function buildCells(grid: TileGrid): ReachabilityCell[] {
       const ramp = !hole && maxHeight > minHeight && maxHeight - minHeight <= 1 && pathEdges >= 3 && configuration.length <= 2;
       const cliff = !hole && maxHeight > minHeight && !ramp;
       const water = corners.filter((index) => grid.water[index]).length >= 2;
+      const [worldX, worldY] = tileToWorld(grid, x + 0.5, y + 0.5);
+      const blockingVolume = blockingVolumes.find((volume) =>
+        volume.blocking && volumeContainsWorldPoint(volume, worldX, worldY));
       cells.push({
         x,
         y,
@@ -153,7 +169,8 @@ function buildCells(grid: TileGrid): ReachabilityCell[] {
         ramp,
         cliff,
         hole,
-        walkable: !hole && !cliff,
+        walkable: !hole && !cliff && !blockingVolume,
+        blockingVolume: blockingVolume?.targetname,
       });
     }
   }
@@ -217,7 +234,7 @@ export function analyzeTileGridReachability(
   const maxFlatStep = Math.max(0, options.maxFlatStep ?? 0.25);
   const maxRampStep = Math.max(maxFlatStep, options.maxRampStep ?? 0.75);
   const minRegionCells = Math.max(1, Math.floor(options.minRegionCells ?? 4));
-  const cells = buildCells(grid);
+  const cells = buildCells(grid, options.blockingVolumes);
   const componentCells: number[][] = [];
 
   for (let index = 0; index < cells.length; index++) {
@@ -429,6 +446,7 @@ export function analyzeTileGridReachability(
     origin: grid.origin,
     walkableCellCount,
     blockedCellCount: cells.length - walkableCellCount,
+    volumeBlockedCellCount: cells.filter((cell) => cell.blockingVolume !== undefined).length,
     cliffCellCount: cells.filter((cell) => cell.cliff).length,
     rampCellCount: cells.filter((cell) => cell.ramp).length,
     waterCellCount: cells.filter((cell) => cell.water).length,
@@ -445,5 +463,8 @@ export function analyzeTileGridReachability(
 }
 
 export function analyzeMapReachability(text: string, options: MapReachabilityOptions = {}): MapReachabilityReport {
-  return analyzeTileGridReachability(parseTileGrid(text), parseMapEntities(text), options);
+  return analyzeTileGridReachability(parseTileGrid(text), parseMapEntities(text), {
+    ...options,
+    blockingVolumes: options.blockingVolumes ?? parseMapBoxVolumes(text),
+  });
 }

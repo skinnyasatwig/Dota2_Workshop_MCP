@@ -61,6 +61,14 @@ test("parseMapSpecification exposes the contract terrain and path vocabulary", (
         shape: { kind: "managedPath", name: "north_route", width: 2 },
       },
     ],
+    managedVolumes: [
+      {
+        targetname: "river_no_wards",
+        recipe: "noWards",
+        center: [0, 0, 256],
+        size: [1024, 512, 512],
+      },
+    ],
   });
 
   assert.deepEqual(specification.requiredEntities, []);
@@ -68,6 +76,7 @@ test("parseMapSpecification exposes the contract terrain and path vocabulary", (
   assert.equal(specification.managedEntities?.[0].properties?.enabled, "true");
   assert.equal(specification.managedTerrain?.[0].op, "height");
   assert.equal(specification.managedTerrain?.[1].op, "ramp");
+  assert.equal(specification.managedVolumes?.[0].recipe, "noWards");
 });
 
 test("parseMapSpecification rejects unresolved managedPath terrain", () => {
@@ -86,7 +95,7 @@ test("parseMapSpecification rejects unresolved managedPath terrain", () => {
   );
 });
 
-test("reconcileMapSpecification applies entities and paths idempotently", () => {
+test("reconcileMapSpecification applies entities, paths, and volumes idempotently", () => {
   const specification = parseMapSpecification({
     managedEntities: [
       {
@@ -101,16 +110,26 @@ test("reconcileMapSpecification applies entities and paths idempotently", () => 
         points: [[-256, 0, 128], [256, 0, 128]],
       },
     ],
+    managedVolumes: [
+      {
+        targetname: "objective_bounds",
+        recipe: "heroTrigger",
+        center: [0, 0, 128],
+        size: [512, 512, 256],
+      },
+    ],
   });
 
   const first = reconcileMapSpecification(EMPTY_MAP, specification);
   assert.equal(first.changed, true);
   assert.deepEqual(first.entities.added, ["objective", "creep_route_1", "creep_route_2"]);
-  assert.equal(parseMapEntities(first.text).length, 3);
+  assert.deepEqual(first.volumes.added, ["objective_bounds"]);
+  assert.equal(parseMapEntities(first.text).length, 4);
 
   const second = reconcileMapSpecification(first.text, specification);
   assert.equal(second.changed, false);
   assert.deepEqual(second.entities.unchanged, ["objective", "creep_route_1", "creep_route_2"]);
+  assert.deepEqual(second.volumes.unchanged, ["objective_bounds"]);
 });
 
 test("named regions can be reused and mirrored around a chosen tile point", () => {
@@ -137,7 +156,7 @@ test("named regions can be reused and mirrored around a chosen tile point", () =
   ]);
 });
 
-test("component placements namespace and transform entities, paths, references, and terrain", () => {
+test("component placements namespace and transform entities, paths, references, terrain, and volumes", () => {
   const specification = parseMapSpecification({
     regions: {
       platform: { shape: { kind: "circle", cx: 0, cy: 0, r: 3 } },
@@ -168,6 +187,16 @@ test("component placements namespace and transform entities, paths, references, 
           {
             op: "ramp",
             shape: { kind: "managedPath", name: "route", width: 2 },
+          },
+        ],
+        managedVolumes: [
+          {
+            targetname: "bounds",
+            recipe: "playerClip",
+            center: [100, 200, 64],
+            size: [600, 200, 256],
+            yaw: 30,
+            properties: { OnUser1: "@local:tower,Disable,,0,-1" },
           },
         ],
       },
@@ -220,6 +249,24 @@ test("component placements namespace and transform entities, paths, references, 
     { op: "ramp", shape: { kind: "managedPath", name: "west_route", width: 2 } },
     { op: "height", level: 1, dome: undefined, shape: { kind: "circle", cx: 24, cy: 12, r: 3 } },
     { op: "ramp", shape: { kind: "managedPath", name: "east_route", width: 2 } },
+  ]);
+  assert.deepEqual(specification.managedVolumes, [
+    {
+      targetname: "west_bounds",
+      recipe: "playerClip",
+      center: [-900, 200, 192],
+      size: [600, 200, 256],
+      yaw: 30,
+      properties: { OnUser1: "west_tower,Disable,,0,-1" },
+    },
+    {
+      targetname: "east_bounds",
+      recipe: "playerClip",
+      center: [900, 200, 192],
+      size: [600, 200, 256],
+      yaw: 150,
+      properties: { OnUser1: "east_tower,Disable,,0,-1" },
+    },
   ]);
 });
 

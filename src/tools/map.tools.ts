@@ -24,6 +24,7 @@ import { parseMapSpecification, reconcileMapSpecification } from "../dota/map-sp
 import { inspectMapArtifactFreshness } from "../dota/map-freshness.js";
 import { runMapTransaction } from "../dota/map-transaction.js";
 import { analyzeMapReachability } from "../dota/map-reachability.js";
+import { reconcileMapVolumes } from "../dota/map-volume.js";
 import {
   buildEngineNavigationCommand,
   engineNavigationRoutesFromManagedPaths,
@@ -271,8 +272,8 @@ export function registerMapTools(server: McpServer) {
       description:
         "Offline whole-map pathing preflight using the Dota tile grid. Detects missing terrain recipes, cliff-separated " +
         "regions, trapped spawns, blocked entrances, inaccessible objectives/camps, and small isolated walkable areas. " +
-        "Recognizes generated ramp cells and does not launch Dota or Hammer. Mesh collision and Valve's final navmesh " +
-        "still require the optional engine navigation test.",
+        "Recognizes generated ramp cells and checked player-blocking volume footprints, and does not launch Dota or " +
+        "Hammer. Other mesh collision and Valve's final navmesh still require the optional engine navigation test.",
       inputSchema: {
         projectRoot: z.string().optional(),
         map: z.string(),
@@ -305,7 +306,8 @@ export function registerMapTools(server: McpServer) {
           `${map}: ${report.reachableCellCount}/${report.walkableCellCount} walkable cells reachable from spawns; ` +
             `${report.regions.length} region(s).`,
           `Terrain: ${report.cliffCellCount} cliff, ${report.rampCellCount} ramp, ${report.waterCellCount} water, ` +
-            `${report.holeCellCount} hole, ${report.unreachableCellCount} unreachable cells.`,
+            `${report.holeCellCount} hole, ${report.volumeBlockedCellCount} volume-blocked, ` +
+            `${report.unreachableCellCount} unreachable cells.`,
           `Findings: ${errors} error(s), ${warnings} warning(s).`,
           ...report.findings.slice(0, 30).map(
             (finding) => `  [${finding.severity.toUpperCase()}] ${finding.code}: ${finding.targetname} — ${finding.detail}`,
@@ -931,7 +933,8 @@ export function registerMapTools(server: McpServer) {
     {
       title: "Synchronize a map with its managed contract",
       description:
-        "Preview or apply desired managedEntities, managedAbsentEntities, compact managedPaths, and managedTerrain " +
+        "Preview or apply desired managedEntities, managedAbsentEntities, compact managedPaths, managedTerrain, and " +
+        "checked managedVolumes " +
         "operations from " +
         ".dota-workshop/map-contract.json. Reusable regions/components/placements are expanded before reconciliation. " +
         "Paths expand into complete linked waypoint chains. Missing named entities " +
@@ -960,9 +963,10 @@ export function registerMapTools(server: McpServer) {
       const specs = managedEntitiesForContract(resolved.contract);
       const absentEntities = resolved.contract.managedAbsentEntities ?? [];
       const terrainOperations = resolved.contract.managedTerrain ?? [];
-      if (!specs.length && !absentEntities.length && !terrainOperations.length) {
+      const volumeSpecifications = resolved.contract.managedVolumes ?? [];
+      if (!specs.length && !absentEntities.length && !terrainOperations.length && !volumeSpecifications.length) {
         return error(
-          `Contract has no managedEntities, managedAbsentEntities, managedPaths, or managedTerrain to synchronize: ${resolved.path}`,
+          `Contract has no managedEntities, managedAbsentEntities, managedPaths, managedTerrain, or managedVolumes to synchronize: ${resolved.path}`,
         );
       }
 
@@ -976,8 +980,10 @@ export function registerMapTools(server: McpServer) {
       }
 
       const terrain = synchronization.terrain;
+      const volumes = synchronization.volumes;
       const changedEntities = result.added.length + result.updated.length + result.removed.length;
-      const changed = changedEntities + (terrain.changed ? 1 : 0);
+      const changedVolumes = volumes.added.length + volumes.updated.length;
+      const changed = changedEntities + changedVolumes + (terrain.changed ? 1 : 0);
       const transaction = apply && (changed > 0 || recompile)
         ? await runMapTransaction({
             projectRoot: project.root,
@@ -1017,9 +1023,10 @@ export function registerMapTools(server: McpServer) {
       }
       const steps = [
         `${apply ? "Synchronized" : "Previewed"} ${specs.length} desired entities and ` +
-          `${absentEntities.length} absence selectors in "${map}".`,
+          `${absentEntities.length} absence selectors plus ${volumeSpecifications.length} solid volumes in "${map}".`,
         `Add ${result.added.length}, update ${result.updated.length}, remove ${result.removed.length}, ` +
           `unchanged ${result.unchanged.length}.`,
+        `Volumes: add ${volumes.added.length}, update ${volumes.updated.length}, unchanged ${volumes.unchanged.length}.`,
         `Terrain: ${terrainOperations.length} operations; change ${terrain.changedHeightVertices} height vertices, ` +
           `${terrain.changedWaterVertices} water vertices, ${terrain.changedTilesetCells} tileset cells, and ` +
           `${terrain.changedOrientationCells} orientation cells, and ` +
@@ -1035,10 +1042,17 @@ export function registerMapTools(server: McpServer) {
           applied: apply === true,
           changed,
           changedEntities,
+          changedVolumes,
           added: result.added,
           updated: result.updated,
           removed: result.removed,
           unchanged: result.unchanged,
+          volumes: {
+            requested: volumeSpecifications.length,
+            added: volumes.added,
+            updated: volumes.updated,
+            unchanged: volumes.unchanged,
+          },
           terrain: {
             changed: terrain.changed,
             changedHeightVertices: terrain.changedHeightVertices,
@@ -1208,8 +1222,9 @@ export function registerMapTools(server: McpServer) {
         "Static preflight for autonomous map work (does not launch Dota): checks source/registration/compiled presence " +
         "and whether the compiled VPK is older than its VMAP source, " +
         "extracts entities, finds duplicate targetnames and broken path_corner/path_track links, and verifies required " +
-        "targetname/classname pairs used by game scripts. When a project contract declares managedTerrain, validation " +
-        "also reports tile-grid drift without writing it. Whole-map offline reachability checks detect terrain holes, " +
+        "targetname/classname pairs used by game scripts. When a project contract declares managedTerrain or " +
+        "managedVolumes, validation also reports tile-grid or checked-volume drift without writing it. Whole-map " +
+        "offline reachability checks detect terrain holes, " +
         "trapped spawns, blocked entrances/path segments, and inaccessible objectives or camps. Known entity keyvalues " +
         "are checked against the installed official Valve FGD definitions.",
       inputSchema: {
@@ -1313,12 +1328,20 @@ export function registerMapTools(server: McpServer) {
             changedPathEdges: number;
           }
         | undefined;
+      let volumeDrift:
+        | {
+            missing: string[];
+            changed: string[];
+            unchanged: string[];
+          }
+        | undefined;
       let reachabilitySummary:
         | {
             walkableCellCount: number;
             reachableCellCount: number;
             unreachableCellCount: number;
             blockedCellCount: number;
+            volumeBlockedCellCount: number;
             cliffCellCount: number;
             rampCellCount: number;
             holeCellCount: number;
@@ -1366,6 +1389,7 @@ export function registerMapTools(server: McpServer) {
           reachableCellCount: reachability.reachableCellCount,
           unreachableCellCount: reachability.unreachableCellCount,
           blockedCellCount: reachability.blockedCellCount,
+          volumeBlockedCellCount: reachability.volumeBlockedCellCount,
           cliffCellCount: reachability.cliffCellCount,
           rampCellCount: reachability.rampCellCount,
           holeCellCount: reachability.holeCellCount,
@@ -1388,6 +1412,24 @@ export function registerMapTools(server: McpServer) {
               message:
                 `Entity required absent by contract is present (${matches.length} match` +
                 `${matches.length === 1 ? "" : "es"}): ${absentSelectorLabel(selector)}.`,
+            });
+          }
+        }
+        const managedVolumes = resolvedContract?.contract.managedVolumes ?? [];
+        if (managedVolumes.length) {
+          const volumeResult = reconcileMapVolumes(mapText, managedVolumes);
+          if (volumeResult.added.length || volumeResult.updated.length) {
+            volumeDrift = {
+              missing: volumeResult.added,
+              changed: volumeResult.updated,
+              unchanged: volumeResult.unchanged,
+            };
+            findings.push({
+              severity: "error",
+              code: "managed-volume-drift",
+              message:
+                `Managed volume drift: ${volumeResult.added.length} missing and ` +
+                `${volumeResult.updated.length} changed checked volume(s).`,
             });
           }
         }
@@ -1548,6 +1590,7 @@ export function registerMapTools(server: McpServer) {
           requirementCount: requirements.length,
           entityDefinitions: entityDefinitionValidation ?? null,
           terrainDrift: terrainDrift ?? null,
+          volumeDrift: volumeDrift ?? null,
           reachability: reachabilitySummary ?? null,
           findings,
         },
