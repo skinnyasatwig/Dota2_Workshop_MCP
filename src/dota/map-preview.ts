@@ -6,7 +6,7 @@ import {
 } from "./map-reachability.js";
 import { cIndex, parseTileGrid, TileGrid, vIndex } from "./tilegrid.js";
 import { parseMapEntities, ParsedMapEntity } from "./vmap.js";
-import { parseMapBoxVolumes, ParsedMapBoxVolume } from "./map-volume.js";
+import { parseMapVolumes, ParsedMapVolume } from "./map-volume.js";
 
 export interface MapPreviewOptions {
   scale?: number;
@@ -74,7 +74,7 @@ function drawPreview(
   grid: TileGrid,
   entities: ParsedMapEntity[],
   options: MapPreviewOptions,
-  volumes: readonly ParsedMapBoxVolume[] = [],
+  volumes: readonly ParsedMapVolume[] = [],
 ): RenderedMapPreview {
   const scale = Math.max(2, Math.min(16, Math.floor(options.scale ?? 8)));
   const width = grid.width * scale;
@@ -194,12 +194,7 @@ function drawPreview(
   if (options.showVolumes !== false) {
     for (const volume of volumes) {
       const radians = (volume.yaw * Math.PI) / 180;
-      const corners: [number, number, number][] = [
-        [-volume.size[0] / 2, -volume.size[1] / 2, 0],
-        [volume.size[0] / 2, -volume.size[1] / 2, 0],
-        [volume.size[0] / 2, volume.size[1] / 2, 0],
-        [-volume.size[0] / 2, volume.size[1] / 2, 0],
-      ].map(([localX, localY]) => [
+      const corners: [number, number, number][] = volume.footprint.map(([localX, localY]) => [
         volume.center[0] + localX * Math.cos(radians) - localY * Math.sin(radians),
         volume.center[1] + localX * Math.sin(radians) + localY * Math.cos(radians),
         volume.center[2],
@@ -370,14 +365,14 @@ function drawPreview(
 }
 
 export function renderMapPreview(text: string, options: MapPreviewOptions = {}): RenderedMapPreview {
-  return drawPreview(parseTileGrid(text), parseMapEntities(text), options, parseMapBoxVolumes(text));
+  return drawPreview(parseTileGrid(text), parseMapEntities(text), options, parseMapVolumes(text));
 }
 
 export function renderTileGridPreview(
   grid: TileGrid,
   entities: ParsedMapEntity[],
   options: MapPreviewOptions = {},
-  volumes: readonly ParsedMapBoxVolume[] = [],
+  volumes: readonly ParsedMapVolume[] = [],
 ): RenderedMapPreview {
   return drawPreview(grid, entities, options, volumes);
 }

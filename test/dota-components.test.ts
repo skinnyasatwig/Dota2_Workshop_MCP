@@ -144,7 +144,11 @@ test("boss pit components create structured terrain, entrances, and an official 
   const expanded = expandDotaComponents([pit]);
 
   assert.equal(expanded.managedEntities[0].classname, "npc_dota_roshan_spawner");
-  assert.equal(expanded.managedEntities[1].targetname, "south_rosh_no_wards_marker");
+  assert.equal(expanded.managedEntities.length, 1);
+  assert.equal(expanded.managedVolumes[0].targetname, "south_rosh_no_wards");
+  assert.equal(expanded.managedVolumes[0].recipe, "noWards");
+  assert.equal(expanded.managedVolumes[0].polygon?.points.length, 32);
+  assert.equal(expanded.managedVolumes[0].polygon?.height, 1024);
   assert.deepEqual(expanded.managedTerrain.map((operation) => operation.op), [
     "height",
     "height",

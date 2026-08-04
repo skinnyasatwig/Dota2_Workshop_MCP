@@ -1,6 +1,6 @@
 import { cIndex, parseTileGrid, TileGrid, tileToWorld, vIndex } from "./tilegrid.js";
 import { parseMapEntities, ParsedMapEntity } from "./vmap.js";
-import { parseMapBoxVolumes, ParsedMapBoxVolume } from "./map-volume.js";
+import { parseMapVolumes, ParsedMapVolume } from "./map-volume.js";
 
 export type ReachabilityEntityKind = "spawn" | "objective" | "entrance" | "camp" | "other";
 
@@ -60,7 +60,7 @@ export interface MapReachabilityOptions {
   maxFlatStep?: number;
   maxRampStep?: number;
   minRegionCells?: number;
-  blockingVolumes?: readonly ParsedMapBoxVolume[];
+  blockingVolumes?: readonly ParsedMapVolume[];
 }
 
 export interface MapReachabilityReport {
@@ -127,16 +127,29 @@ function cellPathEdgeCount(grid: TileGrid, x: number, y: number): number {
   ].reduce((count, index) => count + (grid.pathEdges[index] ? 1 : 0), 0);
 }
 
-function volumeContainsWorldPoint(volume: ParsedMapBoxVolume, x: number, y: number): boolean {
+function pointInConvexPolygon(point: [number, number], polygon: readonly [number, number][]): boolean {
+  let sign = 0;
+  for (let index = 0; index < polygon.length; index++) {
+    const a = polygon[index];
+    const b = polygon[(index + 1) % polygon.length];
+    const cross = (b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0]);
+    if (Math.abs(cross) <= 1e-6) continue;
+    if (sign && Math.sign(cross) !== sign) return false;
+    sign = Math.sign(cross);
+  }
+  return true;
+}
+
+function volumeContainsWorldPoint(volume: ParsedMapVolume, x: number, y: number): boolean {
   const radians = (-volume.yaw * Math.PI) / 180;
   const dx = x - volume.center[0];
   const dy = y - volume.center[1];
   const localX = dx * Math.cos(radians) - dy * Math.sin(radians);
   const localY = dx * Math.sin(radians) + dy * Math.cos(radians);
-  return Math.abs(localX) <= volume.size[0] / 2 && Math.abs(localY) <= volume.size[1] / 2;
+  return pointInConvexPolygon([localX, localY], volume.footprint);
 }
 
-function buildCells(grid: TileGrid, blockingVolumes: readonly ParsedMapBoxVolume[] = []): ReachabilityCell[] {
+function buildCells(grid: TileGrid, blockingVolumes: readonly ParsedMapVolume[] = []): ReachabilityCell[] {
   const cells: ReachabilityCell[] = [];
   for (let y = 0; y < grid.height; y++) {
     for (let x = 0; x < grid.width; x++) {
@@ -465,6 +478,6 @@ export function analyzeTileGridReachability(
 export function analyzeMapReachability(text: string, options: MapReachabilityOptions = {}): MapReachabilityReport {
   return analyzeTileGridReachability(parseTileGrid(text), parseMapEntities(text), {
     ...options,
-    blockingVolumes: options.blockingVolumes ?? parseMapBoxVolumes(text),
+    blockingVolumes: options.blockingVolumes ?? parseMapVolumes(text),
   });
 }

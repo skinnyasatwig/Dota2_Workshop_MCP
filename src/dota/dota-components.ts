@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ManagedMapEntity } from "./map-contract.js";
 import { ManagedTerrainOperation } from "./map-terrain.js";
-import { ManagedMapVolume } from "./map-volume.js";
+import { ManagedMapVolume, regularPolygonFootprint } from "./map-volume.js";
 
 const point2 = z.tuple([z.number().finite(), z.number().finite()]);
 const point3 = z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]);
@@ -129,6 +129,8 @@ const bossPitComponentSchema = z.object({
   entrances: z.array(z.enum(["north", "east", "south", "west"])).optional(),
   entranceWidth: z.number().finite().positive().optional(),
   noWardsRadius: z.number().finite().positive().optional(),
+  noWardsHeight: z.number().finite().positive().max(32768).optional(),
+  noWardsSides: z.number().int().min(8).max(64).optional(),
 }).strict().superRefine((pit, context) => {
   if (pit.floorLevel >= pit.rimLevel) {
     context.addIssue({
@@ -142,6 +144,13 @@ const bossPitComponentSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ["entrances"],
       message: "entrances must not contain duplicates",
+    });
+  }
+  if (pit.noWardsRadius === undefined && (pit.noWardsHeight !== undefined || pit.noWardsSides !== undefined)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: [pit.noWardsHeight !== undefined ? "noWardsHeight" : "noWardsSides"],
+      message: "requires noWardsRadius",
     });
   }
 });
@@ -445,15 +454,16 @@ function pitOperations(component: z.infer<typeof bossPitComponentSchema>): Expan
             : undefined,
     },
   ];
+  const managedVolumes: ManagedMapVolume[] = [];
   if (component.noWardsRadius !== undefined) {
-    managedEntities.push({
-      targetname: `${component.name}_no_wards_marker`,
-      classname: "info_target",
-      origin: originString(component.worldCenter),
-      angles: "0 0 0",
-      properties: {
-        radius: formatted(component.noWardsRadius),
-        comment: "Marker for a future solid trigger_no_wards volume",
+    const height = component.noWardsHeight ?? 1024;
+    managedVolumes.push({
+      targetname: `${component.name}_no_wards`,
+      recipe: "noWards",
+      center: [component.worldCenter[0], component.worldCenter[1], component.worldCenter[2] + height / 2],
+      polygon: {
+        points: regularPolygonFootprint(component.noWardsRadius, component.noWardsSides ?? 32, true),
+        height,
       },
     });
   }
@@ -507,7 +517,7 @@ function pitOperations(component: z.infer<typeof bossPitComponentSchema>): Expan
       },
     });
   }
-  return { managedEntities, managedTerrain, managedVolumes: [] };
+  return { managedEntities, managedTerrain, managedVolumes };
 }
 
 function rotateOffset(offset: Point3, yaw: number): Point3 {

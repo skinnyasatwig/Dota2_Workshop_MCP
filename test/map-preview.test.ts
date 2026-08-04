@@ -4,7 +4,7 @@ import { renderTileGridPreview } from "../src/dota/map-preview.js";
 import { TileGrid } from "../src/dota/tilegrid.js";
 import { ParsedMapEntity } from "../src/dota/vmap.js";
 import { decodePng } from "../src/util/imgmontage.js";
-import { ParsedMapBoxVolume } from "../src/dota/map-volume.js";
+import { ParsedMapVolume } from "../src/dota/map-volume.js";
 
 function grid(width = 6, height = 4): TileGrid {
   return {
@@ -42,13 +42,14 @@ function entity(
 }
 
 test("diagnostic preview renders gameplay and navigation overlays", () => {
-  const volumes: ParsedMapBoxVolume[] = [
+  const volumes: ParsedMapVolume[] = [
     {
       targetname: "camp_bounds",
       classname: "trigger_multiple",
       recipe: "camp",
       center: [384, 768, 192],
       size: [384, 256, 384],
+      footprint: [[-192, -128], [192, -128], [192, 128], [-192, 128]],
       yaw: 20,
       material: "materials/tools/toolstrigger.vmat",
       blocking: false,
@@ -59,6 +60,7 @@ test("diagnostic preview renders gameplay and navigation overlays", () => {
       recipe: "playerClip",
       center: [768, 896, 256],
       size: [512, 128, 512],
+      footprint: [[-256, -64], [256, -64], [256, 64], [-256, 64]],
       yaw: 0,
       material: "materials/tools/toolsplayerclip.vmat",
       blocking: true,

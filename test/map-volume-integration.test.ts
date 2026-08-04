@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseMapBoxVolumes, reconcileMapVolumes } from "../src/dota/map-volume.js";
+import { parseMapVolumes, reconcileMapVolumes } from "../src/dota/map-volume.js";
 import { textToVmap, vmapToText } from "../src/dota/vmap.js";
 
 const dotaRoot = "C:\\Program Files (x86)\\Steam\\steamapps\\common\\dota 2 beta";
@@ -36,7 +36,13 @@ test(
           targetname: "fixture_no_wards",
           recipe: "noWards",
           center: [1024, 512, 256],
-          size: [512, 512, 512],
+          polygon: {
+            points: Array.from({ length: 12 }, (_unused, index) => {
+              const angle = (index / 12) * Math.PI * 2;
+              return [Math.cos(angle) * 256, Math.sin(angle) * 256] as [number, number];
+            }),
+            height: 512,
+          },
           yaw: 30,
         },
         {
@@ -48,7 +54,7 @@ test(
       ]);
       const binary = join(directory, "volume-fixture.vmap");
       await textToVmap(converter, generated.text, binary);
-      const roundTripped = parseMapBoxVolumes(await vmapToText(converter, binary));
+      const roundTripped = parseMapVolumes(await vmapToText(converter, binary));
 
       assert.deepEqual(
         roundTripped
@@ -61,6 +67,7 @@ test(
           { targetname: "fixture_player_clip", recipe: "playerClip", blocking: true },
         ],
       );
+      assert.equal(roundTripped.find((volume) => volume.targetname === "fixture_no_wards")?.footprint.length, 12);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

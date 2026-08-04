@@ -264,10 +264,11 @@ targets with `@local:name`; it becomes the correct namespaced target for each co
 For common gameplay structure, `dotaComponents` provides strongly checked `base`, `ancient`, `tower`, `fountain`,
 `shop`, `camp`, `bossPit`, `playerStart`, `gate`, `baseBlocker`, and `fowBlocker` entries. It derives team numbers, official entity classes,
 stock unit/model names, tower tier names, shop/camp numeric values, base member transforms, and boss-pit terrain.
-See [`examples/dota-components.json`](examples/dota-components.json). A `camp` can now include an optional checked
-rectangular `volume`, which creates the real `trigger_multiple` bounds referenced by its spawner. A boss pit's circular
-no-wards radius still creates a checked placement marker: the generator refuses to approximate a circle with a larger
-box and silently change gameplay. Use an explicit `managedVolumes` box only when a box is genuinely intended.
+See [`examples/dota-components.json`](examples/dota-components.json). A `camp` can include an optional checked
+rectangular `volume`, which creates the real `trigger_multiple` bounds referenced by its spawner. A boss pit's
+`noWardsRadius` creates a real `trigger_no_wards` prism using a checked, configurable regular-polygon approximation
+(32 sides and 1024 units tall by default). The polygon is circumscribed, so the requested radius is fully covered;
+at 32 sides the maximum radial overshoot is under 0.5%.
 `baseBlocker` uses Valve's team-aware base-gate entity. `fowBlocker` turns two or more points into uniquely named,
 explicitly linked `ent_fow_blocker_node` lines; broken links are reported by map inspection/validation and drawn in previews.
 
@@ -399,11 +400,15 @@ contract explicitly uses `fill`. A terrain shape can also use
 `{"kind":"managedPath","name":"path_name","width":2}` to derive its tile-space stroke from an
 existing managed world-space path, keeping roads synchronized with route edits.
 
-`managedVolumes` adds named, axis-aligned or yaw-rotated rectangular solids in world coordinates. Each volume must use
-one checked Valve-derived recipe: `camp`, `trigger`, `heroTrigger`, `dotaTrigger`, `bossAttackable`, `noWards`, or
-`playerClip`. The recipe controls the entity class and tool material; contracts cannot override reserved class,
-transform, or brush fields. Preview and validation inspect the generated geometry, and `playerClip` footprints are
-included in offline reachability. Arbitrary solid classes and arbitrary polygon meshes are deliberately rejected.
+`managedVolumes` adds named convex prisms in world coordinates. A volume chooses either `size: [x,y,z]` for a box or
+`polygon: { points: [[x,y],...], height }` for a three- to 64-sided local footprint; `center` and optional `yaw` place
+that shape in the map. Polygon points must be unique, strictly convex, non-collinear, and non-self-intersecting. Each
+volume uses one checked Valve-derived recipe: `camp`, `trigger`, `heroTrigger`, `dotaTrigger`, `bossAttackable`,
+`noWards`, or `playerClip`. The recipe controls the entity class and tool material; contracts cannot override reserved
+class, transform, or brush fields. Preview, drift validation, reusable component mirroring, and offline `playerClip`
+reachability all follow the true polygon footprint rather than its bounding box. Generated polygons are exercised by
+both Valve's `dmxconvert` round trip and an opt-in isolated `resourcecompiler` integration test. Arbitrary solid classes,
+concave footprints, sloped faces, and curved geometry are deliberately rejected.
 
 Map registration supports both legacy KeyValues 1 and the KV3 `addoninfo.txt` produced by current
 Workshop Tools. Source-controlled layouts under `game/dota_addons/<addon>` and
@@ -412,8 +417,9 @@ the real link operation refuses to overwrite conflicting folders.
 
 Then launch it: `addon_launch_custom_game map="<name>"`.
 
-> Limitation: the MCP can safely generate checked rectangular solid volumes, but bespoke **polygon-mesh geometry**
-> is still authored in **Hammer**. It does not yet sculpt arbitrary sloped/curved solids, bridges, or decorative cliff brushwork.
+> Limitation: the MCP can safely generate checked box and convex-prism gameplay volumes, but general-purpose
+> **polygon-mesh geometry** is still authored in **Hammer**. It does not sculpt concave/sloped/curved solids, bridges,
+> terrain props, or decorative cliff brushwork.
 
 ## Notes & limitations
 

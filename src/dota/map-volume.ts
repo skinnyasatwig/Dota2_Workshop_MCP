@@ -3,6 +3,7 @@ import { z } from "zod";
 import { entityBlockRanges, insertEntity, maxNodeId, parseMapEntities } from "./vmap.js";
 
 const scalar = z.union([z.string(), z.number(), z.boolean()]);
+const point2 = z.tuple([z.number().finite(), z.number().finite()]);
 const point3 = z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]);
 
 export const mapVolumeRecipeSchema = z.enum([
@@ -15,23 +16,43 @@ export const mapVolumeRecipeSchema = z.enum([
   "playerClip",
 ]);
 
-export const managedMapVolumeInputSchema = z.object({
+const managedMapVolumeCommonInputSchema = z.object({
   targetname: z.string().regex(/^[A-Za-z_][A-Za-z0-9_.-]*$/),
   recipe: mapVolumeRecipeSchema,
   center: point3,
-  size: point3,
   yaw: z.number().finite().optional(),
   properties: z.record(scalar).optional(),
-}).strict().superRefine((volume, context) => {
-  volume.size.forEach((value, axis) => {
-    if (value <= 0 || value > 32768) {
+});
+
+const polygonPrismInputSchema = z.object({
+  points: z.array(point2).min(3).max(64),
+  height: z.number().finite().positive().max(32768),
+}).strict();
+
+export const managedMapVolumeInputSchema = z.union([
+  managedMapVolumeCommonInputSchema.extend({ size: point3 }).strict(),
+  managedMapVolumeCommonInputSchema.extend({ polygon: polygonPrismInputSchema }).strict(),
+]).superRefine((volume, context) => {
+  if ("size" in volume) {
+    volume.size.forEach((value, axis) => {
+      if (value <= 0 || value > 32768) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["size", axis],
+          message: "must be greater than 0 and at most 32768 world units",
+        });
+      }
+    });
+  } else {
+    const polygonError = convexPolygonError(volume.polygon.points);
+    if (polygonError) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["size", axis],
-        message: "must be greater than 0 and at most 32768 world units",
+        path: ["polygon", "points"],
+        message: polygonError,
       });
     }
-  });
+  }
   for (const reserved of ["classname", "targetname", "origin", "angles", "source1_brushmodel_index"]) {
     if (volume.properties?.[reserved] !== undefined) {
       context.addIssue({
@@ -44,14 +65,18 @@ export const managedMapVolumeInputSchema = z.object({
 });
 
 export type MapVolumeRecipe = z.infer<typeof mapVolumeRecipeSchema>;
-export interface ManagedMapVolume {
+interface ManagedMapVolumeCommon {
   targetname: string;
   recipe: MapVolumeRecipe;
   center: [number, number, number];
-  size: [number, number, number];
   yaw?: number;
   properties?: Record<string, string>;
 }
+
+export type ManagedMapVolume = ManagedMapVolumeCommon & (
+  | { size: [number, number, number]; polygon?: never }
+  | { size?: never; polygon: { points: [number, number][]; height: number } }
+);
 
 export interface MapVolumeRecipeDefinition {
   classname: string;
@@ -101,9 +126,88 @@ export const MAP_VOLUME_RECIPES: Readonly<Record<MapVolumeRecipe, MapVolumeRecip
     classname: "func_brush",
     material: "materials/tools/toolsplayerclip.vmat",
     properties: { StartDisabled: "0", spawnflags: "2", Solidity: "2", solidbsp: "0" },
-    purpose: "Always-solid invisible player collision box.",
+    purpose: "Always-solid invisible player collision prism.",
   },
 };
+
+function signedPolygonArea(points: readonly [number, number][]): number {
+  return points.reduce((area, [x, y], index) => {
+    const [nextX, nextY] = points[(index + 1) % points.length];
+    return area + x * nextY - nextX * y;
+  }, 0) / 2;
+}
+
+function orientation(a: [number, number], b: [number, number], c: [number, number]): number {
+  return (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+}
+
+function segmentsIntersect(
+  a: [number, number],
+  b: [number, number],
+  c: [number, number],
+  d: [number, number],
+): boolean {
+  const abC = orientation(a, b, c);
+  const abD = orientation(a, b, d);
+  const cdA = orientation(c, d, a);
+  const cdB = orientation(c, d, b);
+  return abC * abD < -1e-8 && cdA * cdB < -1e-8;
+}
+
+function convexPolygonError(points: readonly [number, number][]): string | undefined {
+  if (points.length < 3) return "must contain at least three points";
+  const keys = points.map(([x, y]) => `${x}:${y}`);
+  if (new Set(keys).size !== points.length) return "must not contain duplicate points";
+  if (points.some(([x, y]) => Math.abs(x) > 16384 || Math.abs(y) > 16384)) {
+    return "coordinates must stay within +/-16384 local world units";
+  }
+  if (Math.abs(signedPolygonArea(points)) <= 1) return "must enclose a non-zero area";
+  for (let first = 0; first < points.length; first++) {
+    const firstNext = (first + 1) % points.length;
+    for (let second = first + 1; second < points.length; second++) {
+      const secondNext = (second + 1) % points.length;
+      if (first === second || firstNext === second || secondNext === first) continue;
+      if (segmentsIntersect(points[first], points[firstNext], points[second], points[secondNext])) {
+        return "must not self-intersect";
+      }
+    }
+  }
+  let turn = 0;
+  for (let index = 0; index < points.length; index++) {
+    const cross = orientation(points[index], points[(index + 1) % points.length], points[(index + 2) % points.length]);
+    if (Math.abs(cross) <= 1e-8) return "must not contain collinear adjacent edges";
+    const sign = Math.sign(cross);
+    if (turn && sign !== turn) return "must be convex";
+    turn = sign;
+  }
+  return undefined;
+}
+
+function normalizedPolygon(points: readonly [number, number][]): [number, number][] {
+  const copied = points.map(([x, y]) => [x, y] as [number, number]);
+  return signedPolygonArea(copied) < 0 ? copied.reverse() : copied;
+}
+
+/**
+ * Build a regular convex footprint for JSON generators and reusable components.
+ * Circumscribed mode treats radius as the minimum distance from center to every
+ * polygon edge, which is appropriate for no-ward and collision guarantees.
+ */
+export function regularPolygonFootprint(
+  radius: number,
+  sides = 32,
+  circumscribed = false,
+): [number, number][] {
+  if (!Number.isFinite(radius) || radius <= 0) throw new Error("regular polygon radius must be positive");
+  if (!Number.isInteger(sides) || sides < 3 || sides > 64) {
+    throw new Error("regular polygon sides must be an integer from 3 through 64");
+  }
+  const vertexRadius = circumscribed ? radius / Math.cos(Math.PI / sides) : radius;
+  return Array.from({ length: sides }, (_unused, index) => {
+    const angle = (index / sides) * Math.PI * 2;
+    return [Math.cos(angle) * vertexRadius, Math.sin(angle) * vertexRadius];
+  });
+}
 
 export function parseManagedMapVolumes(
   value: unknown,
@@ -121,11 +225,18 @@ export function parseManagedMapVolumes(
   return result.data.map((volume) => ({
     ...volume,
     center: [...volume.center],
-    size: [...volume.size],
+    ...("size" in volume
+      ? { size: [...volume.size] as [number, number, number] }
+      : {
+          polygon: {
+            points: normalizedPolygon(volume.polygon.points),
+            height: volume.polygon.height,
+          },
+        }),
     properties: volume.properties
       ? Object.fromEntries(Object.entries(volume.properties).map(([key, property]) => [key, String(property)]))
       : undefined,
-  }));
+  })) as ManagedMapVolume[];
 }
 
 function numberText(value: number): string {
@@ -144,31 +255,132 @@ function arrayValues(values: readonly (string | number)[], indent: string): stri
   return values.map((value) => `${indent}"${escaped(value)}"`).join(",\n");
 }
 
-const VERTEX_EDGE_INDICES = [14, 23, 18, 22, 10, 6, 16, 7];
-const VERTEX_DATA_INDICES = [0, 1, 2, 3, 4, 5, 6, 7];
-const EDGE_VERTEX_INDICES = [6, 0, 2, 6, 3, 2, 7, 5, 4, 5, 1, 4, 7, 1, 4, 0, 5, 6, 7, 2, 3, 0, 1, 3];
-const EDGE_OPPOSITE_INDICES = Array.from({ length: 24 }, (_, index) => index % 2 === 0 ? index + 1 : index - 1);
-const EDGE_NEXT_INDICES = [2, 14, 4, 16, 21, 18, 19, 8, 10, 17, 12, 15, 7, 23, 9, 20, 6, 1, 13, 3, 22, 0, 11, 5];
-const EDGE_FACE_INDICES = [0, 3, 0, 4, 0, 2, 4, 1, 1, 3, 1, 5, 1, 2, 3, 5, 4, 3, 2, 4, 5, 0, 5, 2];
-const EDGE_DATA_INDICES = Array.from({ length: 24 }, (_, index) => Math.floor(index / 2));
-const EDGE_VERTEX_DATA_INDICES = [23, 1, 4, 2, 15, 3, 17, 19, 12, 5, 8, 6, 16, 7, 0, 14, 11, 18, 20, 10, 13, 21, 9, 22];
-const FACE_EDGE_INDICES = [21, 7, 23, 17, 19, 15];
-const FACE_DATA_INDICES = [0, 1, 2, 3, 4, 5];
-const FACE_NORMALS = [
-  "1 0 0", "1 0 0", "0 1 0", "-1 0 0", "0 0 1", "1 0 0",
-  "0 -1 0", "-1 0 0", "0 0 -1", "0 -1 0", "0 1 0", "0 1 0",
-  "0 0 -1", "0 -1 0", "0 -1 0", "0 0 1", "0 0 -1", "0 1 0",
-  "1 0 0", "0 0 -1", "-1 0 0", "0 0 1", "-1 0 0", "0 0 1",
-];
-const FACE_TANGENTS = [
-  "0 1 0 -1", "0 1 0 -1", "-1 0 0 -1", "0 -1 0 -1", "1 0 0 -1", "0 1 0 -1",
-  "1 0 0 -1", "0 -1 0 -1", "-1 0 0 -1", "1 0 0 -1", "-1 0 0 -1", "-1 0 0 -1",
-  "-1 0 0 -1", "1 0 0 -1", "1 0 0 -1", "1 0 0 -1", "-1 0 0 -1", "-1 0 0 -1",
-  "0 1 0 -1", "-1 0 0 -1", "0 -1 0 -1", "1 0 0 -1", "0 -1 0 -1", "1 0 0 -1",
-];
-const FACE_UVS = Array.from({ length: 24 }, () => "0 0");
-const FACE_TEXTURE_U = ["1 0 0 32", "-1 0 0 32", "0 -1 0 32", "0 1 0 32", "-1 0 0 32", "1 0 0 32"];
-const FACE_TEXTURE_V = ["0 -1 0 32", "0 -1 0 32", "0 0 -1 0", "0 0 -1 0", "0 0 -1 0", "0 0 -1 0"];
+interface PrismMeshData {
+  vertices: string[];
+  vertexEdgeIndices: number[];
+  vertexDataIndices: number[];
+  edgeVertexIndices: number[];
+  edgeOppositeIndices: number[];
+  edgeNextIndices: number[];
+  edgeFaceIndices: number[];
+  edgeDataIndices: number[];
+  edgeVertexDataIndices: number[];
+  faceEdgeIndices: number[];
+  faceDataIndices: number[];
+  normals: string[];
+  tangents: string[];
+  textureAxisU: string[];
+  textureAxisV: string[];
+}
+
+function footprintAndHeight(volume: ManagedMapVolume): {
+  points: [number, number][];
+  height: number;
+} {
+  if (volume.size !== undefined) {
+    const [width, depth, height] = volume.size;
+    return {
+      points: [
+        [-width / 2, -depth / 2],
+        [width / 2, -depth / 2],
+        [width / 2, depth / 2],
+        [-width / 2, depth / 2],
+      ],
+      height,
+    };
+  }
+  return { points: normalizedPolygon(volume.polygon.points), height: volume.polygon.height };
+}
+
+function buildPrismMesh(points: readonly [number, number][], height: number): PrismMeshData {
+  const count = points.length;
+  const halfHeight = height / 2;
+  const vertices = [
+    ...points.map(([x, y]) => vectorText([x, y, halfHeight])),
+    ...points.map(([x, y]) => vectorText([x, y, -halfHeight])),
+  ];
+  const starts: number[] = [];
+  const ends: number[] = [];
+  const opposites: number[] = [];
+  const addPair = (start: number, end: number): [number, number] => {
+    const forward = starts.length;
+    const reverse = forward + 1;
+    starts.push(start, end);
+    ends.push(end, start);
+    opposites.push(reverse, forward);
+    return [forward, reverse];
+  };
+  const topForward: number[] = [];
+  const topReverse: number[] = [];
+  const bottomReverse: number[] = [];
+  const bottomForward: number[] = [];
+  const down: number[] = [];
+  const up: number[] = [];
+  for (let index = 0; index < count; index++) {
+    const next = (index + 1) % count;
+    const top = addPair(index, next);
+    topForward.push(top[0]);
+    topReverse.push(top[1]);
+    const bottom = addPair(count + next, count + index);
+    bottomReverse.push(bottom[0]);
+    bottomForward.push(bottom[1]);
+    const vertical = addPair(index, count + index);
+    down.push(vertical[0]);
+    up.push(vertical[1]);
+  }
+  const faces: number[][] = [
+    topForward,
+    [...bottomReverse].reverse(),
+    ...points.map((_point, index) => [
+      topReverse[index],
+      down[index],
+      bottomForward[index],
+      up[(index + 1) % count],
+    ]),
+  ];
+  const edgeNextIndices = new Array(starts.length).fill(-1);
+  const edgeFaceIndices = new Array(starts.length).fill(-1);
+  for (const [faceIndex, edges] of faces.entries()) {
+    for (const [edgeIndex, edge] of edges.entries()) {
+      edgeNextIndices[edge] = edges[(edgeIndex + 1) % edges.length];
+      edgeFaceIndices[edge] = faceIndex;
+    }
+  }
+  const faceNormals: [number, number, number][] = [[0, 0, 1], [0, 0, -1]];
+  const faceTangents: [number, number, number, number][] = [[1, 0, 0, -1], [1, 0, 0, 1]];
+  for (let index = 0; index < count; index++) {
+    const [x, y] = points[index];
+    const [nextX, nextY] = points[(index + 1) % count];
+    const dx = nextX - x;
+    const dy = nextY - y;
+    const length = Math.hypot(dx, dy);
+    faceNormals.push([dy / length, -dx / length, 0]);
+    faceTangents.push([dx / length, dy / length, 0, -1]);
+  }
+  const normals = edgeFaceIndices.map((face) => vectorText(faceNormals[face]));
+  const tangents = edgeFaceIndices.map((face) => vectorText(faceTangents[face]));
+  const textureAxisU = faceTangents.map(([x, y, z]) => vectorText([x, y, z, 32]));
+  const textureAxisV = faceTangents.map((_tangent, face) =>
+    face < 2 ? "0 -1 0 32" : "0 0 -1 0");
+  return {
+    vertices,
+    vertexEdgeIndices: Array.from({ length: vertices.length }, (_unused, vertex) =>
+      starts.findIndex((start) => start === vertex)),
+    vertexDataIndices: Array.from({ length: vertices.length }, (_unused, index) => index),
+    edgeVertexIndices: ends,
+    edgeOppositeIndices: opposites,
+    edgeNextIndices,
+    edgeFaceIndices,
+    edgeDataIndices: Array.from({ length: starts.length }, (_unused, index) => Math.floor(index / 2)),
+    edgeVertexDataIndices: Array.from({ length: starts.length }, (_unused, index) => index),
+    faceEdgeIndices: faces.map((edges) => edges[0]),
+    faceDataIndices: faces.map((_edges, index) => index),
+    normals,
+    tangents,
+    textureAxisU,
+    textureAxisV,
+  };
+}
 
 function dataStream(
   name: string,
@@ -206,18 +418,15 @@ ${streams.map((stream) => stream.split("\n").map((line) => `\t\t${line}`).join("
 }`;
 }
 
-export function buildBoxVolumeBlock(
+export function buildMapVolumeBlock(
   volume: ManagedMapVolume,
   entityNodeId: number,
   meshNodeId = entityNodeId + 1,
 ): string {
   const parsed = parseManagedMapVolumes([volume])![0];
   const recipe = MAP_VOLUME_RECIPES[parsed.recipe];
-  const [hx, hy, hz] = parsed.size.map((value) => value / 2) as [number, number, number];
-  const vertices = [
-    [hx, -hy, hz], [-hx, -hy, -hz], [-hx, hy, hz], [-hx, -hy, hz],
-    [hx, -hy, -hz], [hx, hy, -hz], [hx, hy, hz], [-hx, hy, -hz],
-  ].map(vectorText);
+  const geometry = footprintAndHeight(parsed);
+  const mesh = buildPrismMesh(geometry.points, geometry.height);
   const mergedProperties = {
     ...recipe.properties,
     ...(parsed.properties ?? {}),
@@ -228,19 +437,23 @@ export function buildBoxVolumeBlock(
     .join("\n");
   const origin = vectorText(parsed.center);
   const yaw = numberText(((parsed.yaw ?? 0) % 360 + 360) % 360);
-  const vertexData = dataArray(8, [dataStream("position", "position", "vector3", vertices, 3)]);
-  const faceVertexData = dataArray(24, [
-    dataStream("texcoord", "texcoord", "vector2", FACE_UVS, 1),
-    dataStream("normal", "normal", "vector3", FACE_NORMALS, 1),
-    dataStream("tangent", "tangent", "vector4", FACE_TANGENTS, 1),
+  const vertexData = dataArray(mesh.vertices.length, [
+    dataStream("position", "position", "vector3", mesh.vertices, 3),
   ]);
-  const edgeData = dataArray(12, [dataStream("flags", "flags", "int", Array(12).fill(0), 3)]);
-  const faceData = dataArray(6, [
-    dataStream("textureScale", "textureScale", "vector2", Array(6).fill("1 1"), 0),
-    dataStream("textureAxisU", "textureAxisU", "vector4", FACE_TEXTURE_U, 0),
-    dataStream("textureAxisV", "textureAxisV", "vector4", FACE_TEXTURE_V, 0),
-    dataStream("materialindex", "materialindex", "int", Array(6).fill(0), 8),
-    dataStream("flags", "flags", "int", Array(6).fill(0), 3),
+  const faceVertexData = dataArray(mesh.edgeVertexIndices.length, [
+    dataStream("texcoord", "texcoord", "vector2", Array(mesh.edgeVertexIndices.length).fill("0 0"), 1),
+    dataStream("normal", "normal", "vector3", mesh.normals, 1),
+    dataStream("tangent", "tangent", "vector4", mesh.tangents, 1),
+  ]);
+  const edgeCount = mesh.edgeVertexIndices.length / 2;
+  const faceCount = mesh.faceEdgeIndices.length;
+  const edgeData = dataArray(edgeCount, [dataStream("flags", "flags", "int", Array(edgeCount).fill(0), 3)]);
+  const faceData = dataArray(faceCount, [
+    dataStream("textureScale", "textureScale", "vector2", Array(faceCount).fill("1 1"), 0),
+    dataStream("textureAxisU", "textureAxisU", "vector4", mesh.textureAxisU, 0),
+    dataStream("textureAxisV", "textureAxisV", "vector4", mesh.textureAxisV, 0),
+    dataStream("materialindex", "materialindex", "int", Array(faceCount).fill(0), 8),
+    dataStream("flags", "flags", "int", Array(faceCount).fill(0), 3),
   ]);
 
   return `"CMapEntity"
@@ -277,16 +490,16 @@ export function buildBoxVolumeBlock(
 			{
 				"id" "elementid" "${randomUUID()}"
 				"name" "string" "meshData"
-				"vertexEdgeIndices" "int_array" [ ${arrayValues(VERTEX_EDGE_INDICES, "")} ]
-				"vertexDataIndices" "int_array" [ ${arrayValues(VERTEX_DATA_INDICES, "")} ]
-				"edgeVertexIndices" "int_array" [ ${arrayValues(EDGE_VERTEX_INDICES, "")} ]
-				"edgeOppositeIndices" "int_array" [ ${arrayValues(EDGE_OPPOSITE_INDICES, "")} ]
-				"edgeNextIndices" "int_array" [ ${arrayValues(EDGE_NEXT_INDICES, "")} ]
-				"edgeFaceIndices" "int_array" [ ${arrayValues(EDGE_FACE_INDICES, "")} ]
-				"edgeDataIndices" "int_array" [ ${arrayValues(EDGE_DATA_INDICES, "")} ]
-				"edgeVertexDataIndices" "int_array" [ ${arrayValues(EDGE_VERTEX_DATA_INDICES, "")} ]
-				"faceEdgeIndices" "int_array" [ ${arrayValues(FACE_EDGE_INDICES, "")} ]
-				"faceDataIndices" "int_array" [ ${arrayValues(FACE_DATA_INDICES, "")} ]
+				"vertexEdgeIndices" "int_array" [ ${arrayValues(mesh.vertexEdgeIndices, "")} ]
+				"vertexDataIndices" "int_array" [ ${arrayValues(mesh.vertexDataIndices, "")} ]
+				"edgeVertexIndices" "int_array" [ ${arrayValues(mesh.edgeVertexIndices, "")} ]
+				"edgeOppositeIndices" "int_array" [ ${arrayValues(mesh.edgeOppositeIndices, "")} ]
+				"edgeNextIndices" "int_array" [ ${arrayValues(mesh.edgeNextIndices, "")} ]
+				"edgeFaceIndices" "int_array" [ ${arrayValues(mesh.edgeFaceIndices, "")} ]
+				"edgeDataIndices" "int_array" [ ${arrayValues(mesh.edgeDataIndices, "")} ]
+				"edgeVertexDataIndices" "int_array" [ ${arrayValues(mesh.edgeVertexDataIndices, "")} ]
+				"faceEdgeIndices" "int_array" [ ${arrayValues(mesh.faceEdgeIndices, "")} ]
+				"faceDataIndices" "int_array" [ ${arrayValues(mesh.faceDataIndices, "")} ]
 				"materials" "string_array" [ "${recipe.material}" ]
 				"vertexData" ${vertexData.split("\n").map((line) => `\t\t\t\t${line}`).join("\n").trimStart()}
 				"faceVertexData" ${faceVertexData.split("\n").map((line) => `\t\t\t\t${line}`).join("\n").trimStart()}
@@ -295,7 +508,7 @@ export function buildBoxVolumeBlock(
 				"subdivisionData" "CDmePolygonMeshSubdivisionData"
 				{
 					"id" "elementid" "${randomUUID()}"
-					"subdivisionLevels" "int_array" [ ${arrayValues(Array(24).fill(0), "")} ]
+					"subdivisionLevels" "int_array" [ ${arrayValues(Array(mesh.edgeVertexIndices.length).fill(0), "")} ]
 					"streams" "element_array" [ ]
 				}
 			}
@@ -326,6 +539,26 @@ ${propertyLines}
 }`;
 }
 
+export function buildBoxVolumeBlock(
+  volume: ManagedMapVolume,
+  entityNodeId: number,
+  meshNodeId = entityNodeId + 1,
+): string {
+  const parsed = parseManagedMapVolumes([volume])![0];
+  if (!("size" in parsed)) throw new Error("buildBoxVolumeBlock requires a size-based box volume.");
+  return buildMapVolumeBlock(parsed, entityNodeId, meshNodeId);
+}
+
+export function buildPolygonVolumeBlock(
+  volume: ManagedMapVolume,
+  entityNodeId: number,
+  meshNodeId = entityNodeId + 1,
+): string {
+  const parsed = parseManagedMapVolumes([volume])![0];
+  if (!("polygon" in parsed)) throw new Error("buildPolygonVolumeBlock requires a polygon prism volume.");
+  return buildMapVolumeBlock(parsed, entityNodeId, meshNodeId);
+}
+
 function parseVector(value: string | undefined): [number, number, number] | undefined {
   if (!value) return undefined;
   const numbers = value.trim().split(/\s+/).map(Number);
@@ -340,7 +573,7 @@ function positionVertices(block: string): [number, number, number][] | undefined
   const vertices = [...match[1].matchAll(/"([^"]+)"/g)]
     .map((entry) => parseVector(entry[1]))
     .filter((entry): entry is [number, number, number] => !!entry);
-  return vertices.length === 8 ? vertices : undefined;
+  return vertices.length >= 6 && vertices.length % 2 === 0 ? vertices : undefined;
 }
 
 function blockMaterial(block: string): string | undefined {
@@ -349,6 +582,44 @@ function blockMaterial(block: string): string | undefined {
 
 function closeEnough(a: number, b: number): boolean {
   return Math.abs(a - b) <= 1e-4;
+}
+
+function expectedVolumeVertices(volume: ManagedMapVolume): [number, number, number][] {
+  const geometry = footprintAndHeight(volume);
+  return buildPrismMesh(geometry.points, geometry.height).vertices
+    .map((vertex) => parseVector(vertex))
+    .filter((vertex): vertex is [number, number, number] => !!vertex);
+}
+
+function sameVertexSet(
+  actual: readonly [number, number, number][],
+  expected: readonly [number, number, number][],
+): boolean {
+  if (actual.length !== expected.length) return false;
+  const unmatched = [...actual];
+  for (const vertex of expected) {
+    const match = unmatched.findIndex((candidate) =>
+      candidate.every((value, axis) => closeEnough(value, vertex[axis])));
+    if (match < 0) return false;
+    unmatched.splice(match, 1);
+  }
+  return true;
+}
+
+function prismFootprint(vertices: readonly [number, number, number][]): [number, number][] | undefined {
+  const minZ = Math.min(...vertices.map((vertex) => vertex[2]));
+  const maxZ = Math.max(...vertices.map((vertex) => vertex[2]));
+  if (closeEnough(minZ, maxZ)) return undefined;
+  const top = vertices.filter((vertex) => closeEnough(vertex[2], maxZ));
+  const bottom = vertices.filter((vertex) => closeEnough(vertex[2], minZ));
+  if (top.length < 3 || top.length !== bottom.length || top.length * 2 !== vertices.length) return undefined;
+  if (!top.every(([x, y]) => bottom.some(([bottomX, bottomY]) =>
+    closeEnough(x, bottomX) && closeEnough(y, bottomY)))) return undefined;
+  const centerX = top.reduce((sum, vertex) => sum + vertex[0], 0) / top.length;
+  const centerY = top.reduce((sum, vertex) => sum + vertex[1], 0) / top.length;
+  return normalizedPolygon(top
+    .map(([x, y]) => [x, y] as [number, number])
+    .sort((a, b) => Math.atan2(a[1] - centerY, a[0] - centerX) - Math.atan2(b[1] - centerY, b[0] - centerX)));
 }
 
 function volumeBlockMatches(block: string, desired: ManagedMapVolume): boolean {
@@ -362,9 +633,7 @@ function volumeBlockMatches(block: string, desired: ManagedMapVolume): boolean {
   if (!center.every((value, axis) => closeEnough(value, desired.center[axis]))) return false;
   const yaw = ((desired.yaw ?? 0) % 360 + 360) % 360;
   if (!closeEnough(angles[0], 0) || !closeEnough(angles[1], yaw) || !closeEnough(angles[2], 0)) return false;
-  const mins = [0, 1, 2].map((axis) => Math.min(...vertices.map((vertex) => vertex[axis])));
-  const maxs = [0, 1, 2].map((axis) => Math.max(...vertices.map((vertex) => vertex[axis])));
-  if (!desired.size.every((value, axis) => closeEnough(maxs[axis] - mins[axis], value))) return false;
+  if (!sameVertexSet(vertices, expectedVolumeVertices(desired))) return false;
   const properties = { ...recipe.properties, ...(desired.properties ?? {}) };
   return Object.entries(properties).every(([key, value]) => entity.properties[key] === value);
 }
@@ -376,16 +645,21 @@ export interface MapVolumeReconcileResult {
   unchanged: string[];
 }
 
-export interface ParsedMapBoxVolume {
+export interface ParsedMapVolume {
   targetname: string;
   classname: string;
   recipe: MapVolumeRecipe;
   center: [number, number, number];
   size: [number, number, number];
+  /** Convex local-space footprint in counter-clockwise order. */
+  footprint: [number, number][];
   yaw: number;
   material: string;
   blocking: boolean;
 }
+
+/** @deprecated Use ParsedMapVolume. Retained for callers compiled against the box-only milestone. */
+export type ParsedMapBoxVolume = ParsedMapVolume;
 
 function inferredRecipe(
   classname: string,
@@ -403,9 +677,9 @@ function inferredRecipe(
   return undefined;
 }
 
-/** Read checked or Valve-authored rectangular tool volumes from VMAP text. */
-export function parseMapBoxVolumes(text: string): ParsedMapBoxVolume[] {
-  const parsed: ParsedMapBoxVolume[] = [];
+/** Read checked or Valve-authored convex prism tool volumes from VMAP text. */
+export function parseMapVolumes(text: string): ParsedMapVolume[] {
+  const parsed: ParsedMapVolume[] = [];
   for (const range of entityBlockRanges(text)) {
     const center = parseVector(range.entity.origin);
     const angles = parseVector(range.entity.angles) ?? [0, 0, 0];
@@ -415,6 +689,8 @@ export function parseMapBoxVolumes(text: string): ParsedMapBoxVolume[] {
     const targetname = range.entity.targetname ?? `unnamed_volume_${range.start}`;
     const recipe = inferredRecipe(range.entity.classname, material, targetname);
     if (!recipe) continue;
+    const footprint = prismFootprint(vertices);
+    if (!footprint) continue;
     const mins = [0, 1, 2].map((axis) => Math.min(...vertices.map((vertex) => vertex[axis])));
     const maxs = [0, 1, 2].map((axis) => Math.max(...vertices.map((vertex) => vertex[axis])));
     parsed.push({
@@ -423,6 +699,7 @@ export function parseMapBoxVolumes(text: string): ParsedMapBoxVolume[] {
       recipe,
       center,
       size: [maxs[0] - mins[0], maxs[1] - mins[1], maxs[2] - mins[2]],
+      footprint,
       yaw: angles[1],
       material,
       blocking: recipe === "playerClip",
@@ -430,6 +707,10 @@ export function parseMapBoxVolumes(text: string): ParsedMapBoxVolume[] {
   }
   return parsed;
 }
+
+
+/** @deprecated Use parseMapVolumes. Retained for box-only API compatibility. */
+export const parseMapBoxVolumes = parseMapVolumes;
 
 export function reconcileMapVolumes(
   text: string,
@@ -456,7 +737,7 @@ export function reconcileMapVolumes(
       throw new Error(`Managed volume targetname is ambiguous in the map: ${volume.targetname}`);
     }
     if (!matches.length) {
-      additions.push(buildBoxVolumeBlock(volume, nextNodeId, nextNodeId + 1));
+      additions.push(buildMapVolumeBlock(volume, nextNodeId, nextNodeId + 1));
       nextNodeId += 2;
       added.push(volume.targetname);
       continue;
@@ -470,7 +751,7 @@ export function reconcileMapVolumes(
     replacements.push({
       start: existing.start,
       end: existing.end,
-      block: buildBoxVolumeBlock(volume, nodeIds[0] ?? nextNodeId++, nodeIds[1] ?? nextNodeId++),
+      block: buildMapVolumeBlock(volume, nodeIds[0] ?? nextNodeId++, nodeIds[1] ?? nextNodeId++),
     });
     updated.push(volume.targetname);
   }

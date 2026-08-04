@@ -49,6 +49,15 @@
           "recipe": "heroTrigger",
           "center": [0, 0, 128],
           "size": [512, 512, 256]
+        },
+        {
+          "targetname": "asymmetric_no_wards",
+          "recipe": "noWards",
+          "center": [0, 0, 256],
+          "polygon": {
+            "points": [[-384, -256], [256, -320], [448, 64], [192, 384], [-320, 320]],
+            "height": 512
+          }
         }
       ]
     }

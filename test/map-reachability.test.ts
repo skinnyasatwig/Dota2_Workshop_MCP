@@ -6,7 +6,7 @@ import {
 } from "../src/dota/map-reachability.js";
 import { cIndex, TileGrid, vIndex } from "../src/dota/tilegrid.js";
 import { ParsedMapEntity } from "../src/dota/vmap.js";
-import { ParsedMapBoxVolume } from "../src/dota/map-volume.js";
+import { ParsedMapVolume } from "../src/dota/map-volume.js";
 
 function flatGrid(width = 5, height = 3): TileGrid {
   return {
@@ -129,12 +129,13 @@ test("missing terrain recipes are grouped as holes and trap spawns", () => {
 });
 
 test("player-clip footprints participate in offline reachability", () => {
-  const blocker: ParsedMapBoxVolume = {
+  const blocker: ParsedMapVolume = {
     targetname: "center_wall",
     classname: "func_brush",
     recipe: "playerClip",
     center: [640, 384, 256],
     size: [256, 768, 512],
+    footprint: [[-128, -384], [128, -384], [128, 384], [-128, 384]],
     yaw: 0,
     material: "materials/tools/toolsplayerclip.vmat",
     blocking: true,
@@ -151,4 +152,22 @@ test("player-clip footprints participate in offline reachability", () => {
   assert.equal(report.cells.filter((cell) => cell.blockingVolume === blocker.targetname).length, 3);
   assert.equal(report.regions.length, 2);
   assert.ok(report.findings.some((finding) => finding.code === "inaccessible-objective"));
+});
+
+test("offline reachability follows a polygon blocker instead of its bounding box", () => {
+  const blocker: ParsedMapVolume = {
+    targetname: "diamond_blocker",
+    classname: "func_brush",
+    recipe: "playerClip",
+    center: [640, 384, 256],
+    size: [768, 768, 512],
+    footprint: [[0, -384], [384, 0], [0, 384], [-384, 0]],
+    yaw: 0,
+    material: "materials/tools/toolsplayerclip.vmat",
+    blocking: true,
+  };
+  const report = analyzeTileGridReachability(flatGrid(), [], { blockingVolumes: [blocker] });
+
+  assert.equal(report.cells.filter((cell) => cell.blockingVolume === blocker.targetname).length, 5);
+  assert.equal(report.volumeBlockedCellCount, 5);
 });

@@ -460,17 +460,29 @@ function expandComponent(
       `${fieldPrefix(placement)}.${volume.targetname}.yaw`,
       path,
     );
-    return {
-      ...volume,
+    const mirrorCount = Number(placement.mirrorAxis?.includes("x") ?? false) +
+      Number(placement.mirrorAxis?.includes("y") ?? false);
+    const polygon = volume.polygon && mirrorCount % 2 === 1
+      ? {
+          ...volume.polygon,
+          // transformAngles reflects the entity's local X direction. Reflecting
+          // local Y as well preserves the full asymmetric footprint in world space.
+          points: volume.polygon.points.map(([x, y]) => [x, -y] as [number, number]).reverse(),
+        }
+      : volume.polygon;
+    const transformed = {
       targetname: localName(placement.name, volume.targetname),
       center: [
         (placement.mirrorAxis?.includes("x") ? -volume.center[0] : volume.center[0]) + worldOffset[0],
         (placement.mirrorAxis?.includes("y") ? -volume.center[1] : volume.center[1]) + worldOffset[1],
         volume.center[2] + worldOffset[2],
-      ],
+      ] as [number, number, number],
       yaw: transformedAngles ? parseVector(transformedAngles, "transformed volume yaw", path)[1] : volume.yaw,
       properties: localProperties(volume.properties, placement.name),
     };
+    return volume.size !== undefined
+      ? { ...transformed, recipe: volume.recipe, size: volume.size }
+      : { ...transformed, recipe: volume.recipe, polygon: polygon! };
   };
   return {
     managedEntities: (component.managedEntities ?? []).map(transformEntity),

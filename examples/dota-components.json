@@ -87,7 +87,9 @@
       "tileset": 1,
       "entrances": ["north", "east", "west"],
       "entranceWidth": 2.5,
-      "noWardsRadius": 875
+      "noWardsRadius": 875,
+      "noWardsSides": 32,
+      "noWardsHeight": 1024
     },
     {
       "kind": "fowBlocker",
