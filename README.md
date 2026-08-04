@@ -239,7 +239,10 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
   to start the game, then uses the installed executable only when Steam created no Dota process.
 - **`map_recipe_catalog`** — inspect the named terrain cores, Radiant/Dire cliff recipes, ramp-safe
   fallbacks, checked solid-volume recipes, and official Valve prefab references used by the generator. `verifyInstalled:true` checks
-  the references against the current Workshop Tools install without opening Hammer.
+  the references against the current Workshop Tools install without opening Hammer. It also compares Steam/Dota/tools
+  versions and hashes of the official tilesets, PvP prefab, FGD, and compiler against the last proven baseline. A newer
+  game build with unchanged recipe sources is reported as compatible; changed source/tools files request re-verification.
+  `dota_doctor` includes the same concise compatibility status.
 - **`entity_catalog`** — the placeable-entity reference (spawners, `path_track` waypoints, triggers,
   lights, props, …) so you know what to place. Text searches augment the curated list with classes
   and keyvalues parsed from the installed official `dota.fgd`.

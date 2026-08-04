@@ -10,6 +10,7 @@ import { parseAddonInfo } from "../dota/addoninfo.js";
 import { readTextFile } from "../util/fsx.js";
 import { auditAddon } from "../dota/audit.js";
 import { inspectProjectLink } from "../dota/project-link.js";
+import { verifyInstalledRecipeVersion } from "../dota/recipe-version.js";
 import { json, text, error, guard, ToolResult } from "../util/result.js";
 
 async function listAddons(dir: string): Promise<string[]> {
@@ -35,6 +36,7 @@ export function registerDiagnosticsTools(server: McpServer) {
       if (!dota) {
         report.dota = { found: false, hint: "Set DOTA2_PATH to your 'dota 2 beta' folder." };
       } else {
+        const recipeVerification = await verifyInstalledRecipeVersion(dota);
         report.dota = {
           found: true,
           root: dota.root,
@@ -42,6 +44,13 @@ export function registerDiagnosticsTools(server: McpServer) {
           dota2Exe: (await pathExists(dota.dota2Exe)) ? dota.dota2Exe : `MISSING: ${dota.dota2Exe}`,
           resourceCompiler: (await pathExists(dota.resourceCompilerExe)) ? dota.resourceCompilerExe : "missing",
           workshopTools: await hasWorkshopTools(dota),
+          recipeVerification: {
+            status: recipeVerification.status,
+            verifiedAt: recipeVerification.baseline.verifiedAt,
+            baselineBuild: recipeVerification.baseline.appBuildId,
+            installedBuild: recipeVerification.installed.appBuildId ?? null,
+            findings: recipeVerification.findings,
+          },
         };
       }
 

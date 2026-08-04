@@ -70,7 +70,7 @@ async function main() {
     "lua_api_get", "scaffold_ability", "scaffold_modifier", "addon_build", "addon_launch_tools",
     "dota_send_console_command", "dota_read_console_log", "dota_reload_scripts",
     "dota_restart_game", "dota_dev_cycle", "dota_screenshot", "dota_watch_errors",
-    "docs_search", "docs_get", "docs_list", "dota_patterns", "panorama_api_search", "panorama_api_get", "tools_catalog",
+    "docs_search", "docs_get", "docs_list", "dota_patterns", "panorama_api_search", "panorama_api_get", "tools_catalog", "map_recipe_catalog",
     "map_create", "map_add_entity", "map_to_text", "map_from_text", "map_compile", "map_list",
     "map_engine_nav_test",
     "kv3_read", "soundevents_list", "soundevents_get", "soundevents_upsert",
@@ -166,6 +166,11 @@ async function main() {
   // 8) dota_doctor (read-only; will report whether the real install is found)
   const doctor = await client.callTool({ name: "dota_doctor", arguments: {} });
   check("dota_doctor runs", !doctor.isError, textOf(doctor).slice(0, 200));
+  const doctorText = textOf(doctor);
+  check(
+    "dota_doctor reports recipe compatibility when Dota is installed",
+    /"found"\s*:\s*false/.test(doctorText) || /recipeVerification/.test(doctorText),
+  );
 
   // 9) debug tools — use port 29999 (no game listening) so VConsole refuses deterministically
   const sendNoGame = await client.callTool({ name: "dota_send_console_command", arguments: { command: "echo hi", vconPort: 29999, waitMs: 500 } });
@@ -200,6 +205,8 @@ async function main() {
 
   const cat = await client.callTool({ name: "tools_catalog", arguments: { category: "official" } });
   check("tools_catalog official lists VConsole/Hammer", /VConsole|Hammer/.test(textOf(cat)));
+  const mapRecipes = await client.callTool({ name: "map_recipe_catalog", arguments: { verifyInstalled: true } });
+  check("map_recipe_catalog reports its verified Dota baseline", /Baseline Dota build/.test(textOf(mapRecipes)));
 
   // 10b) design patterns knowledge base
   const patAll = await client.callTool({ name: "dota_patterns", arguments: {} });

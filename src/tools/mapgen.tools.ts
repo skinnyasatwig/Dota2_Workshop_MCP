@@ -30,6 +30,10 @@ import {
   VALVE_PREFAB_RECIPES,
   validateTerrainRecipeLibrary,
 } from "../dota/terrain-recipes.js";
+import {
+  RECIPE_VERIFICATION_BASELINE,
+  verifyInstalledRecipeVersion,
+} from "../dota/recipe-version.js";
 import { writeTextFile, pathExists } from "../util/fsx.js";
 import { json, text, image, error, guard, ToolResult } from "../util/result.js";
 
@@ -322,6 +326,7 @@ export function registerMapGenTools(server: McpServer) {
     guard(async ({ category, verifyInstalled }): Promise<ToolResult> => {
       const errors = validateTerrainRecipeLibrary();
       const dota = verifyInstalled ? await resolveDotaPaths() : undefined;
+      const recipeVerification = dota ? await verifyInstalledRecipeVersion(dota) : null;
       const prefabs = await Promise.all(
         VALVE_PREFAB_RECIPES
           .filter((recipe) => !category || (category !== "volume" && recipe.category === category))
@@ -344,11 +349,15 @@ export function registerMapGenTools(server: McpServer) {
           pointBlockerRecipes: !category || category === "base" ? POINT_BLOCKER_RECIPES : {},
           prefabs,
           installVerified: verifyInstalled === true && Boolean(dota),
+          recipeVerificationBaseline: RECIPE_VERIFICATION_BASELINE,
+          recipeVerification,
         },
         `Recipe library ${errors.length ? `has ${errors.length} validation error(s)` : "is valid"}: ` +
           `${CORE_TERRAIN_RECIPES.length} terrain cores, ${CLIFF_RECIPE_SETS.length} cliff sets, ` +
           `${prefabs.length} Valve prefab references, ` +
-          `${!category || category === "volume" ? Object.keys(MAP_VOLUME_RECIPES).length : 0} checked volume recipes.`,
+          `${!category || category === "volume" ? Object.keys(MAP_VOLUME_RECIPES).length : 0} checked volume recipes. ` +
+          `Baseline Dota build ${RECIPE_VERIFICATION_BASELINE.appBuildId}` +
+          `${recipeVerification ? `; installed recipe status: ${recipeVerification.status}` : ""}.`,
       );
     }),
   );
