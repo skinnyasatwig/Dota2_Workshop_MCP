@@ -36,6 +36,19 @@ export interface DotaLaunchTarget {
   method: "steam" | "direct";
 }
 
+export function buildDirectDotaLaunchTarget(
+  dota2Exe: string,
+  args: string[],
+  platform: NodeJS.Platform = process.platform,
+): DotaLaunchTarget {
+  return {
+    executable: dota2Exe,
+    args,
+    cwd: (platform === "win32" ? win32 : { dirname }).dirname(dota2Exe),
+    method: "direct",
+  };
+}
+
 /**
  * Choose the reliable Windows launch path.
  *
@@ -56,12 +69,10 @@ export function buildDotaLaunchTarget(
   const platform = options.platform ?? process.platform;
   const pathExists = options.pathExists ?? existsSync;
   const pathApi = platform === "win32" ? win32 : { resolve, dirname };
-  const direct = {
-    executable: dota2Exe,
-    args,
-    cwd: pathApi.dirname(dota2Exe),
-    method: "direct" as const,
-  };
+  const direct =
+    platform === "win32"
+      ? buildDirectDotaLaunchTarget(dota2Exe, args, platform)
+      : { executable: dota2Exe, args, cwd: pathApi.dirname(dota2Exe), method: "direct" as const };
 
   if (platform !== "win32") return direct;
   const inferredSteamExe = pathApi.resolve(dotaRoot, "..", "..", "..", "steam.exe");

@@ -230,7 +230,8 @@ walk — tower defense"* into a real map:
   first, reads routes from the unified map specification (or explicit input), asks Valve's real `GridNav`
   for endpoint and segment reachability/path lengths, returns structured failures, and automatically
   shuts Dota down even when a check fails. It is a dry run by default and refuses to replace an existing
-  Dota session unless that permission is explicit.
+  Dota session unless that permission is explicit. Its default `auto` launcher gives Steam a bounded chance
+  to start the game, then uses the installed executable only when Steam created no Dota process.
 - **`map_recipe_catalog`** — inspect the named terrain cores, Radiant/Dire cliff recipes, ramp-safe
   fallbacks, and official Valve prefab references used by the generator. `verifyInstalled:true` checks
   the references against the current Workshop Tools install without opening Hammer.

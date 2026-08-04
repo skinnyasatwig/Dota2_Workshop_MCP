@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildDotaLaunchTarget } from "../src/dota/launch.js";
+import { buildDirectDotaLaunchTarget, buildDotaLaunchTarget } from "../src/dota/launch.js";
 
 const root = String.raw`C:\Program Files (x86)\Steam\steamapps\common\dota 2 beta`;
 const dota = String.raw`C:\Program Files (x86)\Steam\steamapps\common\dota 2 beta\game\bin\win64\dota2.exe`;
@@ -50,4 +50,12 @@ test("non-Windows launch remains direct", () => {
 
   assert.equal(target.method, "direct");
   assert.equal(target.executable, "/games/dota/game/bin/linuxsteamrt64/dota2");
+});
+
+test("explicit direct launch keeps the installed executable and arguments", () => {
+  const target = buildDirectDotaLaunchTarget(dota, args, "win32");
+  assert.equal(target.method, "direct");
+  assert.equal(target.executable, dota);
+  assert.deepEqual(target.args, args);
+  assert.equal(target.cwd, String.raw`C:\Program Files (x86)\Steam\steamapps\common\dota 2 beta\game\bin\win64`);
 });

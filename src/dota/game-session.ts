@@ -1,5 +1,5 @@
 import { DotaPaths } from "./paths.js";
-import { buildDotaLaunchTarget, buildLaunchArgs } from "./launch.js";
+import { buildDirectDotaLaunchTarget, buildDotaLaunchTarget, buildLaunchArgs } from "./launch.js";
 import { isProcessRunning, killProcess, spawnDetached } from "./process.js";
 import { defaultVconPort, getVConsole } from "./vconsole.js";
 
@@ -10,7 +10,12 @@ export interface GameLaunchResult {
   command: string;
   killed: boolean;
   reconnected: boolean;
+  method: "steam" | "direct";
+  fallbackUsed: boolean;
+  primaryCommand?: string;
 }
+
+export type GameLaunchStrategy = "auto" | "steam" | "direct";
 
 export interface GameShutdownResult {
   quitSent: boolean;
@@ -27,13 +32,42 @@ export async function restartGame(
   port: number,
   cheats: boolean,
   reconnect: boolean,
+  strategy: GameLaunchStrategy = "auto",
 ): Promise<GameLaunchResult> {
   const args = buildLaunchArgs({ addon, map, insecure: true, dev: true, cheats, vconPort: port });
-  const target = buildDotaLaunchTarget(dota.root, dota.dota2Exe, args, { steamExe: dota.steamExe });
+  let target =
+    strategy === "direct"
+      ? buildDirectDotaLaunchTarget(dota.dota2Exe, args)
+      : buildDotaLaunchTarget(dota.root, dota.dota2Exe, args, { steamExe: dota.steamExe });
+  if (strategy === "steam" && target.method !== "steam") {
+    throw new Error("Steam launch was requested, but steam.exe could not be located.");
+  }
   getVConsole(port).disconnect();
   const kill = await killProcess("dota2.exe");
   await sleep(1500);
-  const { pid, command } = spawnDetached(target.executable, target.args, target.cwd);
+  const primary = spawnDetached(target.executable, target.args, target.cwd);
+  let pid = primary.pid;
+  let command = primary.command;
+  let fallbackUsed = false;
+
+  // On some Windows/Steam states, a second steam.exe accepts -applaunch and
+  // exits without forwarding it to the already-running client. Bound that
+  // ambiguity before falling back; only the process that actually starts Dota
+  // counts as the one engine session.
+  if (strategy === "auto" && target.method === "steam") {
+    const processDeadline = Date.now() + 20_000;
+    while (Date.now() < processDeadline && !(await isProcessRunning("dota2.exe"))) {
+      await sleep(500);
+    }
+    if (!(await isProcessRunning("dota2.exe"))) {
+      const direct = buildDirectDotaLaunchTarget(dota.dota2Exe, args);
+      const fallback = spawnDetached(direct.executable, direct.args, direct.cwd);
+      target = direct;
+      pid = fallback.pid;
+      command = fallback.command;
+      fallbackUsed = true;
+    }
+  }
   let reconnected = false;
   if (reconnect) {
     try {
@@ -43,7 +77,15 @@ export async function restartGame(
       // The caller can continue waiting and report a map-specific readiness failure.
     }
   }
-  return { pid, command, killed: kill.code === 0, reconnected };
+  return {
+    pid,
+    command,
+    killed: kill.code === 0,
+    reconnected,
+    method: target.method,
+    fallbackUsed,
+    primaryCommand: fallbackUsed ? primary.command : undefined,
+  };
 }
 
 /**

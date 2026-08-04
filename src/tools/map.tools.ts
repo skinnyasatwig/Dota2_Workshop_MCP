@@ -360,6 +360,10 @@ export function registerMapTools(server: McpServer) {
           .boolean()
           .optional()
           .describe("Allow this tool to close an existing Dota session before its one launch (default false)."),
+        launchStrategy: z
+          .enum(["auto", "steam", "direct"])
+          .optional()
+          .describe("Launch transport (default auto: Steam, then direct only if Steam creates no Dota process)."),
         vconPort: z.number().int().min(1).max(65535).optional(),
         dryRun: z
           .boolean()
@@ -383,6 +387,7 @@ export function registerMapTools(server: McpServer) {
         errorWindowMs,
         shutdownTimeoutMs,
         replaceRunningDota,
+        launchStrategy,
         vconPort,
         dryRun,
       }): Promise<ToolResult> => {
@@ -441,6 +446,7 @@ export function registerMapTools(server: McpServer) {
               dotaWasRunning,
               replaceRunningDota: replaceRunningDota === true,
               launchCount: 1,
+              launchStrategy: launchStrategy ?? "auto",
               automaticShutdown: true,
               commandBytes: commands.map((command) => command.length),
             },
@@ -479,7 +485,15 @@ export function registerMapTools(server: McpServer) {
         let shutdown: Awaited<ReturnType<typeof shutdownGame>> | undefined;
 
         try {
-          launchResult = await restartGame(dota, project.addonName, map, port, true, true);
+          launchResult = await restartGame(
+            dota,
+            project.addonName,
+            map,
+            port,
+            true,
+            true,
+            launchStrategy ?? "auto",
+          );
           launched = true;
           if (!vc.isConnected()) await vc.connectWithRetry(60_000, 1000);
           vc.clearRing();
