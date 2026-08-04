@@ -10,7 +10,13 @@ export interface FgdDefinitionCatalog {
 
 export interface FgdValidationFinding {
   severity: "error" | "warn";
-  code: "fgd-property-value-invalid" | "fgd-property-unknown" | "fgd-class-unknown";
+  code:
+    | "fgd-property-value-invalid"
+    | "fgd-property-choice-invalid"
+    | "fgd-property-range-invalid"
+    | "fgd-target-missing"
+    | "fgd-property-unknown"
+    | "fgd-class-unknown";
   targetname: string;
   classname: string;
   property?: string;
@@ -22,6 +28,9 @@ export interface FgdValidationReport {
   knownClassCount: number;
   unknownClassNames: string[];
   checkedPropertyCount: number;
+  checkedChoiceCount: number;
+  checkedRangeCount: number;
+  checkedReferenceCount: number;
   unknownProperties: {
     classname: string;
     property: string;
@@ -90,6 +99,7 @@ function validPropertyValue(type: string, value: string): boolean {
   if (normalized === "boolean") {
     return ["0", "1", "true", "false", "yes", "no"].includes(value.trim().toLowerCase());
   }
+  if (normalized === "flags") return /^\d+$/.test(value.trim());
   if (["vector", "vector2d", "angle", "angles", "color255", "color1"].includes(normalized)) {
     const coordinates = value.trim().split(/\s+/).map(Number);
     return coordinates.length >= 2 && coordinates.every(Number.isFinite);
@@ -100,7 +110,7 @@ function validPropertyValue(type: string, value: string): boolean {
 export function validateEntitiesAgainstFgd(
   entities: ParsedMapEntity[],
   catalog: FgdDefinitionCatalog,
-  options: { strictUnknown?: boolean } = {},
+  options: { strictUnknown?: boolean; checkReferences?: boolean } = {},
 ): FgdValidationReport {
   // These are serialized map/tool fields accepted independently of a class's exposed keyvalue list.
   // `solid` and `use_animgraph` also come from Hammer's studioprop behavior, which is not represented
@@ -114,6 +124,15 @@ export function validateEntitiesAgainstFgd(
   >();
   let knownClassCount = 0;
   let checkedPropertyCount = 0;
+  let checkedChoiceCount = 0;
+  let checkedRangeCount = 0;
+  let checkedReferenceCount = 0;
+  const targetnames = new Set(
+    entities
+      .map((entity) => entity.targetname?.trim().toLowerCase())
+      .filter((name): name is string => Boolean(name)),
+  );
+  const classnames = new Set(entities.map((entity) => entity.classname.trim().toLowerCase()));
   for (const entity of entities) {
     const properties = catalog.propertiesFor(entity.classname);
     const targetname = entity.targetname ?? "";
@@ -167,6 +186,86 @@ export function validateEntitiesAgainstFgd(
           property: name,
           detail: `${entity.classname} property "${name}" expects ${property.type}; found "${value}".`,
         });
+        continue;
+      }
+      const trimmedValue = value.trim();
+      const matchingChoice = property.choices?.some((choice) => {
+        if (choice.value === trimmedValue) return true;
+        const choiceNumber = Number(choice.value);
+        const valueNumber = Number(trimmedValue);
+        return choice.value !== "" && trimmedValue !== "" &&
+          Number.isFinite(choiceNumber) && Number.isFinite(valueNumber) && choiceNumber === valueNumber;
+      });
+      if (property.choiceMode === "enum" && property.choices?.length) checkedChoiceCount++;
+      if (
+        property.choiceMode === "enum" &&
+        property.choices?.length &&
+        !matchingChoice
+      ) {
+        const listed = property.choices
+          .slice(0, 20)
+          .map((choice) => `"${choice.value}"`)
+          .join(", ");
+        const allowed = property.choices.length > 20
+          ? `${listed}, and ${property.choices.length - 20} more`
+          : listed;
+        findings.push({
+          severity: "error",
+          code: "fgd-property-choice-invalid",
+          targetname,
+          classname: entity.classname,
+          property: name,
+          detail: `${entity.classname} property "${name}" found "${value}"; Valve allows ${allowed}.`,
+        });
+        continue;
+      }
+      const numericValue = Number(value);
+      if (property.minimum !== undefined || property.maximum !== undefined) checkedRangeCount++;
+      if (
+        Number.isFinite(numericValue) &&
+        ((property.minimum !== undefined && numericValue < property.minimum) ||
+          (property.maximum !== undefined && numericValue > property.maximum))
+      ) {
+        const bounds = [
+          property.minimum === undefined ? undefined : `minimum ${property.minimum}`,
+          property.maximum === undefined ? undefined : `maximum ${property.maximum}`,
+        ].filter(Boolean).join(", ");
+        findings.push({
+          severity: "error",
+          code: "fgd-property-range-invalid",
+          targetname,
+          classname: entity.classname,
+          property: name,
+          detail: `${entity.classname} property "${name}" found "${value}"; Valve declares ${bounds}.`,
+        });
+        continue;
+      }
+      const destination = value.trim();
+      const isTargetDestination = property.type.trim().toLowerCase() === "target_destination";
+      if (options.checkReferences !== false && isTargetDestination && destination) {
+        checkedReferenceCount++;
+      }
+      const dynamicDestination =
+        destination.startsWith("!") ||
+        destination.startsWith("@") ||
+        destination.includes("*") ||
+        destination.includes("?");
+      if (
+        options.checkReferences !== false &&
+        isTargetDestination &&
+        destination &&
+        !dynamicDestination &&
+        !targetnames.has(destination.toLowerCase()) &&
+        !classnames.has(destination.toLowerCase())
+      ) {
+        findings.push({
+          severity: "warn",
+          code: "fgd-target-missing",
+          targetname,
+          classname: entity.classname,
+          property: name,
+          detail: `${entity.classname} property "${name}" refers to missing targetname "${destination}".`,
+        });
       }
     }
   }
@@ -175,6 +274,9 @@ export function validateEntitiesAgainstFgd(
     knownClassCount,
     unknownClassNames: [...unknownClasses].sort(),
     checkedPropertyCount,
+    checkedChoiceCount,
+    checkedRangeCount,
+    checkedReferenceCount,
     unknownProperties: [...unknownProperties.values()]
       .map((entry) => ({
         classname: entry.classname,

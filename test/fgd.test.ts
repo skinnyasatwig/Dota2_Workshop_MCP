@@ -31,7 +31,16 @@ test("parseFgdEntities extracts classes, bases, and top-level properties", () =>
     description: "Spawns neutral units.",
     bases: ["Targetname"],
     properties: [
-      { name: "NeutralType", type: "choices", kind: "keyvalue" },
+      {
+        name: "NeutralType",
+        type: "choices",
+        kind: "keyvalue",
+        choiceMode: "enum",
+        choices: [
+          { value: "0", label: "Easy" },
+          { value: "1", label: "Moderate" },
+        ],
+      },
       { name: "VolumeName", type: "target_destination", kind: "keyvalue" },
       { name: "SpawnNow", type: "void", kind: "input" },
       { name: "OnSpawnerExhausted", type: "void", kind: "output" },
@@ -69,6 +78,55 @@ test("parseFgdEntities includes base and override classes without descriptions",
   ]);
   assert.equal(entities[0].properties[0].name, "teamnumber");
   assert.equal(entities[1].properties[0].name, "MapUnitName");
+});
+
+test("parseFgdEntities preserves enum, flag, and numeric range metadata", () => {
+  const [entity] = parseFgdEntities(`
+@PointClass = constrained_entity
+[
+  Mode(choices) : "Mode" : "FAST" =
+  [
+    "FAST" : "Fast"
+    "SAFE" : "Safe"
+  ]
+  spawnflags(flags) =
+  [
+    1 : "Enabled" : 1
+    4 : "Visible" : 0
+  ]
+  Blend(float) [ group="Preview", min="0.0", max="1.0" ] : "Blend" : "0.5"
+]
+`);
+
+  assert.deepEqual(entity.properties, [
+    {
+      name: "Mode",
+      type: "choices",
+      kind: "keyvalue",
+      choiceMode: "enum",
+      choices: [
+        { value: "FAST", label: "Fast" },
+        { value: "SAFE", label: "Safe" },
+      ],
+    },
+    {
+      name: "spawnflags",
+      type: "flags",
+      kind: "keyvalue",
+      choiceMode: "flags",
+      choices: [
+        { value: "1", label: "Enabled" },
+        { value: "4", label: "Visible" },
+      ],
+    },
+    {
+      name: "Blend",
+      type: "float",
+      kind: "keyvalue",
+      minimum: 0,
+      maximum: 1,
+    },
+  ]);
 });
 
 test("categoryForFgdEntity groups official Dota entities for catalog filtering", () => {

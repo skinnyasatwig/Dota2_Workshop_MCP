@@ -236,6 +236,18 @@ async function main() {
   // 13b) entity catalog
   const ec = await client.callTool({ name: "entity_catalog", arguments: { category: "path" } });
   check("entity_catalog lists path entities (path_track)", /path_track/.test(textOf(ec)));
+  const constrainedEntity = await client.callTool({
+    name: "entity_catalog",
+    arguments: { query: "npc_dota_base_blocker", limit: 5 },
+  });
+  const constrainedEntries = constrainedEntity.structuredContent?.entities ?? [];
+  const baseBlocker = constrainedEntries.find((entry) => entry.name === "npc_dota_base_blocker");
+  const teamRule = baseBlocker?.propertyRules?.find((rule) => rule.name.toLowerCase() === "teamnumber");
+  check(
+    "entity_catalog exposes inherited official choice rules",
+    teamRule?.choices?.some((choice) => choice.value === "2") &&
+      teamRule?.choices?.some((choice) => choice.value === "3"),
+  );
 
   // 14) VPK reader against the REAL Dota install (proves base-game access)
   const vf = await client.callTool({ name: "vpk_find", arguments: { query: "scripts/npc/npc_heroes", limit: 5 } });

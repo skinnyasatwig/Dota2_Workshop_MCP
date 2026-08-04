@@ -6,6 +6,7 @@ import { resolveProject } from "../config.js";
 import { requireDotaPaths, resolveDotaPaths } from "../dota/paths.js";
 import { vmapToText, textToVmap, buildEntityBlock, insertEntity, maxNodeId } from "../dota/vmap.js";
 import { categoryForFgdEntity, parseFgdEntities } from "../dota/fgd.js";
+import { buildFgdDefinitionCatalog } from "../dota/fgd-validation.js";
 import { parseTileGrid, tileToWorld } from "../dota/tilegrid.js";
 import { registerMapFile } from "../dota/addoninfo.js";
 import { compileProjectMap, projectMapPaths } from "../dota/map-project.js";
@@ -390,6 +391,14 @@ export function registerMapGenTools(server: McpServer) {
         source?: "curated" | "official-fgd";
         classType?: string;
         bases?: string[];
+        propertyRules?: {
+          name: string;
+          type: string;
+          kind: "keyvalue" | "input" | "output";
+          choices?: { value: string; label: string }[];
+          minimum?: number;
+          maximum?: number;
+        }[];
       };
       let list: CatalogEntry[] = (data.entities as CatalogEntry[]).map((entry) => ({
         ...entry,
@@ -399,19 +408,62 @@ export function registerMapGenTools(server: McpServer) {
         const dota = await resolveDotaPaths();
         const fgdPath = dota ? join(dota.dotaGameDir, "dota.fgd") : undefined;
         if (fgdPath && (await pathExists(fgdPath))) {
+          const coreFgdPath = join(dota!.dotaGameDir, "..", "core", "base.fgd");
+          const dotaDefinitions = parseFgdEntities(await readFile(fgdPath, "utf8"));
+          const definitions = (await pathExists(coreFgdPath))
+            ? [
+                ...parseFgdEntities(await readFile(coreFgdPath, "utf8")),
+                ...dotaDefinitions,
+              ]
+            : dotaDefinitions;
+          const definitionCatalog = buildFgdDefinitionCatalog(definitions);
+          const constrainedRules = (classname: string): NonNullable<CatalogEntry["propertyRules"]> =>
+            [...(definitionCatalog.propertiesFor(classname)?.values() ?? [])]
+              .filter((property) =>
+                property.kind === "keyvalue" &&
+                (property.choiceMode === "enum" ||
+                  property.minimum !== undefined ||
+                  property.maximum !== undefined ||
+                  property.type.trim().toLowerCase() === "target_destination"),
+              )
+              .map((property) => ({
+                name: property.name,
+                type: property.type,
+                kind: property.kind,
+                ...(property.choices?.length ? { choices: property.choices } : {}),
+                ...(property.minimum !== undefined ? { minimum: property.minimum } : {}),
+                ...(property.maximum !== undefined ? { maximum: property.maximum } : {}),
+              }));
+          list = list.map((entry) => {
+            const propertyRules = constrainedRules(entry.name);
+            return propertyRules.length ? { ...entry, propertyRules } : entry;
+          });
           const known = new Set(list.map((entry) => entry.name));
-          const official = parseFgdEntities(await readFile(fgdPath, "utf8"))
+          const official = dotaDefinitions
             .filter((entry) => !known.has(entry.name))
             .map<CatalogEntry>((entry) => ({
               name: entry.name,
               category: categoryForFgdEntity(entry.name),
               purpose: entry.description || `Official ${entry.classType} from dota.fgd.`,
               keyValues: entry.properties
-                .map((property) => `${property.kind === "keyvalue" ? "" : `${property.kind} `}${property.name}`)
+                .map((property) => {
+                  const kind = property.kind === "keyvalue" ? "" : `${property.kind} `;
+                  const choiceSummary = property.choiceMode === "enum" && property.choices?.length
+                    ? `: ${property.choices.slice(0, 12).map((choice) => choice.value).join("|")}` +
+                      (property.choices.length > 12 ? "|..." : "")
+                    : "";
+                  const rangeSummary = property.minimum !== undefined || property.maximum !== undefined
+                    ? `: ${property.minimum ?? "-inf"}..${property.maximum ?? "+inf"}`
+                    : "";
+                  return `${kind}${property.name} (${property.type}${choiceSummary}${rangeSummary})`;
+                })
                 .join(", "),
               source: "official-fgd",
               classType: entry.classType,
               bases: entry.bases,
+              ...(constrainedRules(entry.name).length
+                ? { propertyRules: constrainedRules(entry.name) }
+                : {}),
             }));
           list.push(...official);
         }

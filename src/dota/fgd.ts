@@ -1,7 +1,16 @@
+export interface FgdChoice {
+  value: string;
+  label: string;
+}
+
 export interface FgdProperty {
   name: string;
   type: string;
   kind: "keyvalue" | "input" | "output";
+  choiceMode?: "enum" | "flags";
+  choices?: FgdChoice[];
+  minimum?: number;
+  maximum?: number;
 }
 
 export interface FgdEntity {
@@ -43,6 +52,7 @@ function matchingBracket(text: string, openAt: number): number {
 function parseTopLevelProperties(block: string): FgdProperty[] {
   const properties: FgdProperty[] = [];
   let depth = 1;
+  let choiceProperty: FgdProperty | undefined;
   for (const rawLine of block.split(/\r?\n/)) {
     const line = rawLine.replace(/\/\/.*$/, "").trim();
     if (depth === 1) {
@@ -55,21 +65,51 @@ function parseTopLevelProperties(block: string): FgdProperty[] {
         });
       } else {
         const keyvalue = line.match(
-          /^([A-Za-z_]\w*)\s*\(\s*([^)]+?)\s*\)\s*(?:(?:\{[^}]*\}|\[[^\]]*\])\s*)*:/,
+          /^([A-Za-z_]\w*)\s*\(\s*([^)]+?)\s*\)\s*((?:(?:\{[^}]*\}|\[[^\]]*\])\s*)*)(?::|=|$)/,
         );
         if (keyvalue) {
-          properties.push({
+          const metadata = keyvalue[3];
+          const property: FgdProperty = {
             name: keyvalue[1],
             type: keyvalue[2],
             kind: "keyvalue",
-          });
+          };
+          const normalizedType = property.type.trim().toLowerCase();
+          if (normalizedType === "choices" || normalizedType === "flags") {
+            property.choiceMode = normalizedType === "choices" ? "enum" : "flags";
+            property.choices = [];
+            choiceProperty = property;
+          } else {
+            choiceProperty = undefined;
+          }
+          for (const attribute of metadata.matchAll(
+            /\b(min|max)\s*=\s*(?:"([^"]+)"|([^\s,}\]]+))/gi,
+          )) {
+            const value = Number(attribute[2] ?? attribute[3]);
+            if (!Number.isFinite(value)) continue;
+            if (attribute[1].toLowerCase() === "min") property.minimum = value;
+            else property.maximum = value;
+          }
+          properties.push(property);
         }
       }
+    } else if (depth === 2 && choiceProperty) {
+      const choice = line.match(
+        /^(?:"((?:\\.|[^"])*)"|([^:]+?))\s*:\s*"((?:\\.|[^"])*)"/,
+      );
+      if (choice) {
+        choiceProperty.choices!.push({
+          value: (choice[1] ?? choice[2]).trim().replace(/\\"/g, '"').replace(/\\\\/g, "\\"),
+          label: choice[3].replace(/\\"/g, '"').replace(/\\\\/g, "\\"),
+        });
+      }
     }
+    const previousDepth = depth;
     for (const char of line) {
       if (char === "[") depth++;
       if (char === "]") depth--;
     }
+    if (previousDepth > 1 && depth <= 1) choiceProperty = undefined;
   }
   return properties;
 }

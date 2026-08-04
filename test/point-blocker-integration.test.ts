@@ -65,6 +65,10 @@ test(
       assert.equal(byName.get("fixture_fow_3")?.properties.TargetNode, undefined);
 
       const official = await loadOfficialDotaFgdCatalog(join(dotaRoot, "game", "dota"));
+      const teamnumber = official.propertiesFor("npc_dota_base_blocker")?.get("teamnumber");
+      assert.equal(teamnumber?.choiceMode, "enum");
+      assert.ok(teamnumber?.choices?.some((choice) => choice.value === "2"));
+      assert.ok(teamnumber?.choices?.some((choice) => choice.value === "3"));
       const validation = validateEntitiesAgainstFgd(entities, official);
       assert.equal(validation.knownClassCount, 4);
       assert.equal(validation.findings.filter((finding) => finding.severity === "error").length, 0);
