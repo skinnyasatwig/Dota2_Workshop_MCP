@@ -161,13 +161,17 @@ export async function waitForEngineNavigationReady(
   vc: VConsoleClient,
   minimumGameState = 3,
   timeoutMs = 120_000,
-): Promise<{ ready: boolean; line?: string }> {
+): Promise<{ ready: boolean; line?: string; lastPong?: string; pongCount: number }> {
   const deadline = Date.now() + timeoutMs;
+  let lastPong: string | undefined;
+  let pongCount = 0;
   while (Date.now() < deadline) {
     const remaining = deadline - Date.now();
     const wait = vc.waitForLine(
       (line) => {
         if (!line.text.includes("[MCP] PONG")) return false;
+        lastPong = line.text;
+        pongCount++;
         const match = /\bstate=(\d+)\b/.exec(line.text);
         return !!match && Number(match[1]) >= minimumGameState;
       },
@@ -179,10 +183,10 @@ export async function waitForEngineNavigationReady(
       // A later poll may succeed while the map is still loading.
     }
     const line = await wait;
-    if (line) return { ready: true, line: line.text };
+    if (line) return { ready: true, line: line.text, lastPong, pongCount };
     if (Date.now() < deadline) await sleep(250);
   }
-  return { ready: false };
+  return { ready: false, lastPong, pongCount };
 }
 
 /** Execute route checks sequentially so each console response is correlated. */

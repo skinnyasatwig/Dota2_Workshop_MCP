@@ -38,6 +38,7 @@ import { attachDebugSdk } from "../dota/debugsdk.js";
 import { restartGame, shutdownGame } from "../dota/game-session.js";
 import { defaultVconPort, getVConsole } from "../dota/vconsole.js";
 import { isProcessRunning } from "../dota/process.js";
+import { diagnoseDota } from "../dota/diagnose.js";
 import {
   validateDotaBuildingEntities,
   validateDotaNeutralSpawners,
@@ -481,7 +482,10 @@ export function registerMapTools(server: McpServer) {
         let execution: EngineNavigationExecution = { results: [], failures: [] };
         let fatalError: string | undefined;
         let readyLine: string | undefined;
+        let readiness: Awaited<ReturnType<typeof waitForEngineNavigationReady>> | undefined;
         let consoleErrors: string[] = [];
+        let consoleTail: string[] = [];
+        let preShutdownDiagnosis: Awaited<ReturnType<typeof diagnoseDota>> | undefined;
         let shutdown: Awaited<ReturnType<typeof shutdownGame>> | undefined;
 
         try {
@@ -502,6 +506,7 @@ export function registerMapTools(server: McpServer) {
             readyGameState ?? 3,
             readyTimeoutMs ?? 120_000,
           );
+          readiness = ready;
           if (!ready.ready) {
             fatalError = `Map did not reach Dota game state ${readyGameState ?? 3} before the timeout.`;
           } else {
@@ -524,6 +529,14 @@ export function registerMapTools(server: McpServer) {
         } catch (caught) {
           fatalError = caught instanceof Error ? caught.message : String(caught);
         } finally {
+          if (launched && fatalError) {
+            consoleTail = vc.recent(200).map((line) => line.text);
+            try {
+              preShutdownDiagnosis = await diagnoseDota();
+            } catch {
+              // Readiness diagnostics are best effort; shutdown is mandatory.
+            }
+          }
           if (launched) shutdown = await shutdownGame(port, shutdownTimeoutMs ?? 15_000);
         }
 
@@ -555,11 +568,14 @@ export function registerMapTools(server: McpServer) {
             : { skipped: true },
           launch: launchResult,
           readyLine,
+          readiness,
           results: execution.results,
           executionFailures: execution.failures,
           failedRouteCount: failedRouteResults.length,
           failedChecks,
           consoleErrors,
+          consoleTail,
+          preShutdownDiagnosis,
           fatalError,
           shutdown,
           passed: !failed,

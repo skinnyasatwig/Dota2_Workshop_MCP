@@ -1,0 +1,92 @@
+{
+  "map": "automation_acceptance",
+  "requiredEntities": [],
+  "regions": {
+    "west_highground": {
+      "shape": { "kind": "polygon", "points": [[4, 8], [14, 8], [16, 16], [14, 24], [4, 24]] }
+    },
+    "east_highground": {
+      "mirrorOf": "west_highground",
+      "mirrorAxis": "x",
+      "around": [32, 16]
+    }
+  },
+  "components": {
+    "lane_branch": {
+      "managedPaths": [
+        {
+          "name": "route",
+          "points": [[-512, 256, 128], [0, 256, 128], [512, 256, 128]],
+          "maxSegmentLength": 600
+        }
+      ],
+      "managedTerrain": [
+        {
+          "op": "tileset",
+          "tileset": 1,
+          "shape": { "kind": "managedPath", "name": "route", "width": 2 }
+        }
+      ]
+    }
+  },
+  "placements": [
+    {
+      "component": "lane_branch",
+      "name": "north_lane",
+      "worldOffset": [0, 512, 0],
+      "tileOffset": [32, 16]
+    },
+    {
+      "component": "lane_branch",
+      "name": "south_lane",
+      "worldOffset": [0, -512, 0],
+      "tileOffset": [32, 48],
+      "mirrorAxis": "y"
+    }
+  ],
+  "dotaComponents": [
+    {
+      "kind": "tower",
+      "name": "radiant_t1",
+      "team": "radiant",
+      "origin": [-1536, 0, 128],
+      "tier": 1,
+      "lane": "mid"
+    },
+    {
+      "kind": "tower",
+      "name": "dire_t1",
+      "team": "dire",
+      "origin": [1536, 0, 128],
+      "yaw": 180,
+      "tier": 1,
+      "lane": "mid"
+    },
+    {
+      "kind": "playerStart",
+      "name": "radiant_start",
+      "team": "radiant",
+      "origin": [-3072, 0, 256]
+    },
+    {
+      "kind": "playerStart",
+      "name": "dire_start",
+      "team": "dire",
+      "origin": [3072, 0, 256]
+    }
+  ],
+  "managedTerrain": [
+    { "op": "fill", "level": 0, "water": false, "tileset": 0 },
+    { "op": "height", "level": 1, "shape": { "kind": "region", "name": "west_highground" } },
+    { "op": "height", "level": 1, "shape": { "kind": "region", "name": "east_highground" } },
+    {
+      "op": "water",
+      "on": true,
+      "shape": { "kind": "path", "points": [[32, 0], [32, 64]], "width": 2.5 }
+    },
+    {
+      "op": "ramp",
+      "shape": { "kind": "polygon", "points": [[13, 14], [18, 14], [18, 18], [13, 18]] }
+    }
+  ]
+}

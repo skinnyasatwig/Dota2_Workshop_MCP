@@ -206,6 +206,10 @@ shipping game do X?"). Stored under `~/.dota2-workshop-mcp/reflib` (override `DO
 Turn a request like *"a small square map with a central platform, ringed by a road the monsters
 walk — tower defense"* into a real map:
 
+Current automation status is summarized in [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md), with a
+verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered remaining work in
+[`docs/BACKLOG.md`](docs/BACKLOG.md).
+
 - **`map_build`** — one call: clone the template, apply one validated desired-state map specification,
   register, and optionally compile it. The preferred `specification` object uses the same
   `managedTerrain` / `managedEntities` / `managedPaths` vocabulary as `map_sync_contract`. A specification can

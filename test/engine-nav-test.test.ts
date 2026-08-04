@@ -5,7 +5,9 @@ import {
   engineNavigationRoutesFromManagedPaths,
   parseEngineNavigationLine,
   validateEngineNavigationRoutes,
+  waitForEngineNavigationReady,
 } from "../src/dota/engine-nav-test.js";
+import type { VConsoleClient } from "../src/dota/vconsole.js";
 
 test("managed paths become bounded engine navigation routes", () => {
   const routes = engineNavigationRoutesFromManagedPaths([
@@ -84,4 +86,22 @@ test("structured DebugSDK navigation output is parsed strictly", () => {
   assert.equal(parsed.passed, true);
   assert.equal(parsed.segments[0].pathLength, 1024);
   assert.throws(() => parseEngineNavigationLine("[MCP] EVAL_OK {}"), /wrong shape/);
+});
+
+test("readiness reports the last observed DebugSDK state", async () => {
+  const lines = [
+    { channel: 0, text: "[MCP] PONG v=1.0.0 t=0 state=1", at: 1 },
+    { channel: 0, text: "[MCP] PONG v=1.0.0 t=1 state=3", at: 2 },
+  ];
+  const fake = {
+    send() {},
+    async waitForLine(testLine: (line: (typeof lines)[number]) => boolean) {
+      const line = lines.shift();
+      return line && testLine(line) ? line : undefined;
+    },
+  } as unknown as VConsoleClient;
+  const ready = await waitForEngineNavigationReady(fake, 3, 1000);
+  assert.equal(ready.ready, true);
+  assert.equal(ready.pongCount, 2);
+  assert.match(ready.lastPong ?? "", /state=3/);
 });
