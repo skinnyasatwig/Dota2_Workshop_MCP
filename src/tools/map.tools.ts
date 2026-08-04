@@ -24,6 +24,7 @@ import { parseMapSpecification, reconcileMapSpecification } from "../dota/map-sp
 import { inspectMapArtifactFreshness } from "../dota/map-freshness.js";
 import { runMapTransaction } from "../dota/map-transaction.js";
 import { analyzeMapReachability } from "../dota/map-reachability.js";
+import { resolveMapCollisionObstacles } from "../dota/map-collision.js";
 import { reconcileMapVolumes } from "../dota/map-volume.js";
 import {
   buildEngineNavigationCommand,
@@ -273,8 +274,9 @@ export function registerMapTools(server: McpServer) {
         "Offline whole-map pathing preflight using the Dota tile grid. Detects missing terrain recipes, cliff-separated " +
         "regions, trapped spawns, blocked entrances, inaccessible objectives/camps, and small isolated walkable areas. " +
         "Recognizes generated ramp cells, checked player-blocking volumes, and warning-only proximity to explicit Valve " +
-        "tree/obstruction classes. Collision-enabled props are inventoried without guessing their model bounds. It does " +
-        "not launch Dota or Hammer; exact mesh collision and Valve's final navmesh still require the engine test.",
+        "tree/obstruction classes. It resolves and caches conservative physical hull bounds from real model PHYS blocks " +
+        "without substituting render bounds. It does not launch Dota or Hammer; exact hull surfaces, dynamic collision, " +
+        "and Valve's final navmesh still require the engine test.",
       inputSchema: {
         projectRoot: z.string().optional(),
         map: z.string(),
@@ -282,17 +284,26 @@ export function registerMapTools(server: McpServer) {
         maxRampStep: z.number().min(0).optional().describe("Maximum center-height change when a ramp participates (default 0.75)."),
         minRegionCells: z.number().int().min(1).optional().describe("Smaller isolated regions are warned about (default 4)."),
         includeCells: z.boolean().optional().describe("Include every analyzed tile cell (default false; can be large)."),
+        resolveModelCollision: z.boolean().optional().describe(
+          "Resolve and cache real model PHYS bounds through VRF (default true; no Dota launch).",
+        ),
       },
     },
-    guard(async ({ projectRoot, map, maxFlatStep, maxRampStep, minRegionCells, includeCells }): Promise<ToolResult> => {
+    guard(async ({ projectRoot, map, maxFlatStep, maxRampStep, minRegionCells, includeCells, resolveModelCollision }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
       const p = projectMapPaths(dota, project, map);
       if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}.`);
-      const report = analyzeMapReachability(await vmapToText(dota.dmxconvertExe, p.contentVmap), {
+      const mapText = await vmapToText(dota.dmxconvertExe, p.contentVmap);
+      const parsedEntities = parseMapEntities(mapText);
+      const collisionObstacles = resolveModelCollision === false
+        ? undefined
+        : await resolveMapCollisionObstacles(parsedEntities, dota.pak01DirVpk);
+      const report = analyzeMapReachability(mapText, {
         maxFlatStep,
         maxRampStep,
         minRegionCells,
+        collisionObstacles,
       });
       const errors = report.findings.filter((finding) => finding.severity === "error").length;
       const warnings = report.findings.length - errors;
@@ -309,8 +320,10 @@ export function registerMapTools(server: McpServer) {
           `Terrain: ${report.cliffCellCount} cliff, ${report.rampCellCount} ramp, ${report.waterCellCount} water, ` +
             `${report.holeCellCount} hole, ${report.volumeBlockedCellCount} volume-blocked, ` +
             `${report.unreachableCellCount} unreachable cells.`,
-          `Collision inventory: ${report.approximatedCollisionObstacleCount} known-class approximation(s), ` +
-            `${report.unknownBoundsCollisionObstacleCount} solid prop(s) with unknown model bounds.`,
+          `Collision inventory: ${report.physicalBoundsCollisionObstacleCount} PHYS-bound prop(s), ` +
+            `${report.approximatedCollisionObstacleCount} known-class approximation(s), ` +
+            `${report.unknownBoundsCollisionObstacleCount} solid prop(s) with unknown model bounds; ` +
+            `${report.modelCollisionBlockedCellCount} terrain cell(s) conservatively blocked by PHYS bounds.`,
           `Findings: ${errors} error(s), ${warnings} warning(s).`,
           ...report.findings.slice(0, 30).map(
             (finding) => `  [${finding.severity.toUpperCase()}] ${finding.code}: ${finding.targetname} — ${finding.detail}`,
@@ -1346,8 +1359,10 @@ export function registerMapTools(server: McpServer) {
             blockedCellCount: number;
             volumeBlockedCellCount: number;
             collisionObstacleCount: number;
+            physicalBoundsCollisionObstacleCount: number;
             approximatedCollisionObstacleCount: number;
             unknownBoundsCollisionObstacleCount: number;
+            modelCollisionBlockedCellCount: number;
             cliffCellCount: number;
             rampCellCount: number;
             holeCellCount: number;
@@ -1389,7 +1404,9 @@ export function registerMapTools(server: McpServer) {
             message: `${finding.targetname}: ${finding.detail}`,
           });
         }
-        const reachability = analyzeMapReachability(mapText);
+        const reachability = analyzeMapReachability(mapText, {
+          collisionObstacles: await resolveMapCollisionObstacles(entities, dota.pak01DirVpk),
+        });
         reachabilitySummary = {
           walkableCellCount: reachability.walkableCellCount,
           reachableCellCount: reachability.reachableCellCount,
@@ -1397,8 +1414,10 @@ export function registerMapTools(server: McpServer) {
           blockedCellCount: reachability.blockedCellCount,
           volumeBlockedCellCount: reachability.volumeBlockedCellCount,
           collisionObstacleCount: reachability.collisionObstacleCount,
+          physicalBoundsCollisionObstacleCount: reachability.physicalBoundsCollisionObstacleCount,
           approximatedCollisionObstacleCount: reachability.approximatedCollisionObstacleCount,
           unknownBoundsCollisionObstacleCount: reachability.unknownBoundsCollisionObstacleCount,
+          modelCollisionBlockedCellCount: reachability.modelCollisionBlockedCellCount,
           cliffCellCount: reachability.cliffCellCount,
           rampCellCount: reachability.rampCellCount,
           holeCellCount: reachability.holeCellCount,

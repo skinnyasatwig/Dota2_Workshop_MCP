@@ -5,6 +5,8 @@ import {
   collectMapCollisionObstacles,
   distanceToSegment2d,
   MapCollisionObstacle,
+  physicalObstacleContainsPoint,
+  segmentIntersectsPhysicalObstacle,
 } from "./map-collision.js";
 
 export type ReachabilityEntityKind = "spawn" | "objective" | "entrance" | "camp" | "other";
@@ -21,6 +23,7 @@ export interface ReachabilityCell {
   hole: boolean;
   walkable: boolean;
   blockingVolume?: string;
+  collisionObstacle?: string;
   component?: number;
 }
 
@@ -67,6 +70,7 @@ export interface MapReachabilityOptions {
   maxRampStep?: number;
   minRegionCells?: number;
   blockingVolumes?: readonly ParsedMapVolume[];
+  collisionObstacles?: readonly MapCollisionObstacle[];
 }
 
 export interface MapReachabilityReport {
@@ -78,8 +82,10 @@ export interface MapReachabilityReport {
   blockedCellCount: number;
   volumeBlockedCellCount: number;
   collisionObstacleCount: number;
+  physicalBoundsCollisionObstacleCount: number;
   approximatedCollisionObstacleCount: number;
   unknownBoundsCollisionObstacleCount: number;
+  modelCollisionBlockedCellCount: number;
   cliffCellCount: number;
   rampCellCount: number;
   waterCellCount: number;
@@ -159,7 +165,11 @@ function volumeContainsWorldPoint(volume: ParsedMapVolume, x: number, y: number)
   return pointInConvexPolygon([localX, localY], volume.footprint);
 }
 
-function buildCells(grid: TileGrid, blockingVolumes: readonly ParsedMapVolume[] = []): ReachabilityCell[] {
+function buildCells(
+  grid: TileGrid,
+  blockingVolumes: readonly ParsedMapVolume[] = [],
+  collisionObstacles: readonly MapCollisionObstacle[] = [],
+): ReachabilityCell[] {
   const cells: ReachabilityCell[] = [];
   for (let y = 0; y < grid.height; y++) {
     for (let x = 0; x < grid.width; x++) {
@@ -182,6 +192,12 @@ function buildCells(grid: TileGrid, blockingVolumes: readonly ParsedMapVolume[] 
       const [worldX, worldY] = tileToWorld(grid, x + 0.5, y + 0.5);
       const blockingVolume = blockingVolumes.find((volume) =>
         volume.blocking && volumeContainsWorldPoint(volume, worldX, worldY));
+      // Dota level-zero terrain is centered at z=128 and cliff levels are 256 units apart.
+      // Apply this only to bounds recovered from an actual model PHYS block.
+      const worldZ = grid.origin[2] + 128 + height * 256;
+      const collisionObstacle = collisionObstacles.find((obstacle) =>
+        obstacle.confidence === "physical-model-bounds" &&
+        physicalObstacleContainsPoint(obstacle, [worldX, worldY], worldZ));
       cells.push({
         x,
         y,
@@ -192,8 +208,9 @@ function buildCells(grid: TileGrid, blockingVolumes: readonly ParsedMapVolume[] 
         ramp,
         cliff,
         hole,
-        walkable: !hole && !cliff && !blockingVolume,
+        walkable: !hole && !cliff && !blockingVolume && !collisionObstacle,
         blockingVolume: blockingVolume?.targetname,
+        collisionObstacle: collisionObstacle?.id,
       });
     }
   }
@@ -257,8 +274,10 @@ export function analyzeTileGridReachability(
   const maxFlatStep = Math.max(0, options.maxFlatStep ?? 0.25);
   const maxRampStep = Math.max(maxFlatStep, options.maxRampStep ?? 0.75);
   const minRegionCells = Math.max(1, Math.floor(options.minRegionCells ?? 4));
-  const cells = buildCells(grid, options.blockingVolumes);
-  const collisionObstacles = collectMapCollisionObstacles(sourceEntities);
+  const collisionObstacles = [
+    ...(options.collisionObstacles ?? collectMapCollisionObstacles(sourceEntities)),
+  ];
+  const cells = buildCells(grid, options.blockingVolumes, collisionObstacles);
   const componentCells: number[][] = [];
 
   for (let index = 0; index < cells.length; index++) {
@@ -457,14 +476,18 @@ export function analyzeTileGridReachability(
           .map((index) => [index % grid.width, Math.floor(index / grid.width)] as [number, number]),
       });
     }
-    const nearbyObstacles = collisionObstacles.filter((obstacle) =>
-      obstacle.approximateRadius !== undefined &&
-      Math.abs(obstacle.origin[2] - ((from[2] + to[2]) / 2)) <= grid.tileSize &&
-      distanceToSegment2d(
-        [obstacle.origin[0], obstacle.origin[1]],
-        [from[0], from[1]],
-        [to[0], to[1]],
-      ) <= obstacle.approximateRadius);
+    const nearbyObstacles = collisionObstacles.filter((obstacle) => {
+      if (obstacle.confidence === "physical-model-bounds") {
+        return segmentIntersectsPhysicalObstacle(obstacle, from, to);
+      }
+      return obstacle.approximateRadius !== undefined &&
+        Math.abs(obstacle.origin[2] - ((from[2] + to[2]) / 2)) <= grid.tileSize &&
+        distanceToSegment2d(
+          [obstacle.origin[0], obstacle.origin[1]],
+          [from[0], from[1]],
+          [to[0], to[1]],
+        ) <= obstacle.approximateRadius;
+    });
     if (nearbyObstacles.length) {
       const names = nearbyObstacles.slice(0, 5).map((obstacle) => obstacle.id).join(", ");
       findings.push({
@@ -472,8 +495,8 @@ export function analyzeTileGridReachability(
         code: "path-collision-obstacle",
         targetname: path.targetname!,
         detail:
-          `Segment to "${path.target}" passes through the warning-only broad phase of ` +
-          `${nearbyObstacles.length} Valve obstruction(s): ${names}` +
+          `Segment to "${path.target}" intersects a physical or warning-only collision broad phase for ` +
+          `${nearbyObstacles.length} obstruction(s): ${names}` +
           `${nearbyObstacles.length > 5 ? ", …" : ""}. Exact collision still requires GridNav.`,
       });
     }
@@ -492,11 +515,17 @@ export function analyzeTileGridReachability(
     blockedCellCount: cells.length - walkableCellCount,
     volumeBlockedCellCount: cells.filter((cell) => cell.blockingVolume !== undefined).length,
     collisionObstacleCount: collisionObstacles.length,
+    physicalBoundsCollisionObstacleCount: collisionObstacles.filter(
+      (obstacle) => obstacle.confidence === "physical-model-bounds",
+    ).length,
     approximatedCollisionObstacleCount: collisionObstacles.filter(
       (obstacle) => obstacle.confidence === "class-approximation",
     ).length,
     unknownBoundsCollisionObstacleCount: collisionObstacles.filter(
       (obstacle) => obstacle.confidence === "unknown-model-bounds",
+    ).length,
+    modelCollisionBlockedCellCount: cells.filter(
+      (cell) => cell.collisionObstacle !== undefined,
     ).length,
     cliffCellCount: cells.filter((cell) => cell.cliff).length,
     rampCellCount: cells.filter((cell) => cell.ramp).length,

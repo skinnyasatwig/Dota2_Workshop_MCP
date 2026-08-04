@@ -7,6 +7,7 @@ import {
 import { cIndex, parseTileGrid, TileGrid, vIndex } from "./tilegrid.js";
 import { parseMapEntities, ParsedMapEntity } from "./vmap.js";
 import { parseMapVolumes, ParsedMapVolume } from "./map-volume.js";
+import { MapCollisionObstacle } from "./map-collision.js";
 
 export interface MapPreviewOptions {
   scale?: number;
@@ -24,6 +25,8 @@ export interface MapPreviewOptions {
   showVolumes?: boolean;
   showVisionBlockers?: boolean;
   showCollisionObstacles?: boolean;
+  /** Pre-resolved physical/class collision inventory supplied by the async tools. */
+  collisionObstacles?: readonly MapCollisionObstacle[];
 }
 
 export interface MapPreviewStats {
@@ -82,7 +85,10 @@ function drawPreview(
   const width = grid.width * scale;
   const height = grid.height * scale;
   const rgba = Buffer.alloc(width * height * 4);
-  const reachability = analyzeTileGridReachability(grid, entities, { blockingVolumes: volumes });
+  const reachability = analyzeTileGridReachability(grid, entities, {
+    blockingVolumes: volumes,
+    collisionObstacles: options.collisionObstacles,
+  });
   const reachableComponents = new Set(reachability.spawnComponents.length
     ? reachability.spawnComponents
     : reachability.primaryComponent === undefined ? [] : [reachability.primaryComponent]);
@@ -220,7 +226,17 @@ function drawPreview(
   if (options.showCollisionObstacles !== false) {
     for (const obstacle of reachability.collisionObstacles) {
       const [x, y] = worldPixel(obstacle.origin);
-      if (obstacle.approximateRadius !== undefined) {
+      if (obstacle.confidence === "physical-model-bounds" && obstacle.physicalFootprints) {
+        for (const footprint of obstacle.physicalFootprints) {
+          const pixels = footprint.points.map(([worldX, worldY]) =>
+            worldPixel([worldX, worldY, obstacle.origin[2]]));
+          for (let index = 0; index < pixels.length; index++) {
+            const from = pixels[index];
+            const to = pixels[(index + 1) % pixels.length];
+            line(from[0], from[1], to[0], to[1], [57, 232, 255], 0.95, 2);
+          }
+        }
+      } else if (obstacle.approximateRadius !== undefined) {
         circle(
           x,
           y,
@@ -381,7 +397,7 @@ function drawPreview(
       minimapBounds: "magenta rectangle",
       volumes: "orange camp, purple no-ward, cyan trigger, pink player blocker outlines",
       visionBlockers: "purple linked lines",
-      collisionObstacles: "dark green/orange obstruction circles; white X means model bounds unknown",
+      collisionObstacles: "cyan PHYS bounds; dark green/orange class approximations; white X means model bounds unknown",
     },
   };
   return { png: encodeRgbaPng(width, height, rgba), stats, reachability };

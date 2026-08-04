@@ -29,6 +29,7 @@ test("parseMapEntities extracts class, targetname, target and origin", () => {
     {
       classname: entities[0].classname,
       origin: entities[0].origin,
+      scales: entities[0].scales,
       nodeId: entities[0].nodeId,
       targetname: entities[0].targetname,
       target: entities[0].target,
@@ -36,6 +37,7 @@ test("parseMapEntities extracts class, targetname, target and origin", () => {
     {
       classname: "path_corner",
       origin: "100 200 128",
+      scales: "1 1 1",
       nodeId: 42,
       targetname: "path_radiant_north_1",
       target: "path_radiant_north_2",

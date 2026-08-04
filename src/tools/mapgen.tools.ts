@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { readFile } from "node:fs/promises";
 import { resolveProject } from "../config.js";
 import { requireDotaPaths, resolveDotaPaths } from "../dota/paths.js";
-import { vmapToText, textToVmap, buildEntityBlock, insertEntity, maxNodeId } from "../dota/vmap.js";
+import { vmapToText, textToVmap, buildEntityBlock, insertEntity, maxNodeId, parseMapEntities } from "../dota/vmap.js";
 import { categoryForFgdEntity, parseFgdEntities } from "../dota/fgd.js";
 import { buildFgdDefinitionCatalog } from "../dota/fgd-validation.js";
 import { parseTileGrid, tileToWorld } from "../dota/tilegrid.js";
@@ -23,6 +23,7 @@ import {
 import { resolveDataPath } from "../util/datapath.js";
 import { runMapTransaction } from "../dota/map-transaction.js";
 import { renderMapPreview } from "../dota/map-preview.js";
+import { resolveMapCollisionObstacles } from "../dota/map-collision.js";
 import { MAP_VOLUME_RECIPES } from "../dota/map-volume.js";
 import { POINT_BLOCKER_RECIPES } from "../dota/dota-components.js";
 import {
@@ -788,7 +789,7 @@ export function registerMapGenTools(server: McpServer) {
       description:
         "Render a diagnostic top-down image without launching Dota: terrain contours, cliffs, ramps, water, currents, " +
         "entities, waypoint paths, tower ranges, camps, objectives, minimap bounds, checked trigger/blocker volumes, " +
-        "explicit Valve tree/obstruction proximity, solid props with unknown model bounds, terrain holes, and unreachable regions.",
+        "cached model PHYS bounds, explicit Valve tree/obstruction proximity, unresolved solid props, terrain holes, and unreachable regions.",
       inputSchema: {
         projectRoot: z.string().optional(),
         map: z.string(),
@@ -807,6 +808,9 @@ export function registerMapGenTools(server: McpServer) {
         showVolumes: z.boolean().optional(),
         showVisionBlockers: z.boolean().optional(),
         showCollisionObstacles: z.boolean().optional(),
+        resolveModelCollision: z.boolean().optional().describe(
+          "Resolve and cache real model PHYS bounds through VRF (default true; no Dota launch).",
+        ),
       },
     },
     guard(async ({
@@ -827,12 +831,18 @@ export function registerMapGenTools(server: McpServer) {
       showVolumes,
       showVisionBlockers,
       showCollisionObstacles,
+      resolveModelCollision,
     }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
       const p = projectMapPaths(dota, project, map);
       if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}.`);
-      const rendered = renderMapPreview(await vmapToText(dota.dmxconvertExe, p.contentVmap), {
+      const mapText = await vmapToText(dota.dmxconvertExe, p.contentVmap);
+      const parsedEntities = parseMapEntities(mapText);
+      const collisionObstacles = resolveModelCollision === false
+        ? undefined
+        : await resolveMapCollisionObstacles(parsedEntities, dota.pak01DirVpk);
+      const rendered = renderMapPreview(mapText, {
         scale,
         showContours,
         showCliffs,
@@ -848,6 +858,7 @@ export function registerMapGenTools(server: McpServer) {
         showVolumes,
         showVisionBlockers,
         showCollisionObstacles,
+        collisionObstacles,
       });
       const reachability = {
         walkableCellCount: rendered.reachability.walkableCellCount,
@@ -856,8 +867,10 @@ export function registerMapGenTools(server: McpServer) {
         holeCellCount: rendered.reachability.holeCellCount,
         volumeBlockedCellCount: rendered.reachability.volumeBlockedCellCount,
         collisionObstacleCount: rendered.reachability.collisionObstacleCount,
+        physicalBoundsCollisionObstacleCount: rendered.reachability.physicalBoundsCollisionObstacleCount,
         approximatedCollisionObstacleCount: rendered.reachability.approximatedCollisionObstacleCount,
         unknownBoundsCollisionObstacleCount: rendered.reachability.unknownBoundsCollisionObstacleCount,
+        modelCollisionBlockedCellCount: rendered.reachability.modelCollisionBlockedCellCount,
         regions: rendered.reachability.regions,
         findings: rendered.reachability.findings,
       };

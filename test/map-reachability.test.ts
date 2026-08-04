@@ -7,6 +7,7 @@ import {
 import { cIndex, TileGrid, vIndex } from "../src/dota/tilegrid.js";
 import { ParsedMapEntity } from "../src/dota/vmap.js";
 import { ParsedMapVolume } from "../src/dota/map-volume.js";
+import { MapCollisionObstacle } from "../src/dota/map-collision.js";
 
 function flatGrid(width = 5, height = 3): TileGrid {
   return {
@@ -187,4 +188,38 @@ test("creep routes warn when they cross explicit Valve obstruction classes", () 
   assert.equal(warning?.severity, "warn");
   assert.match(warning?.detail ?? "", /tree_on_route/);
   assert.doesNotMatch(warning?.detail ?? "", /solid_prop_unknown/);
+});
+
+test("resolved PHYS bounds conservatively block covered terrain cells and route segments", () => {
+  const obstacle: MapCollisionObstacle = {
+    id: "physical_prop",
+    sourceIndex: 0,
+    targetname: "physical_prop",
+    classname: "prop_static",
+    origin: [640, 384, 128],
+    kind: "solid-prop",
+    confidence: "physical-model-bounds",
+    model: "models/props/test.vmdl",
+    physicalFootprints: [{
+      points: [[512, 256], [768, 256], [768, 512], [512, 512]],
+      minZ: 100,
+      maxZ: 200,
+      localBounds: { min: [-128, -128, -28], max: [128, 128, 72] },
+    }],
+    reason: "test PHYS bounds",
+  };
+  const report = analyzeTileGridReachability(
+    flatGrid(),
+    [
+      entity("path_test_1", "path_corner", 128, 384, "path_test_2"),
+      entity("path_test_2", "path_corner", 1152, 384),
+    ],
+    { collisionObstacles: [obstacle] },
+  );
+
+  assert.equal(report.physicalBoundsCollisionObstacleCount, 1);
+  assert.equal(report.modelCollisionBlockedCellCount, 1);
+  assert.equal(report.cells.find((cell) => cell.x === 2 && cell.y === 1)?.collisionObstacle, "physical_prop");
+  assert.ok(report.findings.some((finding) => finding.code === "blocked-path-segment"));
+  assert.ok(report.findings.some((finding) => finding.code === "path-collision-obstacle"));
 });

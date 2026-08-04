@@ -68,6 +68,7 @@ export interface ParsedMapEntity {
   classname: string;
   origin?: string;
   angles?: string;
+  scales?: string;
   nodeId?: number;
   targetname?: string;
   target?: string;
@@ -127,11 +128,13 @@ export function parseMapEntities(text: string): ParsedMapEntity[] {
     if (classname) {
       const origin = block.match(/"origin"\s+"vector3"\s+"([^"]+)"/)?.[1];
       const angles = block.match(/"angles"\s+"qangle"\s+"([^"]+)"/)?.[1];
+      const scales = block.match(/"scales"\s+"vector3"\s+"([^"]+)"/)?.[1];
       const nodeText = block.match(/"nodeID"\s+"int"\s+"(\d+)"/)?.[1];
       entities.push({
         classname,
         origin,
         angles,
+        scales,
         nodeId: nodeText === undefined ? undefined : Number(nodeText),
         targetname: properties.targetname,
         target: properties.target,
