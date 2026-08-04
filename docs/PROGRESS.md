@@ -46,11 +46,14 @@ Last updated: 2026-08-04
 18. `b076a92` - replaced yaw-only PHYS projection with Valve-grounded pitch/yaw/roll transforms. Each local
     bound now transforms all eight 3D corners, records the transformed vertical extent, and exposes a conservative
     convex XY hull (including six-sided compound-angle projections); malformed or degenerate transforms stay unknown.
+19. `ffa6032` - decoded VRF's validated convex `RnHull_t` vertex blobs into a versioned cache and exact top-down
+    projections. Preview and reachability distinguish exact hull outlines from bounds fallbacks; out-of-bounds data,
+    non-empty bind poses, PHYS meshes, and unknown layouts stay conservative rather than being labelled exact.
 
 ## Current verification record
 
 - TypeScript build passes.
-- 205 unit and integration tests pass; the opt-in compiler and installed-VRF tests are skipped during the default suite.
+- 208 unit and integration tests pass; the opt-in compiler and installed-VRF tests are skipped during the default suite.
 - MCP smoke suite: 197 passed, 0 failed, 1 skipped because the remote Steam Workshop search service was unavailable.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
@@ -61,8 +64,9 @@ Last updated: 2026-08-04
   infrastructure, depends on no private 3v3 file, stores no copied Valve VMAP, and leaves no temporary addon trees.
 - Installed ValveResourceFormat 19.2 recovered the physical hull bounds of
   `models/props_gameplay/cap_point001.vmdl_c` directly from `pak01_dir.vpk`; a second lookup reused the fingerprinted
-  disk cache. Empty-PHYS walls, barrels, trees, gates, and props remain explicitly unresolved rather than borrowing
-  their render or hitbox bounds.
+  cache. The same real-resource test now recovers validated exact convex-hull vertices into cache version 2.
+  Empty-PHYS walls, barrels, trees, gates, and props remain explicitly unresolved rather than borrowing their render
+  or hitbox bounds.
 - Real Dota 3v3 contract: 86 managed entities, 4 managed paths, 97 terrain operations, and zero desired-state drift.
 - Offline 3v3 terrain: zero holes; only two known isolated regions (a tiny shelf and a deliberate off-map strip).
 - Installed official definitions expose 187 enum properties with 1,171 choices, 16 explicitly ranged properties,
