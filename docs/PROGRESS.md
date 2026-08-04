@@ -37,11 +37,14 @@ Last updated: 2026-08-04
 15. `76e608f` - added a repository-owned compiler acceptance payload and one-command opt-in test. It applies
     MCP-authored entities, paths, a base blocker, and a polygon volume to Valve's locally installed blank-map
     infrastructure, round-trips the generated VMAP, compiles a real VPK, and removes its isolated addon trees.
+16. `833a598` - extended fingerprinted PHYS inspection to loose compiled addon models. Preview, reachability,
+    and validation now prefer safe project-local `models/*.vmdl_c` files before the base Dota archive, reject
+    traversal-like resource paths, and retain explicit unknown status when no trustworthy bounds exist.
 
 ## Current verification record
 
 - TypeScript build passes.
-- 201 unit and integration tests pass; the opt-in compiler and installed-VRF tests are skipped during the default suite.
+- 202 unit and integration tests pass; the opt-in compiler and installed-VRF tests are skipped during the default suite.
 - MCP smoke suite: 197 passed, 0 failed, 1 skipped because the remote Steam Workshop search service was unavailable.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
