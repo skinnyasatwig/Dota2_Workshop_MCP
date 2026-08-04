@@ -28,11 +28,14 @@ Last updated: 2026-08-04
 12. `1b4a1be` - taught the official FGD parser and validator to preserve and enforce inherited dropdown choices,
     explicit numeric bounds, and resolvable named-entity destinations; exposed these constraints through the
     entity catalog and accepted the stronger checks against the real 3v3 map.
+13. `a7f8be8` - added conservative collision diagnostics: explicit Valve tree/obstruction classes receive
+    warning-only route broad phases, solid props with unavailable model bounds are inventoried and drawn without
+    guessed footprints, and nav-ignore/initially-disabled declarations are honored.
 
 ## Current verification record
 
 - TypeScript build passes.
-- 193 unit and integration tests pass; the opt-in compiler test is skipped during the default suite.
+- 196 unit and integration tests pass; the opt-in compiler test is skipped during the default suite.
 - MCP smoke suite: 197 passed, 0 failed, 1 skipped because the remote Steam Workshop search service was unavailable.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.

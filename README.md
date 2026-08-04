@@ -225,12 +225,15 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
 - **`map_preview`** — render a diagnostic top-down **image straight from the data**, no game launch.
   In addition to shaded terrain and water it overlays contours, cliff cells, ramp cells, current arrows,
   entities, complete waypoint paths, tower ranges, camps, objectives, minimap bounds, checked trigger/blocker volumes, missing terrain
-  recipes, and regions unreachable from player/creep spawns. Every overlay family can be hidden.
+  recipes, explicit Valve tree/obstruction broad phases, collision-enabled props whose model bounds are unknown,
+  and regions unreachable from player/creep spawns. Every overlay family can be hidden.
 - **`map_reachability`** — analyze the whole tile grid offline and report missing terrain recipes,
   cliff-separated regions, trapped spawns, blocked entrances, inaccessible objectives or camps, and
   waypoint segments that cross blocked cells. It recognizes generated ramps and checked player-blocking
-  volume footprints, and treats Dota river water as walkable. Other mesh collision and Valve's final navmesh
-  remain an engine-test responsibility.
+  volume footprints, treats Dota river water as walkable, and warns when a waypoint segment approaches an
+  explicit `ent_dota_tree` or `point_simple_obstruction`. The warning uses a deliberately small 64-unit broad
+  phase because Valve does not publish those exact hulls in FGD. Model-specific prop collision and Valve's final
+  navmesh remain engine-test responsibilities; solid props are inventoried and drawn without invented bounds.
 - **`map_engine_nav_test`** — close the offline-to-engine gap with one bounded Dota launch. It compiles
   first, reads routes from the unified map specification (or explicit input), asks Valve's real `GridNav`
   for endpoint and segment reachability/path lengths, returns structured failures, and automatically
