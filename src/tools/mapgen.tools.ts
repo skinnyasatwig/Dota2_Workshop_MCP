@@ -843,6 +843,7 @@ export function registerMapGenTools(server: McpServer) {
         ? undefined
         : await resolveMapCollisionObstacles(parsedEntities, dota.pak01DirVpk, undefined, {
             compiledModelRoots: [project.gameDir],
+            compiledModelVpks: [join(project.gameDir, "pak01_dir.vpk")],
           });
       const rendered = renderMapPreview(mapText, {
         scale,

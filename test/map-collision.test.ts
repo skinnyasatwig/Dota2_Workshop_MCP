@@ -139,3 +139,80 @@ test("loose compiled addon models take precedence over the base VPK", async () =
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("packed addon lookup shadows base models and falls through only when absent", async () => {
+  const root = await mkdtemp(join(tmpdir(), "d2-addon-vpk-"));
+  const addonVpk = join(root, "pak01_dir.vpk");
+  const prop = entity("prop_static", "packed_prop", {
+    solid: "6",
+    model: "models/props/packed.vmdl",
+  });
+  const physical = (model: string, detail: string) => ({
+    model,
+    status: "physical-bounds" as const,
+    bounds: [{ min: [-16, -16, 0] as [number, number, number], max: [16, 16, 64] as [number, number, number] }],
+    source: "vrf-phys" as const,
+    fromCache: false,
+    detail,
+  });
+  try {
+    await writeFile(addonVpk, "fixture");
+
+    const shadowCalls: string[] = [];
+    const shadowed = await resolveMapCollisionObstacles(
+      [prop],
+      "base.vpk",
+      async (archive, model) => {
+        shadowCalls.push(archive);
+        return physical(model, "packed addon PHYS hull");
+      },
+      { compiledModelVpks: [addonVpk] },
+    );
+    assert.deepEqual(shadowCalls, [addonVpk]);
+    assert.match(shadowed[0].reason, /packed addon/);
+
+    const fallbackCalls: string[] = [];
+    const fallback = await resolveMapCollisionObstacles(
+      [prop],
+      "base.vpk",
+      async (archive, model) => {
+        fallbackCalls.push(archive);
+        if (archive === addonVpk) return {
+          model,
+          status: "error",
+          bounds: [],
+          source: "vrf-phys",
+          fromCache: false,
+          detail: "The model was not found in the compiled-addon VPK.",
+        };
+        return physical(model, "base PHYS hull");
+      },
+      { compiledModelVpks: [addonVpk] },
+    );
+    assert.deepEqual(fallbackCalls, [addonVpk, "base.vpk"]);
+    assert.match(fallback[0].reason, /base PHYS/);
+
+    const failedCalls: string[] = [];
+    const failed = await resolveMapCollisionObstacles(
+      [prop],
+      "base.vpk",
+      async (archive, model) => {
+        failedCalls.push(archive);
+        return {
+          model,
+          status: "error",
+          bounds: [],
+          source: "vrf-phys",
+          fromCache: false,
+          detail: "VRF physics inspection failed safely.",
+        };
+      },
+      { compiledModelVpks: [addonVpk] },
+    );
+    assert.deepEqual(failedCalls, [addonVpk]);
+    assert.equal(failed[0].confidence, "unknown-model-bounds");
+    assert.match(failed[0].reason, /failed safely/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

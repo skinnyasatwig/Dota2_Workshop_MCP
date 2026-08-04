@@ -145,6 +145,7 @@ export function collectMapCollisionObstacles(
 export type ModelPhysicsInspector = (
   vpk: string,
   model: string,
+  sourceLabel?: string,
 ) => Promise<ModelPhysicsInspection>;
 
 export type CompiledModelPhysicsInspector = (
@@ -155,6 +156,8 @@ export type CompiledModelPhysicsInspector = (
 export interface MapCollisionResolutionOptions {
   /** Loose compiled addon roots, normally the active project's game directory. */
   compiledModelRoots?: readonly string[];
+  /** Packed addon archives checked after loose files and before the base Dota VPK. */
+  compiledModelVpks?: readonly string[];
   inspectCompiledModel?: CompiledModelPhysicsInspector;
 }
 
@@ -221,6 +224,13 @@ export async function resolveMapCollisionObstacles(
             if (await pathExists(candidate)) {
               return (options.inspectCompiledModel ?? inspectCompiledModelPhysics)(candidate, model);
             }
+          }
+        }
+        for (const addonVpk of options.compiledModelVpks ?? []) {
+          if (!(await pathExists(addonVpk))) continue;
+          const addonInspection = await inspect(addonVpk, model, "compiled-addon VPK");
+          if (!/^The model was not found in the compiled-addon VPK\.$/.test(addonInspection.detail)) {
+            return addonInspection;
           }
         }
         return inspect(vpk, model);

@@ -190,6 +190,7 @@ async function inspectVrfResource(
 export async function inspectVpkModelPhysics(
   vpk: string,
   requestedModel: string,
+  sourceLabel = "base-VPK",
 ): Promise<ModelPhysicsInspection> {
   const model = normalizeCompiledModelPath(requestedModel);
   if (!model) {
@@ -198,8 +199,8 @@ export async function inspectVpkModelPhysics(
   const key = `vpk|${await fingerprint(vpk)}|${model.toLowerCase()}`;
   return inspectVrfResource(key, model, ["-i", vpk, "-f", model, "-b", "PHYS"], {
     missingOutputNeedle: model,
-    missingDetail: "The model was not found in the base Dota VPK.",
-    sourceLabel: "base-VPK",
+    missingDetail: `The model was not found in the ${sourceLabel}.`,
+    sourceLabel,
   });
 }
 

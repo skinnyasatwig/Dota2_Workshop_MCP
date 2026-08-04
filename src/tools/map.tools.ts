@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { join } from "node:path";
 import { resolveProject } from "../config.js";
 import { requireDotaPaths } from "../dota/paths.js";
 import {
@@ -300,6 +301,7 @@ export function registerMapTools(server: McpServer) {
         ? undefined
         : await resolveMapCollisionObstacles(parsedEntities, dota.pak01DirVpk, undefined, {
             compiledModelRoots: [project.gameDir],
+            compiledModelVpks: [join(project.gameDir, "pak01_dir.vpk")],
           });
       const report = analyzeMapReachability(mapText, {
         maxFlatStep,
@@ -1411,7 +1413,10 @@ export function registerMapTools(server: McpServer) {
             entities,
             dota.pak01DirVpk,
             undefined,
-            { compiledModelRoots: [project.gameDir] },
+            {
+              compiledModelRoots: [project.gameDir],
+              compiledModelVpks: [join(project.gameDir, "pak01_dir.vpk")],
+            },
           ),
         });
         reachabilitySummary = {

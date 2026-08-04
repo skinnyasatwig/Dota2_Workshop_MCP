@@ -232,12 +232,12 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
   cliff-separated regions, trapped spawns, blocked entrances, inaccessible objectives or camps, and
   waypoint segments that cross blocked cells. It recognizes generated ramps and checked player-blocking
   volume footprints, treats Dota river water as walkable, and resolves collision-enabled props through
-  ValveResourceFormat, preferring loose compiled models in the active addon before the base Dota archive. Only
-  conservative bounds from a real non-empty model `PHYS` block are cached, transformed,
+  ValveResourceFormat, preferring loose compiled models and the active addon's `pak01_dir.vpk` before the base Dota
+  archive. Only conservative bounds from a real non-empty model `PHYS` block are cached, transformed,
   previewed, and allowed to block covered cells; render/hitbox bounds are never substituted. It also warns when a
   waypoint approaches `ent_dota_tree` or `point_simple_obstruction`, using a deliberately small 64-unit broad phase
-  because Valve does not publish those exact hulls in FGD. Exact hull surfaces, dynamic collision, packed addon
-  archives, and Valve's final navmesh remain engine-test responsibilities. Set `resolveModelCollision:false` for a
+  because Valve does not publish those exact hulls in FGD. Exact hull surfaces, pitched/rolled transforms, dynamic
+  collision, and Valve's final navmesh remain engine-test responsibilities. Set `resolveModelCollision:false` for a
   faster terrain-only pass.
 - **`map_engine_nav_test`** — close the offline-to-engine gap with one bounded Dota launch. It compiles
   first, reads routes from the unified map specification (or explicit input), asks Valve's real `GridNav`
