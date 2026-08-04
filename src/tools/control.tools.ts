@@ -17,7 +17,7 @@ import { getVConsole, defaultVconPort, ConsoleLine } from "../dota/vconsole.js";
 import { runWin32Spec, dotaWindowInfo, escapeSendKeys, InputAction, Win32Spec, Button } from "../dota/win32.js";
 import { captureWindowPng } from "../dota/capture.js";
 import { loadSelftestSpec } from "../dota/selftest-spec.js";
-import { restartGame } from "./debug.tools.js";
+import { restartGame } from "../dota/game-session.js";
 import { quoteLua } from "./debugsdk.tools.js";
 import { json, image, error, guard, ToolResult } from "../util/result.js";
 

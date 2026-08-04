@@ -39,7 +39,7 @@ fallback for non-tstl addons.
 | **In-game DebugSDK** | `addon_attach_debug_sdk`, `addon_detach_debug_sdk`, `dota_lua_eval`, `dota_debug_dump`, `dota_selftest` |
 | **Reference library** | `ref_harvest`, `ref_harvest_top`, `ref_list`, `ref_search`, `ref_find`, `ref_passport`, `ref_inspect`, `ref_get`, `ref_recipe`, `ref_curate`, `ref_stats`, `asset_db` (SQLite index: fast structured search by kind/ext/name) |
 | **Docs & references** | `docs_search`, `docs_get`, `docs_list`, `dota_patterns`, `panorama_api_search`, `panorama_api_get`, `tools_catalog` |
-| **Maps** | `map_create`, `map_add_entity`, `map_inspect`, `map_patch_entities`, `map_sync_contract`, `map_rewrite_path`, `map_to_text`, `map_from_text`, `map_compile`, `map_list`, `map_validate` |
+| **Maps** | `map_create`, `map_add_entity`, `map_inspect`, `map_patch_entities`, `map_sync_contract`, `map_rewrite_path`, `map_to_text`, `map_from_text`, `map_compile`, `map_list`, `map_validate`, `map_engine_nav_test` |
 | **Map generation** | `map_build`, `map_terrain`, `map_preview`, `map_tile_to_world`, `map_recipe_catalog`, `entity_catalog`, `scaffold_td` |
 | **Reference games** | `workshop_search`, `workshop_download`, `workshop_list`, `workshop_inspect`, `workshop_read`, `workshop_grep`, `panorama_decompile` |
 | **Asset preview (out of engine)** | `asset_preview` (particles/textures/models → inline contact-sheet image + HTML gallery), `sound_preview` (sounds → inline waveform/icon image + playable HTML soundboard + inline audio), `preview_studio` / `preview_studio_stop` (interactive gallery + public share link: animated particles, 3D models, audio players, click-to-select), `preview_pick` / `preview_selections` (resolve the IDs the user picked/clicked → game + asset path) — decoded via ValveResourceFormat, no Dota launch |
@@ -226,6 +226,11 @@ walk — tower defense"* into a real map:
   cliff-separated regions, trapped spawns, blocked entrances, inaccessible objectives or camps, and
   waypoint segments that cross blocked cells. It recognizes generated ramps and treats Dota river water
   as walkable. Mesh collision and Valve's final navmesh remain an engine-test responsibility.
+- **`map_engine_nav_test`** — close the offline-to-engine gap with one bounded Dota launch. It compiles
+  first, reads routes from the unified map specification (or explicit input), asks Valve's real `GridNav`
+  for endpoint and segment reachability/path lengths, returns structured failures, and automatically
+  shuts Dota down even when a check fails. It is a dry run by default and refuses to replace an existing
+  Dota session unless that permission is explicit.
 - **`map_recipe_catalog`** — inspect the named terrain cores, Radiant/Dire cliff recipes, ramp-safe
   fallbacks, and official Valve prefab references used by the generator. `verifyInstalled:true` checks
   the references against the current Workshop Tools install without opening Hammer.
@@ -353,6 +358,10 @@ playable `.vpk` — a pipeline verified end to end.
   provides one. Known property types are checked through inherited definitions from Valve's installed
   `base.fgd` and `dota.fgd`. Unknown custom metadata remains informational by default; pass
   `strictEntityProperties:true` to turn unknown classes/properties into warnings.
+- **`map_engine_nav_test`** — optional engine preflight for facts the text pipeline cannot prove.
+  Call it once with `dryRun:true` to review route/check counts, then with `dryRun:false` when Dota is
+  closed. The tool compiles, launches the requested map exactly once, runs `GridNav:CanFindPath`,
+  `GridNav:FindPathLength`, and `GridNav:IsTraversable` over managed paths, and automatically exits.
 
 Contract entries under `requiredEntities` are validation-only. Entries under `managedEntities`
 are declarative desired state and require `targetname`, `classname`, and `origin`; `angles` and

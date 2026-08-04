@@ -3,10 +3,11 @@ import { z } from "zod";
 import { readdir, stat, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { resolveProject } from "../config.js";
-import { requireDotaPaths, DotaPaths } from "../dota/paths.js";
+import { requireDotaPaths } from "../dota/paths.js";
 import { getVConsole, defaultVconPort, ConsoleLine } from "../dota/vconsole.js";
 import { buildDotaLaunchTarget, buildLaunchArgs } from "../dota/launch.js";
-import { run, spawnDetached, killProcess, npmCommand } from "../dota/process.js";
+import { run, npmCommand } from "../dota/process.js";
+import { restartGame } from "../dota/game-session.js";
 import { ensureDir } from "../util/fsx.js";
 import { captureWindowPng } from "../dota/capture.js";
 import { json, text, image, error, guard, ToolResult } from "../util/result.js";
@@ -33,33 +34,6 @@ function findErrors(lines: ConsoleLine[]): string[] {
 const VCON_HINT =
   "Could not reach the VConsole channel. Launch the game in tools mode first (addon_launch_custom_game), " +
   "and make sure it was started with -tools (and matching -vconport if you overrode it).";
-
-/** Full relaunch helper shared by dota_restart_game, dota_dev_cycle and dota_selftest. */
-export async function restartGame(
-  dota: DotaPaths,
-  addon: string,
-  map: string,
-  port: number,
-  cheats: boolean,
-  reconnect: boolean,
-): Promise<{ pid?: number; command: string; killed: boolean; reconnected: boolean }> {
-  const args = buildLaunchArgs({ addon, map, insecure: true, dev: true, cheats, vconPort: port });
-  const target = buildDotaLaunchTarget(dota.root, dota.dota2Exe, args, { steamExe: dota.steamExe });
-  getVConsole(port).disconnect();
-  const kill = await killProcess("dota2.exe");
-  await sleep(1500); // let the OS release file locks
-  const { pid, command } = spawnDetached(target.executable, target.args, target.cwd);
-  let reconnected = false;
-  if (reconnect) {
-    try {
-      await getVConsole(port).connectWithRetry(60_000, 1000);
-      reconnected = true;
-    } catch {
-      /* still loading */
-    }
-  }
-  return { pid, command, killed: kill.code === 0, reconnected };
-}
 
 export function registerDebugTools(server: McpServer) {
   server.registerTool(

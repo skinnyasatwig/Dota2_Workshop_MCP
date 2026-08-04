@@ -25,6 +25,20 @@ import { inspectMapArtifactFreshness } from "../dota/map-freshness.js";
 import { runMapTransaction } from "../dota/map-transaction.js";
 import { analyzeMapReachability } from "../dota/map-reachability.js";
 import {
+  buildEngineNavigationCommand,
+  engineNavigationRoutesFromManagedPaths,
+  EngineNavigationExecution,
+  EngineNavigationMode,
+  EngineNavigationRoute,
+  executeEngineNavigationChecks,
+  validateEngineNavigationRoutes,
+  waitForEngineNavigationReady,
+} from "../dota/engine-nav-test.js";
+import { attachDebugSdk } from "../dota/debugsdk.js";
+import { restartGame, shutdownGame } from "../dota/game-session.js";
+import { defaultVconPort, getVConsole } from "../dota/vconsole.js";
+import { isProcessRunning } from "../dota/process.js";
+import {
   validateDotaBuildingEntities,
   validateDotaNeutralSpawners,
 } from "../dota/map-semantics.js";
@@ -293,6 +307,261 @@ export function registerMapTools(server: McpServer) {
         ].join("\n"),
       );
     }),
+  );
+
+  server.registerTool(
+    "map_engine_nav_test",
+    {
+      title: "Test map routes with Dota's real navigation",
+      description:
+        "Compile and launch a map exactly once, test specification paths with Valve's real GridNav API, return " +
+        "route/segment/path-length results, then automatically close Dota. Refuses to replace an already-running " +
+        "Dota session unless replaceRunningDota=true. Dry-run is the default; pass dryRun=false for the engine test.",
+      inputSchema: {
+        projectRoot: z.string().optional(),
+        map: z.string(),
+        contractFile: z
+          .string()
+          .optional()
+          .describe("Unified map specification path. Defaults to .dota-workshop/map-contract.json."),
+        routes: z
+          .array(
+            z.object({
+              name: z.string().min(1),
+              points: z.array(z.tuple([z.number(), z.number(), z.number()])).min(2).max(128),
+            }),
+          )
+          .min(1)
+          .max(64)
+          .optional()
+          .describe("Explicit routes; otherwise every managedPath in the unified specification is tested."),
+        mode: z
+          .enum(["endpoints", "segments", "both"])
+          .optional()
+          .describe("Check each full route, each consecutive segment, or both (default both)."),
+        compile: z.boolean().optional().describe("Compile the map before launch (default true)."),
+        forceCompile: z.boolean().optional().describe("Force the Source 2 compiler to rebuild unchanged inputs."),
+        ensureDebugSdk: z
+          .boolean()
+          .optional()
+          .describe("Idempotently attach/update the bundled DebugSDK before launch (default true)."),
+        readyGameState: z
+          .number()
+          .int()
+          .min(1)
+          .max(9)
+          .optional()
+          .describe("Minimum Dota game state before testing (default 3, hero selection)."),
+        readyTimeoutMs: z.number().int().min(1000).max(180000).optional(),
+        routeTimeoutMs: z.number().int().min(1000).max(60000).optional(),
+        errorWindowMs: z.number().int().min(0).max(60000).optional(),
+        shutdownTimeoutMs: z.number().int().min(1000).max(60000).optional(),
+        replaceRunningDota: z
+          .boolean()
+          .optional()
+          .describe("Allow this tool to close an existing Dota session before its one launch (default false)."),
+        vconPort: z.number().int().min(1).max(65535).optional(),
+        dryRun: z
+          .boolean()
+          .optional()
+          .describe("Return the bounded launch/check/shutdown plan without compiling or launching (default true)."),
+      },
+    },
+    guard(
+      async ({
+        projectRoot,
+        map,
+        contractFile,
+        routes,
+        mode,
+        compile,
+        forceCompile,
+        ensureDebugSdk,
+        readyGameState,
+        readyTimeoutMs,
+        routeTimeoutMs,
+        errorWindowMs,
+        shutdownTimeoutMs,
+        replaceRunningDota,
+        vconPort,
+        dryRun,
+      }): Promise<ToolResult> => {
+        const dota = await requireDotaPaths();
+        const project = await resolveProject(projectRoot);
+        const p = projectMapPaths(dota, project, map);
+        if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}.`);
+
+        let chosenRoutes: EngineNavigationRoute[];
+        let routeSource: string;
+        if (routes) {
+          chosenRoutes = validateEngineNavigationRoutes(routes as EngineNavigationRoute[]);
+          routeSource = "explicit routes";
+        } else {
+          const resolved = await loadMapContract(project.root, map, contractFile, parseMapSpecification);
+          if (!resolved) {
+            return error(
+              "No unified map specification was found. Add managedPaths, pass contractFile, or provide explicit routes.",
+            );
+          }
+          if (!resolved.contract.managedPaths?.length) {
+            return error(`Unified map specification has no managedPaths: ${resolved.path}`);
+          }
+          chosenRoutes = engineNavigationRoutesFromManagedPaths(resolved.contract.managedPaths);
+          routeSource = resolved.path;
+        }
+
+        const chosenMode = (mode ?? "both") as EngineNavigationMode;
+        const pointCount = chosenRoutes.reduce((sum, route) => sum + route.points.length, 0);
+        const checkCount = chosenRoutes.reduce(
+          (sum, route) =>
+            sum +
+            (chosenMode === "segments" ? 0 : 1) +
+            (chosenMode === "endpoints" ? 0 : route.points.length - 1),
+          0,
+        );
+        const commands = chosenRoutes.map((route) => buildEngineNavigationCommand(route, chosenMode));
+        const dotaWasRunning = await isProcessRunning("dota2.exe");
+        const shouldCompile = compile !== false;
+        const shouldAttach = ensureDebugSdk !== false;
+        const isDryRun = dryRun !== false;
+        const port = vconPort ?? defaultVconPort();
+
+        if (isDryRun) {
+          return json(
+            {
+              dryRun: true,
+              map,
+              routeSource,
+              routeCount: chosenRoutes.length,
+              pointCount,
+              checkCount,
+              mode: chosenMode,
+              compile: shouldCompile,
+              ensureDebugSdk: shouldAttach,
+              dotaWasRunning,
+              replaceRunningDota: replaceRunningDota === true,
+              launchCount: 1,
+              automaticShutdown: true,
+              commandBytes: commands.map((command) => command.length),
+            },
+            [
+              `[dry run] ${map}: ${chosenRoutes.length} route(s), ${pointCount} points, ${checkCount} GridNav checks.`,
+              `Routes: ${routeSource}`,
+              `Compile first: ${shouldCompile}; attach DebugSDK: ${shouldAttach}; launch count: 1; automatic shutdown: yes.`,
+              `Dota currently running: ${dotaWasRunning}${dotaWasRunning && !replaceRunningDota ? " (actual run would refuse)" : ""}.`,
+            ].join("\n"),
+          );
+        }
+
+        if (dotaWasRunning && replaceRunningDota !== true) {
+          return error(
+            "Dota is already running. The engine navigation test refused to close it. Exit Dota first or explicitly pass replaceRunningDota=true.",
+          );
+        }
+
+        if (shouldCompile) {
+          const compileResult = await compileProjectMap(dota, project, map, forceCompile === true);
+          if (compileResult.code !== 0) {
+            return error(
+              `Map compilation failed; Dota was not launched.\n${compileResult.stdout.slice(-3000)}\n${compileResult.stderr.slice(-3000)}`.trim(),
+            );
+          }
+        }
+
+        const attached = shouldAttach ? await attachDebugSdk(project, false) : undefined;
+        const vc = getVConsole(port);
+        let launched = false;
+        let launchResult: Awaited<ReturnType<typeof restartGame>> | undefined;
+        let execution: EngineNavigationExecution = { results: [], failures: [] };
+        let fatalError: string | undefined;
+        let readyLine: string | undefined;
+        let consoleErrors: string[] = [];
+        let shutdown: Awaited<ReturnType<typeof shutdownGame>> | undefined;
+
+        try {
+          launchResult = await restartGame(dota, project.addonName, map, port, true, true);
+          launched = true;
+          if (!vc.isConnected()) await vc.connectWithRetry(60_000, 1000);
+          vc.clearRing();
+          const ready = await waitForEngineNavigationReady(
+            vc,
+            readyGameState ?? 3,
+            readyTimeoutMs ?? 120_000,
+          );
+          if (!ready.ready) {
+            fatalError = `Map did not reach Dota game state ${readyGameState ?? 3} before the timeout.`;
+          } else {
+            readyLine = ready.line;
+            execution = await executeEngineNavigationChecks(
+              vc,
+              chosenRoutes,
+              chosenMode,
+              routeTimeoutMs ?? 10_000,
+            );
+            const watchMs = errorWindowMs ?? 2000;
+            if (watchMs > 0) await new Promise((resolve) => setTimeout(resolve, watchMs));
+            const engineError =
+              /(script error|stack traceback|attempt to (call|index|perform|concatenate)|assertion failed|lua runtime error|[^A-Za-z]Error:|\.lua:\d+:)/i;
+            consoleErrors = vc
+              .recent(2000)
+              .filter((line) => engineError.test(line.text))
+              .map((line) => line.text);
+          }
+        } catch (caught) {
+          fatalError = caught instanceof Error ? caught.message : String(caught);
+        } finally {
+          if (launched) shutdown = await shutdownGame(port, shutdownTimeoutMs ?? 15_000);
+        }
+
+        const failedRouteResults = execution.results.filter((result) => !result.passed);
+        const failedChecks = execution.results.reduce(
+          (sum, result) =>
+            sum +
+            (result.endpoint && !result.endpoint.passed && chosenMode !== "segments" ? 1 : 0) +
+            result.segments.filter((segment) => !segment.passed).length,
+          0,
+        );
+        const failed =
+          !!fatalError ||
+          execution.failures.length > 0 ||
+          failedRouteResults.length > 0 ||
+          consoleErrors.length > 0 ||
+          !shutdown?.stopped;
+        const data = {
+          dryRun: false,
+          map,
+          routeSource,
+          routeCount: chosenRoutes.length,
+          pointCount,
+          checkCount,
+          mode: chosenMode,
+          compiled: shouldCompile,
+          debugSdk: attached
+            ? { copiedTo: attached.copiedTo, bootstrapAction: attached.bootstrapAction }
+            : { skipped: true },
+          launch: launchResult,
+          readyLine,
+          results: execution.results,
+          executionFailures: execution.failures,
+          failedRouteCount: failedRouteResults.length,
+          failedChecks,
+          consoleErrors,
+          fatalError,
+          shutdown,
+          passed: !failed,
+        };
+        const output = [
+          `${map} ENGINE NAV: ${failed ? "FAILED" : "PASSED"}`,
+          `${execution.results.length}/${chosenRoutes.length} route responses; ${failedRouteResults.length} failed route(s), ${failedChecks} failed check(s).`,
+          `Console errors: ${consoleErrors.length}; automatic shutdown: ${shutdown?.stopped ? "complete" : "FAILED"}.`,
+          ...(fatalError ? [`Fatal: ${fatalError}`] : []),
+          ...execution.failures.map((failure) => `  [ERROR] ${failure.name}: ${failure.error}`),
+          ...failedRouteResults.map((result) => `  [BLOCKED] ${result.name}`),
+          ...(shutdown ? [`Shutdown: ${shutdown.detail}`] : []),
+        ].join("\n");
+        return { ...json(data, output), isError: failed };
+      },
+    ),
   );
 
   server.registerTool(
