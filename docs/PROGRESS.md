@@ -40,11 +40,14 @@ Last updated: 2026-08-04
 16. `833a598` - extended fingerprinted PHYS inspection to loose compiled addon models. Preview, reachability,
     and validation now prefer safe project-local `models/*.vmdl_c` files before the base Dota archive, reject
     traversal-like resource paths, and retain explicit unknown status when no trustworthy bounds exist.
+17. `77cafc0` - added packed-addon `pak01_dir.vpk` collision lookup with Source 2 shadowing order: loose addon
+    file, packed addon resource, then base Dota resource. A truly absent packed resource falls through, while a
+    malformed/failed packed inspection stops safely instead of silently borrowing the wrong base model.
 
 ## Current verification record
 
 - TypeScript build passes.
-- 202 unit and integration tests pass; the opt-in compiler and installed-VRF tests are skipped during the default suite.
+- 203 unit and integration tests pass; the opt-in compiler and installed-VRF tests are skipped during the default suite.
 - MCP smoke suite: 197 passed, 0 failed, 1 skipped because the remote Steam Workshop search service was unavailable.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
