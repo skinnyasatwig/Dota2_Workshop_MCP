@@ -8,6 +8,9 @@ import {
   resolveMapCollisionObstacles,
 } from "../src/dota/map-collision.js";
 import { ParsedMapEntity } from "../src/dota/vmap.js";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 
 function entity(
   classname: string,
@@ -92,4 +95,47 @@ test("solid props are promoted only by real model PHYS bounds", async () => {
   assert.equal(obstacles[2].confidence, "unknown-model-bounds");
   assert.equal(physicalObstacleContainsPoint(obstacles[0], [256, 512], 140), true);
   assert.equal(physicalObstacleContainsPoint(obstacles[0], [400, 512], 140), false);
+});
+
+test("loose compiled addon models take precedence over the base VPK", async () => {
+  const root = await mkdtemp(join(tmpdir(), "d2-addon-model-"));
+  const compiled = join(root, "models", "props", "test.vmdl_c");
+  try {
+    await mkdir(dirname(compiled), { recursive: true });
+    await writeFile(compiled, "fixture");
+    let vpkInspections = 0;
+    let fileInspections = 0;
+    const obstacles = await resolveMapCollisionObstacles(
+      [entity("prop_static", "addon_prop", {
+        solid: "6",
+        model: "models/props/test.vmdl",
+      })],
+      "base.vpk",
+      async () => {
+        vpkInspections++;
+        throw new Error("base VPK should not be inspected");
+      },
+      {
+        compiledModelRoots: [root],
+        inspectCompiledModel: async (file, model) => {
+          fileInspections++;
+          assert.equal(file, compiled);
+          return {
+            model: model!,
+            status: "physical-bounds",
+            bounds: [{ min: [-32, -32, 0], max: [32, 32, 64] }],
+            source: "vrf-phys",
+            fromCache: false,
+            detail: "addon PHYS hull",
+          };
+        },
+      },
+    );
+    assert.equal(fileInspections, 1);
+    assert.equal(vpkInspections, 0);
+    assert.equal(obstacles[0].confidence, "physical-model-bounds");
+    assert.match(obstacles[0].reason, /addon PHYS hull/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

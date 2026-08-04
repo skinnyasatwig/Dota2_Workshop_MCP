@@ -1,8 +1,12 @@
 import { ParsedMapEntity } from "./vmap.js";
+import { join } from "node:path";
+import { pathExists } from "../util/fsx.js";
 import {
+  inspectCompiledModelPhysics,
   inspectVpkModelPhysics,
   ModelPhysicsBounds,
   ModelPhysicsInspection,
+  normalizeCompiledModelPath,
 } from "./model-physics.js";
 
 export type MapCollisionObstacleKind = "tree" | "point-obstruction" | "solid-prop";
@@ -143,6 +147,17 @@ export type ModelPhysicsInspector = (
   model: string,
 ) => Promise<ModelPhysicsInspection>;
 
+export type CompiledModelPhysicsInspector = (
+  compiledModelFile: string,
+  model?: string,
+) => Promise<ModelPhysicsInspection>;
+
+export interface MapCollisionResolutionOptions {
+  /** Loose compiled addon roots, normally the active project's game directory. */
+  compiledModelRoots?: readonly string[];
+  inspectCompiledModel?: CompiledModelPhysicsInspector;
+}
+
 function transformedFootprints(
   entity: ParsedMapEntity,
   bounds: readonly ModelPhysicsBounds[],
@@ -190,6 +205,7 @@ export async function resolveMapCollisionObstacles(
   entities: readonly ParsedMapEntity[],
   vpk: string,
   inspect: ModelPhysicsInspector = inspectVpkModelPhysics,
+  options: MapCollisionResolutionOptions = {},
 ): Promise<MapCollisionObstacle[]> {
   const obstacles = collectMapCollisionObstacles(entities);
   const modelInspections = new Map<string, Promise<ModelPhysicsInspection>>();
@@ -197,7 +213,18 @@ export async function resolveMapCollisionObstacles(
     const key = model.toLowerCase();
     let inspection = modelInspections.get(key);
     if (!inspection) {
-      inspection = inspect(vpk, model);
+      inspection = (async () => {
+        const compiledModel = normalizeCompiledModelPath(model);
+        if (compiledModel) {
+          for (const root of options.compiledModelRoots ?? []) {
+            const candidate = join(root, ...compiledModel.split("/"));
+            if (await pathExists(candidate)) {
+              return (options.inspectCompiledModel ?? inspectCompiledModelPhysics)(candidate, model);
+            }
+          }
+        }
+        return inspect(vpk, model);
+      })();
       modelInspections.set(key, inspection);
     }
     return inspection;

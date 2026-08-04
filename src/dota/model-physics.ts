@@ -72,6 +72,9 @@ export function parseVrfPhysicsBounds(text: string): ModelPhysicsBounds[] {
 export function normalizeCompiledModelPath(model: string): string | undefined {
   const normalized = model.trim().replace(/\\/g, "/").replace(/^\/+/, "");
   if (!/^models\/.+\.vmdl(?:_c)?$/i.test(normalized)) return undefined;
+  if (normalized.split("/").some((segment) => !segment || segment === "." || segment === ".." || segment.includes(":"))) {
+    return undefined;
+  }
   return /_c$/i.test(normalized) ? normalized : `${normalized}_c`;
 }
 
@@ -101,75 +104,51 @@ function saveCache(): Promise<void> {
   return cacheWrite;
 }
 
-async function cacheKey(vpk: string, model: string): Promise<string> {
-  const metadata = await stat(vpk);
-  return `${vpk.toLowerCase()}|${metadata.size}|${Math.floor(metadata.mtimeMs)}|${model.toLowerCase()}`;
+async function fingerprint(path: string): Promise<string> {
+  const metadata = await stat(path);
+  return `${path.toLowerCase()}|${metadata.size}|${Math.floor(metadata.mtimeMs)}`;
 }
 
-/**
- * Inspect one base-game model. Successful positive and negative results are cached by VPK
- * fingerprint; transient tool failures are not cached.
- */
-export async function inspectVpkModelPhysics(
-  vpk: string,
-  requestedModel: string,
+function errorInspection(model: string, detail: string): ModelPhysicsInspection {
+  return {
+    model,
+    status: "error",
+    bounds: [],
+    source: "vrf-phys",
+    fromCache: false,
+    detail,
+  };
+}
+
+async function inspectVrfResource(
+  key: string,
+  model: string,
+  args: string[],
+  options: { missingOutputNeedle?: string; missingDetail?: string; sourceLabel: string },
 ): Promise<ModelPhysicsInspection> {
-  const model = normalizeCompiledModelPath(requestedModel);
-  if (!model) {
-    return {
-      model: requestedModel,
-      status: "error",
-      bounds: [],
-      source: "vrf-phys",
-      fromCache: false,
-      detail: "Model path is not a models/*.vmdl resource.",
-    };
-  }
-  const key = await cacheKey(vpk, model);
   const existing = pending.get(key);
   if (existing) return existing;
-
   const task = (async (): Promise<ModelPhysicsInspection> => {
     const loaded = await loadCache();
     const cached = loaded.entries[key];
     if (cached) return { ...cached, fromCache: true };
 
     const exe = await ensureVrf();
-    const result = await run(exe, ["-i", vpk, "-f", model, "-b", "PHYS"], {
-      timeoutMs: 120_000,
-      maxOutputChars: 8_000_000,
-    });
+    const result = await run(exe, args, { timeoutMs: 120_000, maxOutputChars: 8_000_000 });
     if (result.timedOut || result.code !== 0) {
-      return {
+      return errorInspection(
         model,
-        status: "error",
-        bounds: [],
-        source: "vrf-phys",
-        fromCache: false,
-        detail: result.timedOut
+        result.timedOut
           ? "VRF physics inspection timed out."
           : `VRF physics inspection failed: ${(result.stderr || result.stdout).slice(-300)}`,
-      };
+      );
     }
     if (result.stdout.includes("...(truncated)...")) {
-      return {
-        model,
-        status: "error",
-        bounds: [],
-        source: "vrf-phys",
-        fromCache: false,
-        detail: "VRF PHYS output exceeded the safe parser limit; bounds were not guessed.",
-      };
+      return errorInspection(model, "VRF PHYS output exceeded the safe parser limit; bounds were not guessed.");
     }
-    if (!result.stdout.toLowerCase().includes(model.toLowerCase())) {
-      return {
-        model,
-        status: "error",
-        bounds: [],
-        source: "vrf-phys",
-        fromCache: false,
-        detail: "The model was not found in the base Dota VPK; addon model collision remains unresolved.",
-      };
+    if (options.missingOutputNeedle &&
+        !result.stdout.toLowerCase().includes(options.missingOutputNeedle.toLowerCase())) {
+      return errorInspection(model, options.missingDetail ?? "The model resource was not found.");
     }
 
     const bounds = parseVrfPhysicsBounds(result.stdout);
@@ -179,15 +158,17 @@ export async function inspectVpkModelPhysics(
           status: "physical-bounds",
           bounds,
           source: "vrf-phys",
-          detail: `${bounds.length} conservative physical hull bound(s) recovered from the model PHYS block.`,
+          detail:
+            `${bounds.length} conservative physical hull bound(s) recovered from the ` +
+            `${options.sourceLabel} model PHYS block.`,
         }
       : {
           model,
           status: "no-physics",
           bounds: [],
           source: "vrf-phys",
-          detail: "The model has no non-empty physical hull bounds in its PHYS block.",
-    };
+          detail: `The ${options.sourceLabel} model has no non-empty physical hull bounds in its PHYS block.`,
+        };
     loaded.entries[key] = stored;
     // Cache persistence is an optimization, not a prerequisite for a truthful result. A read-only
     // home directory must not turn successful PHYS extraction into a validation failure.
@@ -200,4 +181,50 @@ export async function inspectVpkModelPhysics(
   } finally {
     pending.delete(key);
   }
+}
+
+/**
+ * Inspect one base-game model. Successful positive and negative results are cached by VPK
+ * fingerprint; transient tool failures are not cached.
+ */
+export async function inspectVpkModelPhysics(
+  vpk: string,
+  requestedModel: string,
+): Promise<ModelPhysicsInspection> {
+  const model = normalizeCompiledModelPath(requestedModel);
+  if (!model) {
+    return errorInspection(requestedModel, "Model path is not a safe models/*.vmdl resource.");
+  }
+  const key = `vpk|${await fingerprint(vpk)}|${model.toLowerCase()}`;
+  return inspectVrfResource(key, model, ["-i", vpk, "-f", model, "-b", "PHYS"], {
+    missingOutputNeedle: model,
+    missingDetail: "The model was not found in the base Dota VPK.",
+    sourceLabel: "base-VPK",
+  });
+}
+
+/** Inspect one loose compiled addon model (.vmdl_c) with the same fingerprinted cache. */
+export async function inspectCompiledModelPhysics(
+  compiledModelFile: string,
+  requestedModel?: string,
+): Promise<ModelPhysicsInspection> {
+  const model = requestedModel ? normalizeCompiledModelPath(requestedModel) : undefined;
+  if (!/\.vmdl_c$/i.test(compiledModelFile) || (requestedModel && !model)) {
+    return errorInspection(requestedModel ?? compiledModelFile, "Compiled model input must be a safe .vmdl_c resource.");
+  }
+  let key: string;
+  try {
+    key = `file|${await fingerprint(compiledModelFile)}`;
+  } catch (cause) {
+    return errorInspection(
+      model ?? compiledModelFile,
+      `Compiled addon model is unavailable: ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+  }
+  return inspectVrfResource(
+    key,
+    model ?? compiledModelFile,
+    ["-i", compiledModelFile, "-b", "PHYS"],
+    { sourceLabel: "compiled-addon" },
+  );
 }

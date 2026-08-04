@@ -298,7 +298,9 @@ export function registerMapTools(server: McpServer) {
       const parsedEntities = parseMapEntities(mapText);
       const collisionObstacles = resolveModelCollision === false
         ? undefined
-        : await resolveMapCollisionObstacles(parsedEntities, dota.pak01DirVpk);
+        : await resolveMapCollisionObstacles(parsedEntities, dota.pak01DirVpk, undefined, {
+            compiledModelRoots: [project.gameDir],
+          });
       const report = analyzeMapReachability(mapText, {
         maxFlatStep,
         maxRampStep,
@@ -1405,7 +1407,12 @@ export function registerMapTools(server: McpServer) {
           });
         }
         const reachability = analyzeMapReachability(mapText, {
-          collisionObstacles: await resolveMapCollisionObstacles(entities, dota.pak01DirVpk),
+          collisionObstacles: await resolveMapCollisionObstacles(
+            entities,
+            dota.pak01DirVpk,
+            undefined,
+            { compiledModelRoots: [project.gameDir] },
+          ),
         });
         reachabilitySummary = {
           walkableCellCount: reachability.walkableCellCount,

@@ -841,7 +841,9 @@ export function registerMapGenTools(server: McpServer) {
       const parsedEntities = parseMapEntities(mapText);
       const collisionObstacles = resolveModelCollision === false
         ? undefined
-        : await resolveMapCollisionObstacles(parsedEntities, dota.pak01DirVpk);
+        : await resolveMapCollisionObstacles(parsedEntities, dota.pak01DirVpk, undefined, {
+            compiledModelRoots: [project.gameDir],
+          });
       const rendered = renderMapPreview(mapText, {
         scale,
         showContours,

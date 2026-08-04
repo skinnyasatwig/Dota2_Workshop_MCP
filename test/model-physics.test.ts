@@ -38,6 +38,8 @@ test("compiled model paths are normalized without accepting arbitrary resources"
   );
   assert.equal(normalizeCompiledModelPath("models/x.vmdl_c"), "models/x.vmdl_c");
   assert.equal(normalizeCompiledModelPath("materials/x.vmat"), undefined);
+  assert.equal(normalizeCompiledModelPath("models/../escape.vmdl"), undefined);
+  assert.equal(normalizeCompiledModelPath("models/C:/escape.vmdl"), undefined);
 });
 
 test("VRF recovers and caches a known base-game model PHYS hull", {
