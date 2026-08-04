@@ -34,18 +34,22 @@ Last updated: 2026-08-04
 14. `1531961` - added cached base-game model collision inspection through ValveResourceFormat. Only bounds from
     real non-empty `PHYS` blocks are promoted; yaw/scale transforms feed cyan preview footprints, conservative
     blocked-cell analysis, and route warnings, while render/hitbox bounds and unsafe transforms remain unknown.
+15. `76e608f` - added a repository-owned compiler acceptance payload and one-command opt-in test. It applies
+    MCP-authored entities, paths, a base blocker, and a polygon volume to Valve's locally installed blank-map
+    infrastructure, round-trips the generated VMAP, compiles a real VPK, and removes its isolated addon trees.
 
 ## Current verification record
 
 - TypeScript build passes.
-- 200 unit and integration tests pass; the opt-in compiler and installed-VRF tests are skipped during the default suite.
+- 201 unit and integration tests pass; the opt-in compiler and installed-VRF tests are skipped during the default suite.
 - MCP smoke suite: 197 passed, 0 failed, 1 skipped because the remote Steam Workshop search service was unavailable.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
 - Valve's installed `dmxconvert.exe` successfully round-trips generated camp, polygonal no-ward, and player-clip
   volumes from text to binary VMAP and back during the integration suite.
-- Valve's installed `resourcecompiler.exe` successfully compiled an isolated temporary addon containing a
-  16-sided generated no-ward prism to a real VPK; the fixture's content/game folders were removed afterward.
+- `npm run test:compiler-fixture` successfully round-tripped and compiled the repository-owned acceptance payload
+  into a real VPK twice. The generated map uses Valve's installed blank template only as required hidden
+  infrastructure, depends on no private 3v3 file, stores no copied Valve VMAP, and leaves no temporary addon trees.
 - Installed ValveResourceFormat 19.2 recovered the physical hull bounds of
   `models/props_gameplay/cap_point001.vmdl_c` directly from `pak01_dir.vpk`; a second lookup reused the fingerprinted
   disk cache. Empty-PHYS walls, barrels, trees, gates, and props remain explicitly unresolved rather than borrowing
