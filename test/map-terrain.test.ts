@@ -13,7 +13,10 @@ function tileGridFixture(): string {
     `"gridWidth" "int" "2"\n"gridHeight" "int" "2"\n` +
     `"verticesHeight" "int_array" [ "0", "0", "0", "0", "0", "0", "0", "0", "0" ]\n` +
     `"verticesWater" "bool_array" [ "0", "0", "0", "0", "0", "0", "0", "0", "0" ]\n` +
-    `"cellsTileSet" "int_array" [ "0", "0", "0", "0" ]\n}\n`
+    `"cellsTileSet" "int_array" [ "0", "0", "0", "0" ]\n` +
+    `"cellsOrientation" "int_array" [ "0", "0", "0", "0" ]\n` +
+    `"cellConfiguration" "int_array" [ "2", "5292", "-1", "2", "5292", "-1", "2", "5292", "-1", "2", "5292", "-1" ]\n` +
+    `"edgesPath" "bool_array" [ "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0" ]\n}\n`
   );
 }
 
@@ -43,6 +46,9 @@ test("reconcileMapTerrain applies declared shapes and is idempotent", () => {
   assert.equal(first.changedHeightVertices, 4);
   assert.equal(first.changedWaterVertices, 1);
   assert.equal(first.changedTilesetCells, 1);
+  assert.equal(first.changedOrientationCells, 3);
+  assert.equal(first.changedConfigurationCells, 3);
+  assert.equal(first.changedPathEdges, 0);
   assert.match(first.text, /preserve-me/);
 
   const second = reconcileMapTerrain(first.text, operations);
@@ -50,6 +56,9 @@ test("reconcileMapTerrain applies declared shapes and is idempotent", () => {
   assert.equal(second.changedHeightVertices, 0);
   assert.equal(second.changedWaterVertices, 0);
   assert.equal(second.changedTilesetCells, 0);
+  assert.equal(second.changedOrientationCells, 0);
+  assert.equal(second.changedConfigurationCells, 0);
+  assert.equal(second.changedPathEdges, 0);
   assert.equal(second.text, first.text);
 });
 
@@ -116,4 +125,29 @@ test("reconcileMapTerrain resolves managed path references in world coordinates"
     () => reconcileMapTerrain(tileGridFixture(), operations),
     /references missing path "lane"/,
   );
+});
+
+test("reconcileMapTerrain marks polygon ramp cells with path edges", () => {
+  const operations = parseManagedTerrain(
+    [
+      {
+        op: "ramp",
+        shape: {
+          kind: "polygon",
+          points: [
+            [0, 0],
+            [1, 0],
+            [1, 1],
+            [0, 1],
+          ],
+        },
+      },
+    ],
+    "managedTerrain",
+    "fixture.json",
+  )!;
+  const first = reconcileMapTerrain(tileGridFixture(), operations);
+  assert.equal(first.changedPathEdges, 4);
+  const second = reconcileMapTerrain(first.text, operations);
+  assert.equal(second.changed, false);
 });

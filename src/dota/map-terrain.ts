@@ -1,8 +1,13 @@
 import {
   applyTileGrid,
+  cIndex,
+  configureCellsFromHeights,
   fill,
+  inShape,
+  orientCellsFromHeights,
   parseTileGrid,
   setHeight,
+  setPathEdges,
   setTileset,
   setWater,
   Shape,
@@ -20,7 +25,8 @@ export type ManagedTerrainOperation =
   | { op: "fill"; level?: number; water?: boolean; tileset?: number }
   | { op: "height"; shape: ManagedTerrainShape; level: number; dome?: boolean }
   | { op: "water"; shape: ManagedTerrainShape; on?: boolean; invert?: boolean }
-  | { op: "tileset"; shape: ManagedTerrainShape; tileset: number };
+  | { op: "tileset"; shape: ManagedTerrainShape; tileset: number }
+  | { op: "ramp"; shape: ManagedTerrainShape };
 
 export interface TerrainPathReference {
   name: string;
@@ -33,6 +39,9 @@ export interface TerrainReconcileResult {
   changedHeightVertices: number;
   changedWaterVertices: number;
   changedTilesetCells: number;
+  changedOrientationCells: number;
+  changedConfigurationCells: number;
+  changedPathEdges: number;
   operations: {
     index: number;
     op: ManagedTerrainOperation["op"];
@@ -119,8 +128,23 @@ function shape(value: unknown, field: string, path: string): ManagedTerrainShape
       if (width <= 0) throw new Error(`${field}.width must be positive: ${path}`);
       return { kind: "path", points, width };
     }
+    case "polygon": {
+      if (!Array.isArray(raw.points) || raw.points.length < 3) {
+        throw new Error(`${field}.points must contain at least three [x, y] points: ${path}`);
+      }
+      const points = raw.points.map((point, index) => {
+        if (!Array.isArray(point) || point.length !== 2) {
+          throw new Error(`${field}.points[${index}] must be [x, y]: ${path}`);
+        }
+        return [
+          finiteNumber(point[0], `${field}.points[${index}][0]`, path),
+          finiteNumber(point[1], `${field}.points[${index}][1]`, path),
+        ] as [number, number];
+      });
+      return { kind: "polygon", points };
+    }
     default:
-      throw new Error(`${field}.kind must be rect, circle, ring, path, or managedPath: ${path}`);
+      throw new Error(`${field}.kind must be rect, circle, ring, path, polygon, or managedPath: ${path}`);
   }
 }
 
@@ -184,8 +208,13 @@ export function parseManagedTerrain(
           shape: shape(raw.shape, `${itemField}.shape`, path),
           tileset: integer(raw.tileset, `${itemField}.tileset`, path, 0),
         };
+      case "ramp":
+        return {
+          op: "ramp",
+          shape: shape(raw.shape, `${itemField}.shape`, path),
+        };
       default:
-        throw new Error(`${itemField}.op must be fill, height, water, or tileset: ${path}`);
+        throw new Error(`${itemField}.op must be fill, height, water, tileset, or ramp: ${path}`);
     }
   });
 }
@@ -210,6 +239,9 @@ export function reconcileMapTerrain(
       changedHeightVertices: 0,
       changedWaterVertices: 0,
       changedTilesetCells: 0,
+      changedOrientationCells: 0,
+      changedConfigurationCells: 0,
+      changedPathEdges: 0,
       operations: [],
     };
   }
@@ -217,8 +249,12 @@ export function reconcileMapTerrain(
   const beforeHeight = [...terrain.heights];
   const beforeWater = [...terrain.water];
   const beforeTileset = [...terrain.tileset];
+  const beforeOrientations = [...terrain.orientations];
+  const beforeConfigurations = terrain.configurations.map((configuration) => [...configuration]);
+  const beforePathEdges = [...terrain.pathEdges];
   const results: TerrainReconcileResult["operations"] = [];
   const pathsByName = new Map(pathReferences.map((path) => [path.name, path]));
+  const rampCells = new Set<number>();
   const concreteShape = (managedShape: ManagedTerrainShape): Shape => {
     if (managedShape.kind !== "managedPath") return managedShape;
     const reference = pathsByName.get(managedShape.name);
@@ -268,20 +304,55 @@ export function reconcileMapTerrain(
       case "tileset":
         touched = setTileset(terrain, concreteShape(operation.shape), operation.tileset);
         break;
+      case "ramp": {
+        const rampShape = concreteShape(operation.shape);
+        touched = setPathEdges(terrain, rampShape, true);
+        for (let cy = 0; cy < terrain.height; cy++) {
+          for (let cx = 0; cx < terrain.width; cx++) {
+            if (inShape(rampShape, cx + 0.5, cy + 0.5)) {
+              rampCells.add(cIndex(terrain, cx, cy));
+            }
+          }
+        }
+        break;
+      }
     }
     results.push({ index, op: operation.op, touched });
   }
 
+  orientCellsFromHeights(terrain);
+  configureCellsFromHeights(terrain, rampCells);
   const changedHeightVertices = changedValues(beforeHeight, terrain.heights);
   const changedWaterVertices = changedValues(beforeWater, terrain.water);
   const changedTilesetCells = changedValues(beforeTileset, terrain.tileset);
-  const changed = changedHeightVertices + changedWaterVertices + changedTilesetCells > 0;
+  const changedOrientationCells = changedValues(beforeOrientations, terrain.orientations);
+  const changedConfigurationCells = beforeConfigurations.reduce(
+    (changed, configuration, index) =>
+      changed +
+      (configuration.length !== terrain.configurations[index]?.length ||
+      configuration.some((value, entry) => value !== terrain.configurations[index]?.[entry])
+        ? 1
+        : 0),
+    0,
+  );
+  const changedPathEdges = changedValues(beforePathEdges, terrain.pathEdges);
+  const changed =
+    changedHeightVertices +
+      changedWaterVertices +
+      changedTilesetCells +
+      changedOrientationCells +
+      changedConfigurationCells +
+      changedPathEdges >
+    0;
   return {
     text: changed ? applyTileGrid(text, terrain) : text,
     changed,
     changedHeightVertices,
     changedWaterVertices,
     changedTilesetCells,
+    changedOrientationCells,
+    changedConfigurationCells,
+    changedPathEdges,
     operations: results,
   };
 }

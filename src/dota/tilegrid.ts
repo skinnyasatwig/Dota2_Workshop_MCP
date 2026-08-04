@@ -18,6 +18,9 @@ export interface TileGrid {
   heights: number[]; // length vw*vh, integer levels
   water: number[]; // length vw*vh, 0/1
   tileset: number[]; // length width*height, index into tileSetMapInfo
+  orientations: number[]; // length width*height, quarter-turn cliff-tile orientation
+  configurations: number[][]; // one variable-length tile recipe per cell
+  pathEdges: number[]; // horizontal edges, then vertical edges; 0/1
 }
 
 const TILE_SIZE = 256;
@@ -31,6 +34,24 @@ function boolArray(text: string, key: string): number[] | null {
   return m ? (m[1].match(/\b[01]\b|true|false/g) || []).map((v) => (v === "1" || v === "true" ? 1 : 0)) : null;
 }
 
+function configurationArray(text: string, key: string, cellCount: number): number[][] | null {
+  const packed = intArray(text, key);
+  if (!packed) return null;
+  const records: number[][] = [];
+  for (let offset = 0; offset < packed.length && records.length < cellCount;) {
+    const valueCount = packed[offset];
+    if (valueCount < 0 || offset + valueCount >= packed.length) {
+      throw new Error(`Invalid ${key} record ${records.length}: length ${valueCount}.`);
+    }
+    records.push(packed.slice(offset + 1, offset + 1 + valueCount));
+    offset += valueCount + 1;
+  }
+  if (records.length !== cellCount) {
+    throw new Error(`${key} has ${records.length} records; expected ${cellCount}.`);
+  }
+  return records;
+}
+
 export function parseTileGrid(text: string): TileGrid {
   const gw = text.match(/"gridWidth" "int" "(\d+)"/);
   const gh = text.match(/"gridHeight" "int" "(\d+)"/);
@@ -42,8 +63,28 @@ export function parseTileGrid(text: string): TileGrid {
   const heights = intArray(text, "verticesHeight");
   const water = boolArray(text, "verticesWater");
   const tileset = intArray(text, "cellsTileSet");
+  const orientations = intArray(text, "cellsOrientation") ?? new Array(width * height).fill(0);
+  const configurations =
+    configurationArray(text, "cellConfiguration", width * height) ??
+    new Array(width * height).fill(undefined).map(() => [5292, -1]);
+  const pathEdges =
+    boolArray(text, "edgesPath") ??
+    new Array(width * (height + 1) + (width + 1) * height).fill(0);
   if (!heights || !water || !tileset) throw new Error("Tile grid arrays missing (verticesHeight/verticesWater/cellsTileSet).");
-  return { width, height, vw: width + 1, vh: height + 1, origin, tileSize: TILE_SIZE, heights, water, tileset };
+  return {
+    width,
+    height,
+    vw: width + 1,
+    vh: height + 1,
+    origin,
+    tileSize: TILE_SIZE,
+    heights,
+    water,
+    tileset,
+    orientations,
+    configurations,
+    pathEdges,
+  };
 }
 
 export function applyTileGrid(text: string, g: TileGrid): string {
@@ -55,6 +96,13 @@ export function applyTileGrid(text: string, g: TileGrid): string {
   text = repl("verticesHeight", "int_array", g.heights);
   text = repl("verticesWater", "bool_array", g.water);
   text = repl("cellsTileSet", "int_array", g.tileset);
+  text = repl("cellsOrientation", "int_array", g.orientations);
+  text = repl(
+    "cellConfiguration",
+    "int_array",
+    g.configurations.flatMap((configuration) => [configuration.length, ...configuration]),
+  );
+  text = repl("edgesPath", "bool_array", g.pathEdges);
   return text;
 }
 
@@ -70,7 +118,8 @@ export type Shape =
   | { kind: "rect"; x0: number; y0: number; x1: number; y1: number }
   | { kind: "circle"; cx: number; cy: number; r: number }
   | { kind: "ring"; cx: number; cy: number; rInner: number; rOuter: number }
-  | { kind: "path"; points: [number, number][]; width: number };
+  | { kind: "path"; points: [number, number][]; width: number }
+  | { kind: "polygon"; points: [number, number][] };
 
 function distToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
   const dx = bx - ax, dy = by - ay;
@@ -95,6 +144,18 @@ export function inShape(s: Shape, x: number, y: number): boolean {
         if (distToSegment(x, y, s.points[i][0], s.points[i][1], s.points[i + 1][0], s.points[i + 1][1]) <= s.width / 2) return true;
       }
       return false;
+    }
+    case "polygon": {
+      let inside = false;
+      for (let i = 0, j = s.points.length - 1; i < s.points.length; j = i++) {
+        const [xi, yi] = s.points[i];
+        const [xj, yj] = s.points[j];
+        const intersects =
+          yi > y !== yj > y &&
+          x < ((xj - xi) * (y - yi)) / (yj - yi || Number.EPSILON) + xi;
+        if (intersects) inside = !inside;
+      }
+      return inside;
     }
   }
 }
@@ -143,6 +204,137 @@ export function setTileset(g: TileGrid, shape: Shape, tilesetIndex: number): num
     }
   }
   return n;
+}
+
+/** Mark every edge around cells in a shape as a Tile Editor road/ramp edge. */
+export function setPathEdges(g: TileGrid, shape: Shape, on: boolean): number {
+  const horizontalCount = g.width * (g.height + 1);
+  const horizontal = (x: number, y: number) => y * g.width + x;
+  const vertical = (x: number, y: number) => horizontalCount + y * (g.width + 1) + x;
+  let changed = 0;
+  const value = on ? 1 : 0;
+  for (let cy = 0; cy < g.height; cy++) {
+    for (let cx = 0; cx < g.width; cx++) {
+      if (!inShape(shape, cx + 0.5, cy + 0.5)) continue;
+      for (const index of [
+        horizontal(cx, cy),
+        horizontal(cx, cy + 1),
+        vertical(cx, cy),
+        vertical(cx + 1, cy),
+      ]) {
+        if (g.pathEdges[index] === value) continue;
+        g.pathEdges[index] = value;
+        changed++;
+      }
+    }
+  }
+  return changed;
+}
+
+/**
+ * Rotate cliff cells to match their raised corners. Hammer normally performs
+ * this bookkeeping while painting terrain; programmatic height edits must do
+ * it explicitly or Source 2 can select an incompatible/missing cliff mesh.
+ */
+export function orientCellsFromHeights(g: TileGrid): number {
+  const orientationByPattern: Record<string, number> = {
+    "0000": 0,
+    "0001": 3,
+    "0010": 0,
+    "0011": 0,
+    "0100": 2,
+    "0101": 3,
+    "0110": 0,
+    "0111": 3,
+    "1000": 1,
+    "1001": 1,
+    "1010": 1,
+    "1011": 0,
+    "1100": 2,
+    "1101": 2,
+    "1110": 1,
+    "1111": 0,
+  };
+  let touched = 0;
+  for (let cy = 0; cy < g.height; cy++) {
+    for (let cx = 0; cx < g.width; cx++) {
+      const corners = [
+        g.heights[vIndex(g, cx, cy)],
+        g.heights[vIndex(g, cx + 1, cy)],
+        g.heights[vIndex(g, cx, cy + 1)],
+        g.heights[vIndex(g, cx + 1, cy + 1)],
+      ];
+      const minimum = Math.min(...corners);
+      const maximum = Math.max(...corners);
+      const pattern =
+        maximum === minimum
+          ? "0000"
+          : corners.map((height) => (height === maximum ? "1" : "0")).join("");
+      g.orientations[cIndex(g, cx, cy)] = orientationByPattern[pattern] ?? 0;
+      touched++;
+    }
+  }
+  return touched;
+}
+
+/**
+ * Select the core Dota terrain tile whose corner profile matches each cell.
+ * These node ids are shared by Valve's radiant_basic and dire_basic tile sets.
+ * Decorative cliff pieces can be layered later; the core tile prevents edited
+ * cells from falling back to a flat recipe with missing ground geometry.
+ */
+export function configureCellsFromHeights(g: TileGrid, rampCells: ReadonlySet<number> = new Set()): number {
+  let changed = 0;
+  for (let cy = 0; cy < g.height; cy++) {
+    for (let cx = 0; cx < g.width; cx++) {
+      const corners = [
+        g.heights[vIndex(g, cx, cy)],
+        g.heights[vIndex(g, cx + 1, cy)],
+        g.heights[vIndex(g, cx, cy + 1)],
+        g.heights[vIndex(g, cx + 1, cy + 1)],
+      ];
+      const minimum = Math.min(...corners);
+      const maximum = Math.max(...corners);
+      const pattern =
+        maximum === minimum
+          ? "0000"
+          : corners.map((height) => (height === maximum ? "1" : "0")).join("");
+      const raisedCorners = [...pattern].filter((value) => value === "1").length;
+      const tileNode =
+        raisedCorners === 0
+          ? 5292
+          : raisedCorners === 1
+            ? 5183
+            : raisedCorners === 3
+              ? 5180
+              : pattern === "0110" || pattern === "1001"
+                ? 5177
+                : 5186;
+      const index = cIndex(g, cx, cy);
+      const cliffRecipes: Record<number, Record<number, number[]>> = {
+        0: {
+          1: [5183, -1, 5925, 5938, -1, 6967, 5939, -1, 20862, 5939, 20884, -1],
+          2: [5186, -1, 5943, 5949, -1, 21178, 5949, 21180, -1, 5948, 5950, -1, 0, 5950, 6080, -1],
+          3: [5180, -1, 6487, 5974, -1, 20900, 5974, 20915, -1, 5969, 5975, -1],
+        },
+        1: {
+          1: [5183, -1, 6361, 5938, -1, 6382, 5939, -1, 15301, 5939, 15346, -1],
+          2: [5186, -1, 5944, 5949, -1, 15412, 5949, 15511, -1, 5948, 5950, -1, 0, 5950, 6080, -1],
+          3: [5180, -1, 6468, 5974, -1, 15616, 5974, 15624, -1, 5969, 5975, -1],
+        },
+      };
+      const next =
+        raisedCorners === 0 || rampCells.has(index) || raisedCorners === 2 && (pattern === "0110" || pattern === "1001")
+          ? [tileNode, -1]
+          : cliffRecipes[g.tileset[index] ?? 0]?.[raisedCorners] ?? [tileNode, -1];
+      const current = g.configurations[index] ?? [];
+      if (current.length !== next.length || current.some((value, entry) => value !== next[entry])) {
+        g.configurations[index] = next;
+        changed++;
+      }
+    }
+  }
+  return changed;
 }
 
 /** Fill the whole grid to a height/water baseline (e.g. all water for an ocean). */

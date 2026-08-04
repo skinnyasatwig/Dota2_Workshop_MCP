@@ -354,7 +354,9 @@ export function registerMapTools(server: McpServer) {
         `Add ${result.added.length}, update ${result.updated.length}, remove ${result.removed.length}, ` +
           `unchanged ${result.unchanged.length}.`,
         `Terrain: ${terrainOperations.length} operations; change ${terrain.changedHeightVertices} height vertices, ` +
-          `${terrain.changedWaterVertices} water vertices, ${terrain.changedTilesetCells} tileset cells.`,
+          `${terrain.changedWaterVertices} water vertices, ${terrain.changedTilesetCells} tileset cells, and ` +
+          `${terrain.changedOrientationCells} orientation cells, and ` +
+          `${terrain.changedConfigurationCells} tile recipes plus ${terrain.changedPathEdges} path edges.`,
       ];
       if (!apply && changed) steps.push("No files changed. Pass apply=true to write this plan.");
       if (apply && recompile) {
@@ -377,6 +379,9 @@ export function registerMapTools(server: McpServer) {
             changedHeightVertices: terrain.changedHeightVertices,
             changedWaterVertices: terrain.changedWaterVertices,
             changedTilesetCells: terrain.changedTilesetCells,
+            changedOrientationCells: terrain.changedOrientationCells,
+            changedConfigurationCells: terrain.changedConfigurationCells,
+            changedPathEdges: terrain.changedPathEdges,
             operations: terrain.operations,
           },
           recompiled: apply === true && recompile === true,
@@ -627,6 +632,9 @@ export function registerMapTools(server: McpServer) {
             changedHeightVertices: number;
             changedWaterVertices: number;
             changedTilesetCells: number;
+            changedOrientationCells: number;
+            changedConfigurationCells: number;
+            changedPathEdges: number;
           }
         | undefined;
       if (source) {
@@ -675,6 +683,9 @@ export function registerMapTools(server: McpServer) {
               changedHeightVertices: terrain.changedHeightVertices,
               changedWaterVertices: terrain.changedWaterVertices,
               changedTilesetCells: terrain.changedTilesetCells,
+              changedOrientationCells: terrain.changedOrientationCells,
+              changedConfigurationCells: terrain.changedConfigurationCells,
+              changedPathEdges: terrain.changedPathEdges,
             };
             findings.push({
               severity: "error",
@@ -682,7 +693,10 @@ export function registerMapTools(server: McpServer) {
               message:
                 `Managed terrain drift: ${terrain.changedHeightVertices} height vertices, ` +
                 `${terrain.changedWaterVertices} water vertices, and ` +
-                `${terrain.changedTilesetCells} tileset cells differ from the contract.`,
+                `${terrain.changedTilesetCells} tileset cells plus ` +
+                `${terrain.changedOrientationCells} orientation cells and ` +
+                `${terrain.changedConfigurationCells} tile recipes plus ` +
+                `${terrain.changedPathEdges} path edges differ from the contract.`,
             });
           }
         }
