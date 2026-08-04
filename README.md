@@ -11,7 +11,7 @@ template](https://github.com/ModDota/TypeScript-Addon-Template) it scaffolds **T
 wiring) and drives the template's `npm` scripts. It also has a raw-Lua + `resourcecompiler.exe`
 fallback for non-tstl addons.
 
-> Status: working — **116 tools**, end-to-end tested. It can search the Workshop for custom games by
+> Status: working — **117 tools**, end-to-end tested. It can search the Workshop for custom games by
 > name and download them outside the client (SteamCMD) to study, generates whole playable maps from a spec
 > (terrain shaping via the Dota tile grid + entities + waypoint paths → compile → .vpk), previews them
 > top-down as an image without launching the game, edits KV1 + KV3 (soundevents/particles) data, reads
@@ -216,8 +216,14 @@ walk — tower defense"* into a real map:
   `fill` / `height` / `water` / `tileset` / `ramp` over `rect` / `circle` / `ring` / `path` /
   `polygon` / `managedPath` shapes and regenerates valid cliff orientation and tile recipes. It is
   preview-only by default; pass `apply:true` after reviewing the exact change counts.
-- **`map_preview`** — render the map top-down to an **image straight from the data**, no game launch —
-  the fast way to iterate on a layout (water = blue, road = tan, grass = green, shaded by height).
+- **`map_preview`** — render a diagnostic top-down **image straight from the data**, no game launch.
+  In addition to shaded terrain and water it overlays contours, cliff cells, ramp cells, current arrows,
+  entities, complete waypoint paths, tower ranges, camps, objectives, minimap bounds, missing terrain
+  recipes, and regions unreachable from player/creep spawns. Every overlay family can be hidden.
+- **`map_reachability`** — analyze the whole tile grid offline and report missing terrain recipes,
+  cliff-separated regions, trapped spawns, blocked entrances, inaccessible objectives or camps, and
+  waypoint segments that cross blocked cells. It recognizes generated ramps and treats Dota river water
+  as walkable. Mesh collision and Valve's final navmesh remain an engine-test responsibility.
 - **`entity_catalog`** — the placeable-entity reference (spawners, `path_track` waypoints, triggers,
   lights, props, …) so you know what to place. Text searches augment the curated list with classes
   and keyvalues parsed from the installed official `dota.fgd`.

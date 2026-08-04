@@ -23,6 +23,7 @@ import { reconcileMapTerrain } from "../dota/map-terrain.js";
 import { reconcileMapSpecification } from "../dota/map-spec.js";
 import { inspectMapArtifactFreshness } from "../dota/map-freshness.js";
 import { runMapTransaction } from "../dota/map-transaction.js";
+import { analyzeMapReachability } from "../dota/map-reachability.js";
 import {
   validateDotaBuildingEntities,
   validateDotaNeutralSpawners,
@@ -235,6 +236,58 @@ export function registerMapTools(server: McpServer) {
         );
       },
     ),
+  );
+
+  server.registerTool(
+    "map_reachability",
+    {
+      title: "Analyze whole-map terrain reachability",
+      description:
+        "Offline whole-map pathing preflight using the Dota tile grid. Detects missing terrain recipes, cliff-separated " +
+        "regions, trapped spawns, blocked entrances, inaccessible objectives/camps, and small isolated walkable areas. " +
+        "Recognizes generated ramp cells and does not launch Dota or Hammer. Mesh collision and Valve's final navmesh " +
+        "still require the optional engine navigation test.",
+      inputSchema: {
+        projectRoot: z.string().optional(),
+        map: z.string(),
+        maxFlatStep: z.number().min(0).optional().describe("Maximum center-height change between normal cells (default 0.25)."),
+        maxRampStep: z.number().min(0).optional().describe("Maximum center-height change when a ramp participates (default 0.75)."),
+        minRegionCells: z.number().int().min(1).optional().describe("Smaller isolated regions are warned about (default 4)."),
+        includeCells: z.boolean().optional().describe("Include every analyzed tile cell (default false; can be large)."),
+      },
+    },
+    guard(async ({ projectRoot, map, maxFlatStep, maxRampStep, minRegionCells, includeCells }): Promise<ToolResult> => {
+      const dota = await requireDotaPaths();
+      const project = await resolveProject(projectRoot);
+      const p = projectMapPaths(dota, project, map);
+      if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}.`);
+      const report = analyzeMapReachability(await vmapToText(dota.dmxconvertExe, p.contentVmap), {
+        maxFlatStep,
+        maxRampStep,
+        minRegionCells,
+      });
+      const errors = report.findings.filter((finding) => finding.severity === "error").length;
+      const warnings = report.findings.length - errors;
+      const data = {
+        map,
+        ...report,
+        cells: includeCells ? report.cells : undefined,
+      };
+      return json(
+        data,
+        [
+          `${map}: ${report.reachableCellCount}/${report.walkableCellCount} walkable cells reachable from spawns; ` +
+            `${report.regions.length} region(s).`,
+          `Terrain: ${report.cliffCellCount} cliff, ${report.rampCellCount} ramp, ${report.waterCellCount} water, ` +
+            `${report.holeCellCount} hole, ${report.unreachableCellCount} unreachable cells.`,
+          `Findings: ${errors} error(s), ${warnings} warning(s).`,
+          ...report.findings.slice(0, 30).map(
+            (finding) => `  [${finding.severity.toUpperCase()}] ${finding.code}: ${finding.targetname} — ${finding.detail}`,
+          ),
+          ...(report.findings.length > 30 ? [`  ...${report.findings.length - 30} more finding(s)`] : []),
+        ].join("\n"),
+      );
+    }),
   );
 
   server.registerTool(
@@ -573,7 +626,8 @@ export function registerMapTools(server: McpServer) {
         "and whether the compiled VPK is older than its VMAP source, " +
         "extracts entities, finds duplicate targetnames and broken path_corner/path_track links, and verifies required " +
         "targetname/classname pairs used by game scripts. When a project contract declares managedTerrain, validation " +
-        "also reports tile-grid drift without writing it.",
+        "also reports tile-grid drift without writing it. Whole-map offline reachability checks detect terrain holes, " +
+        "trapped spawns, blocked entrances/path segments, and inaccessible objectives or camps.",
       inputSchema: {
         projectRoot: z.string().optional(),
         map: z.string(),
@@ -668,6 +722,19 @@ export function registerMapTools(server: McpServer) {
             changedPathEdges: number;
           }
         | undefined;
+      let reachabilitySummary:
+        | {
+            walkableCellCount: number;
+            reachableCellCount: number;
+            unreachableCellCount: number;
+            blockedCellCount: number;
+            cliffCellCount: number;
+            rampCellCount: number;
+            holeCellCount: number;
+            regionCount: number;
+            findingCount: number;
+          }
+        | undefined;
       if (source) {
         const mapText = await vmapToText(dota.dmxconvertExe, p.contentVmap);
         entities = parseMapEntities(mapText);
@@ -686,6 +753,25 @@ export function registerMapTools(server: McpServer) {
           if (finding.code === "broken-path-target") continue;
           findings.push({
             severity: "error",
+            code: finding.code,
+            message: `${finding.targetname}: ${finding.detail}`,
+          });
+        }
+        const reachability = analyzeMapReachability(mapText);
+        reachabilitySummary = {
+          walkableCellCount: reachability.walkableCellCount,
+          reachableCellCount: reachability.reachableCellCount,
+          unreachableCellCount: reachability.unreachableCellCount,
+          blockedCellCount: reachability.blockedCellCount,
+          cliffCellCount: reachability.cliffCellCount,
+          rampCellCount: reachability.rampCellCount,
+          holeCellCount: reachability.holeCellCount,
+          regionCount: reachability.regions.length,
+          findingCount: reachability.findings.length,
+        };
+        for (const finding of reachability.findings) {
+          findings.push({
+            severity: finding.severity,
             code: finding.code,
             message: `${finding.targetname}: ${finding.detail}`,
           });
@@ -858,6 +944,7 @@ export function registerMapTools(server: McpServer) {
           contract: resolvedContract?.path ?? null,
           requirementCount: requirements.length,
           terrainDrift: terrainDrift ?? null,
+          reachability: reachabilitySummary ?? null,
           findings,
         },
         `${header}${body ? `\n${body}` : ""}`,

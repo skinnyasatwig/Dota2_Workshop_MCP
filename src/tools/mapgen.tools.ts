@@ -6,7 +6,7 @@ import { resolveProject } from "../config.js";
 import { requireDotaPaths, resolveDotaPaths } from "../dota/paths.js";
 import { vmapToText, textToVmap, buildEntityBlock, insertEntity, maxNodeId } from "../dota/vmap.js";
 import { categoryForFgdEntity, parseFgdEntities } from "../dota/fgd.js";
-import { parseTileGrid, tileToWorld, vIndex, cIndex } from "../dota/tilegrid.js";
+import { parseTileGrid, tileToWorld } from "../dota/tilegrid.js";
 import { registerMapFile } from "../dota/addoninfo.js";
 import { compileProjectMap, projectMapPaths } from "../dota/map-project.js";
 import { loadMapContract } from "../dota/map-contract.js";
@@ -20,7 +20,7 @@ import {
 } from "../dota/map-spec.js";
 import { resolveDataPath } from "../util/datapath.js";
 import { runMapTransaction } from "../dota/map-transaction.js";
-import { encodeRgbaPng } from "../util/png.js";
+import { renderMapPreview } from "../dota/map-preview.js";
 import { writeTextFile, pathExists } from "../util/fsx.js";
 import { json, text, image, error, guard, ToolResult } from "../util/result.js";
 
@@ -629,47 +629,79 @@ export function registerMapGenTools(server: McpServer) {
     {
       title: "Preview a map (top-down image)",
       description:
-        "Render a top-down image of a map's terrain straight from the tile grid (water = blue, road/other tilesets = " +
-        "tan, grass = green, shaded by height) — no game launch needed. The fast way to see how a generated layout looks.",
-      inputSchema: { projectRoot: z.string().optional(), map: z.string(), scale: z.number().int().min(2).max(16).optional() },
+        "Render a diagnostic top-down image without launching Dota: terrain contours, cliffs, ramps, water, currents, " +
+        "entities, waypoint paths, tower ranges, camps, objectives, minimap bounds, terrain holes, and unreachable regions.",
+      inputSchema: {
+        projectRoot: z.string().optional(),
+        map: z.string(),
+        scale: z.number().int().min(2).max(16).optional(),
+        showContours: z.boolean().optional(),
+        showCliffs: z.boolean().optional(),
+        showRamps: z.boolean().optional(),
+        showEntities: z.boolean().optional(),
+        showPaths: z.boolean().optional(),
+        showTowerRanges: z.boolean().optional(),
+        showCamps: z.boolean().optional(),
+        showObjectives: z.boolean().optional(),
+        showCurrents: z.boolean().optional(),
+        showMinimapBounds: z.boolean().optional(),
+        showReachability: z.boolean().optional(),
+      },
     },
-    guard(async ({ projectRoot, map, scale }): Promise<ToolResult> => {
+    guard(async ({
+      projectRoot,
+      map,
+      scale,
+      showContours,
+      showCliffs,
+      showRamps,
+      showEntities,
+      showPaths,
+      showTowerRanges,
+      showCamps,
+      showObjectives,
+      showCurrents,
+      showMinimapBounds,
+      showReachability,
+    }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
       const p = projectMapPaths(dota, project, map);
       if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}.`);
-      const g = parseTileGrid(await vmapToText(dota.dmxconvertExe, p.contentVmap));
-      const px = Math.max(2, Math.min(16, scale ?? 8));
-      const W = g.width * px, H = g.height * px;
-      const img = Buffer.alloc(W * H * 4);
-      const put = (x: number, y: number, r: number, gg: number, b: number) => {
-        const i = (y * W + x) * 4;
-        img[i] = r; img[i + 1] = gg; img[i + 2] = b; img[i + 3] = 255;
+      const rendered = renderMapPreview(await vmapToText(dota.dmxconvertExe, p.contentVmap), {
+        scale,
+        showContours,
+        showCliffs,
+        showRamps,
+        showEntities,
+        showPaths,
+        showTowerRanges,
+        showCamps,
+        showObjectives,
+        showCurrents,
+        showMinimapBounds,
+        showReachability,
+      });
+      const reachability = {
+        walkableCellCount: rendered.reachability.walkableCellCount,
+        reachableCellCount: rendered.reachability.reachableCellCount,
+        unreachableCellCount: rendered.reachability.unreachableCellCount,
+        holeCellCount: rendered.reachability.holeCellCount,
+        regions: rendered.reachability.regions,
+        findings: rendered.reachability.findings,
       };
-      for (let cy = 0; cy < g.height; cy++) {
-        for (let cx = 0; cx < g.width; cx++) {
-          const corners = [vIndex(g, cx, cy), vIndex(g, cx + 1, cy), vIndex(g, cx, cy + 1), vIndex(g, cx + 1, cy + 1)];
-          const waterN = corners.reduce((n, i) => n + g.water[i], 0);
-          const hAvg = corners.reduce((s, i) => s + g.heights[i], 0) / 4;
-          const tile = g.tileset[cIndex(g, cx, cy)];
-          let r: number, gg: number, b: number;
-          if (waterN >= 2) {
-            r = 36; gg = 86; b = 140; // water
-          } else if (tile !== 0) {
-            r = 170; gg = 150; b = 110; // road / alt tileset
-          } else {
-            r = 70; gg = 120; b = 55; // grass
-          }
-          const shade = 1 + Math.max(-0.3, Math.min(0.6, hAvg * 0.18)); // height shading
-          r = Math.min(255, r * shade) | 0; gg = Math.min(255, gg * shade) | 0; b = Math.min(255, b * shade) | 0;
-          const oy = (g.height - 1 - cy) * px; // +y up
-          const ox = cx * px;
-          for (let yy = 0; yy < px; yy++) for (let xx = 0; xx < px; xx++) put(ox + xx, oy + yy, r, gg, b);
-        }
-      }
-      const png = encodeRgbaPng(W, H, img);
-      const stats = { width: W, height: H, grid: [g.width, g.height], waterVerts: g.water.filter((w) => w).length, raised: g.heights.filter((h) => h > 0).length, roadCells: g.tileset.filter((t) => t !== 0).length };
-      return image(png.toString("base64"), "image/png", `Top-down preview of "${map}" (${W}x${H}). water=${stats.waterVerts} verts, raised=${stats.raised} verts, road=${stats.roadCells} cells.`);
+      const caption =
+        `Diagnostic preview of "${map}" (${rendered.stats.width}x${rendered.stats.height}). ` +
+        `${rendered.stats.cliffCells} cliff, ${rendered.stats.rampCells} ramp, ` +
+        `${rendered.stats.unreachableCells} unreachable, ${rendered.stats.holeCells} hole cells. ` +
+        `Legend: ${Object.entries(rendered.stats.legend).map(([name, value]) => `${name}=${value}`).join("; ")}.`;
+      return {
+        content: [
+          { type: "text", text: caption },
+          { type: "image", data: rendered.png.toString("base64"), mimeType: "image/png" },
+        ],
+        structuredContent: { map, stats: rendered.stats, reachability },
+      };
     }),
   );
 
