@@ -78,6 +78,8 @@ test("diagnostic preview renders gameplay and navigation overlays", () => {
     entity("fow_wall_2", "ent_fow_blocker_node", "1280 896 256"),
     entity("minimap_boundary_southwest", "dota_minimap_boundary", "0 0 128"),
     entity("minimap_boundary_northeast", "dota_minimap_boundary", "1536 1024 128"),
+    entity("preview_tree", "ent_dota_tree", "128 896 128"),
+    entity("preview_statue", "prop_static", "1408 128 128", { solid: "6" }),
   ], { scale: 4 }, volumes);
 
   const decoded = decodePng(rendered.png);
@@ -92,6 +94,7 @@ test("diagnostic preview renders gameplay and navigation overlays", () => {
   assert.equal(rendered.stats.overlays.volumes, 2);
   assert.equal(rendered.stats.overlays.blockingVolumes, 1);
   assert.equal(rendered.stats.overlays.visionBlockers, 1);
+  assert.equal(rendered.stats.overlays.collisionObstacles, 2);
   assert.equal(rendered.reachability.findings.length, 0);
   const colors = new Set<string>();
   for (let index = 0; index < decoded.rgba.length; index += 4) {

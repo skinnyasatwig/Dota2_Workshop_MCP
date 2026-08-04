@@ -272,8 +272,9 @@ export function registerMapTools(server: McpServer) {
       description:
         "Offline whole-map pathing preflight using the Dota tile grid. Detects missing terrain recipes, cliff-separated " +
         "regions, trapped spawns, blocked entrances, inaccessible objectives/camps, and small isolated walkable areas. " +
-        "Recognizes generated ramp cells and checked player-blocking volume footprints, and does not launch Dota or " +
-        "Hammer. Other mesh collision and Valve's final navmesh still require the optional engine navigation test.",
+        "Recognizes generated ramp cells, checked player-blocking volumes, and warning-only proximity to explicit Valve " +
+        "tree/obstruction classes. Collision-enabled props are inventoried without guessing their model bounds. It does " +
+        "not launch Dota or Hammer; exact mesh collision and Valve's final navmesh still require the engine test.",
       inputSchema: {
         projectRoot: z.string().optional(),
         map: z.string(),
@@ -308,6 +309,8 @@ export function registerMapTools(server: McpServer) {
           `Terrain: ${report.cliffCellCount} cliff, ${report.rampCellCount} ramp, ${report.waterCellCount} water, ` +
             `${report.holeCellCount} hole, ${report.volumeBlockedCellCount} volume-blocked, ` +
             `${report.unreachableCellCount} unreachable cells.`,
+          `Collision inventory: ${report.approximatedCollisionObstacleCount} known-class approximation(s), ` +
+            `${report.unknownBoundsCollisionObstacleCount} solid prop(s) with unknown model bounds.`,
           `Findings: ${errors} error(s), ${warnings} warning(s).`,
           ...report.findings.slice(0, 30).map(
             (finding) => `  [${finding.severity.toUpperCase()}] ${finding.code}: ${finding.targetname} — ${finding.detail}`,
@@ -1342,6 +1345,9 @@ export function registerMapTools(server: McpServer) {
             unreachableCellCount: number;
             blockedCellCount: number;
             volumeBlockedCellCount: number;
+            collisionObstacleCount: number;
+            approximatedCollisionObstacleCount: number;
+            unknownBoundsCollisionObstacleCount: number;
             cliffCellCount: number;
             rampCellCount: number;
             holeCellCount: number;
@@ -1390,6 +1396,9 @@ export function registerMapTools(server: McpServer) {
           unreachableCellCount: reachability.unreachableCellCount,
           blockedCellCount: reachability.blockedCellCount,
           volumeBlockedCellCount: reachability.volumeBlockedCellCount,
+          collisionObstacleCount: reachability.collisionObstacleCount,
+          approximatedCollisionObstacleCount: reachability.approximatedCollisionObstacleCount,
+          unknownBoundsCollisionObstacleCount: reachability.unknownBoundsCollisionObstacleCount,
           cliffCellCount: reachability.cliffCellCount,
           rampCellCount: reachability.rampCellCount,
           holeCellCount: reachability.holeCellCount,

@@ -788,7 +788,7 @@ export function registerMapGenTools(server: McpServer) {
       description:
         "Render a diagnostic top-down image without launching Dota: terrain contours, cliffs, ramps, water, currents, " +
         "entities, waypoint paths, tower ranges, camps, objectives, minimap bounds, checked trigger/blocker volumes, " +
-        "terrain holes, and unreachable regions.",
+        "explicit Valve tree/obstruction proximity, solid props with unknown model bounds, terrain holes, and unreachable regions.",
       inputSchema: {
         projectRoot: z.string().optional(),
         map: z.string(),
@@ -806,6 +806,7 @@ export function registerMapGenTools(server: McpServer) {
         showReachability: z.boolean().optional(),
         showVolumes: z.boolean().optional(),
         showVisionBlockers: z.boolean().optional(),
+        showCollisionObstacles: z.boolean().optional(),
       },
     },
     guard(async ({
@@ -825,6 +826,7 @@ export function registerMapGenTools(server: McpServer) {
       showReachability,
       showVolumes,
       showVisionBlockers,
+      showCollisionObstacles,
     }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
@@ -845,6 +847,7 @@ export function registerMapGenTools(server: McpServer) {
         showReachability,
         showVolumes,
         showVisionBlockers,
+        showCollisionObstacles,
       });
       const reachability = {
         walkableCellCount: rendered.reachability.walkableCellCount,
@@ -852,6 +855,9 @@ export function registerMapGenTools(server: McpServer) {
         unreachableCellCount: rendered.reachability.unreachableCellCount,
         holeCellCount: rendered.reachability.holeCellCount,
         volumeBlockedCellCount: rendered.reachability.volumeBlockedCellCount,
+        collisionObstacleCount: rendered.reachability.collisionObstacleCount,
+        approximatedCollisionObstacleCount: rendered.reachability.approximatedCollisionObstacleCount,
+        unknownBoundsCollisionObstacleCount: rendered.reachability.unknownBoundsCollisionObstacleCount,
         regions: rendered.reachability.regions,
         findings: rendered.reachability.findings,
       };

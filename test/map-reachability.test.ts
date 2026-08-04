@@ -171,3 +171,20 @@ test("offline reachability follows a polygon blocker instead of its bounding box
   assert.equal(report.cells.filter((cell) => cell.blockingVolume === blocker.targetname).length, 5);
   assert.equal(report.volumeBlockedCellCount, 5);
 });
+
+test("creep routes warn when they cross explicit Valve obstruction classes", () => {
+  const report = analyzeTileGridReachability(flatGrid(), [
+    entity("path_test_1", "path_corner", 128, 384, "path_test_2"),
+    entity("path_test_2", "path_corner", 1152, 384),
+    entity("tree_on_route", "ent_dota_tree", 640, 384),
+    entity("solid_prop_unknown", "prop_static", 896, 384),
+  ]);
+
+  assert.equal(report.collisionObstacleCount, 2);
+  assert.equal(report.approximatedCollisionObstacleCount, 1);
+  assert.equal(report.unknownBoundsCollisionObstacleCount, 1);
+  const warning = report.findings.find((finding) => finding.code === "path-collision-obstacle");
+  assert.equal(warning?.severity, "warn");
+  assert.match(warning?.detail ?? "", /tree_on_route/);
+  assert.doesNotMatch(warning?.detail ?? "", /solid_prop_unknown/);
+});

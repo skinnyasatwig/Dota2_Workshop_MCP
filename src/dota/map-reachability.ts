@@ -1,6 +1,11 @@
 import { cIndex, parseTileGrid, TileGrid, tileToWorld, vIndex } from "./tilegrid.js";
 import { parseMapEntities, ParsedMapEntity } from "./vmap.js";
 import { parseMapVolumes, ParsedMapVolume } from "./map-volume.js";
+import {
+  collectMapCollisionObstacles,
+  distanceToSegment2d,
+  MapCollisionObstacle,
+} from "./map-collision.js";
 
 export type ReachabilityEntityKind = "spawn" | "objective" | "entrance" | "camp" | "other";
 
@@ -50,7 +55,8 @@ export interface ReachabilityFinding {
     | "isolated-region"
     | "entity-out-of-bounds"
     | "blocked-path-node"
-    | "blocked-path-segment";
+    | "blocked-path-segment"
+    | "path-collision-obstacle";
   targetname: string;
   detail: string;
   cells?: [number, number][];
@@ -71,6 +77,9 @@ export interface MapReachabilityReport {
   walkableCellCount: number;
   blockedCellCount: number;
   volumeBlockedCellCount: number;
+  collisionObstacleCount: number;
+  approximatedCollisionObstacleCount: number;
+  unknownBoundsCollisionObstacleCount: number;
   cliffCellCount: number;
   rampCellCount: number;
   waterCellCount: number;
@@ -81,6 +90,7 @@ export interface MapReachabilityReport {
   spawnComponents: number[];
   regions: ReachabilityRegion[];
   entities: ReachabilityEntity[];
+  collisionObstacles: MapCollisionObstacle[];
   findings: ReachabilityFinding[];
   cells: ReachabilityCell[];
 }
@@ -248,6 +258,7 @@ export function analyzeTileGridReachability(
   const maxRampStep = Math.max(maxFlatStep, options.maxRampStep ?? 0.75);
   const minRegionCells = Math.max(1, Math.floor(options.minRegionCells ?? 4));
   const cells = buildCells(grid, options.blockingVolumes);
+  const collisionObstacles = collectMapCollisionObstacles(sourceEntities);
   const componentCells: number[][] = [];
 
   for (let index = 0; index < cells.length; index++) {
@@ -446,6 +457,26 @@ export function analyzeTileGridReachability(
           .map((index) => [index % grid.width, Math.floor(index / grid.width)] as [number, number]),
       });
     }
+    const nearbyObstacles = collisionObstacles.filter((obstacle) =>
+      obstacle.approximateRadius !== undefined &&
+      Math.abs(obstacle.origin[2] - ((from[2] + to[2]) / 2)) <= grid.tileSize &&
+      distanceToSegment2d(
+        [obstacle.origin[0], obstacle.origin[1]],
+        [from[0], from[1]],
+        [to[0], to[1]],
+      ) <= obstacle.approximateRadius);
+    if (nearbyObstacles.length) {
+      const names = nearbyObstacles.slice(0, 5).map((obstacle) => obstacle.id).join(", ");
+      findings.push({
+        severity: "warn",
+        code: "path-collision-obstacle",
+        targetname: path.targetname!,
+        detail:
+          `Segment to "${path.target}" passes through the warning-only broad phase of ` +
+          `${nearbyObstacles.length} Valve obstruction(s): ${names}` +
+          `${nearbyObstacles.length > 5 ? ", …" : ""}. Exact collision still requires GridNav.`,
+      });
+    }
   }
 
   const walkableCellCount = cells.filter((cell) => cell.walkable).length;
@@ -460,6 +491,13 @@ export function analyzeTileGridReachability(
     walkableCellCount,
     blockedCellCount: cells.length - walkableCellCount,
     volumeBlockedCellCount: cells.filter((cell) => cell.blockingVolume !== undefined).length,
+    collisionObstacleCount: collisionObstacles.length,
+    approximatedCollisionObstacleCount: collisionObstacles.filter(
+      (obstacle) => obstacle.confidence === "class-approximation",
+    ).length,
+    unknownBoundsCollisionObstacleCount: collisionObstacles.filter(
+      (obstacle) => obstacle.confidence === "unknown-model-bounds",
+    ).length,
     cliffCellCount: cells.filter((cell) => cell.cliff).length,
     rampCellCount: cells.filter((cell) => cell.ramp).length,
     waterCellCount: cells.filter((cell) => cell.water).length,
@@ -470,6 +508,7 @@ export function analyzeTileGridReachability(
     spawnComponents: [...spawnComponents].sort((a, b) => a - b),
     regions,
     entities,
+    collisionObstacles,
     findings,
     cells,
   };

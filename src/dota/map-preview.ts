@@ -23,6 +23,7 @@ export interface MapPreviewOptions {
   showReachability?: boolean;
   showVolumes?: boolean;
   showVisionBlockers?: boolean;
+  showCollisionObstacles?: boolean;
 }
 
 export interface MapPreviewStats {
@@ -47,6 +48,7 @@ export interface MapPreviewStats {
     volumes: number;
     blockingVolumes: number;
     visionBlockers: number;
+    collisionObstacles: number;
   };
   legend: Record<string, string>;
 }
@@ -215,6 +217,25 @@ function drawPreview(
     }
   }
 
+  if (options.showCollisionObstacles !== false) {
+    for (const obstacle of reachability.collisionObstacles) {
+      const [x, y] = worldPixel(obstacle.origin);
+      if (obstacle.approximateRadius !== undefined) {
+        circle(
+          x,
+          y,
+          Math.max(2, (obstacle.approximateRadius / grid.tileSize) * scale),
+          obstacle.kind === "tree" ? [35, 66, 24] : [255, 92, 45],
+          0.95,
+          2,
+        );
+      } else {
+        line(x - 3, y - 3, x + 3, y + 3, [235, 235, 235], 0.9, 1);
+        line(x - 3, y + 3, x + 3, y - 3, [235, 235, 235], 0.9, 1);
+      }
+    }
+  }
+
   const named = entities.filter((entity) => entity.targetname && vector3(entity.origin));
   const towers = named.filter((entity) => entity.classname === "npc_dota_tower");
   if (options.showTowerRanges !== false) {
@@ -344,6 +365,7 @@ function drawPreview(
       volumes: volumes.length,
       blockingVolumes: volumes.filter((volume) => volume.blocking).length,
       visionBlockers: visionBlockerSegments,
+      collisionObstacles: reachability.collisionObstacleCount,
     },
     legend: {
       water: "blue",
@@ -359,6 +381,7 @@ function drawPreview(
       minimapBounds: "magenta rectangle",
       volumes: "orange camp, purple no-ward, cyan trigger, pink player blocker outlines",
       visionBlockers: "purple linked lines",
+      collisionObstacles: "dark green/orange obstruction circles; white X means model bounds unknown",
     },
   };
   return { png: encodeRgbaPng(width, height, rgba), stats, reachability };
