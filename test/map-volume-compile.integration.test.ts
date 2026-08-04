@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { reconcileMapVolumes } from "../src/dota/map-volume.js";
+import { buildRepositoryCompileFixtureText } from "../src/dota/compile-fixture.js";
 import { compileVmap, textToVmap, vmapToText } from "../src/dota/vmap.js";
 
-const dotaRoot = "C:\\Program Files (x86)\\Steam\\steamapps\\common\\dota 2 beta";
+const dotaRoot = process.env.DOTA2_PATH || "C:\\Program Files (x86)\\Steam\\steamapps\\common\\dota 2 beta";
 const converter = join(dotaRoot, "game", "bin", "win64", "dmxconvert.exe");
 const compiler = join(dotaRoot, "game", "bin", "win64", "resourcecompiler.exe");
 const dotaGame = join(dotaRoot, "game", "dota");
@@ -14,7 +14,7 @@ const template = join(dotaRoot, "content", "dota_addons", "addon_template", "map
 const enabled = process.env.DOTA2_MCP_COMPILE_INTEGRATION === "1";
 
 test(
-  "resourcecompiler accepts a checked polygon volume in an isolated temporary addon",
+  "resourcecompiler accepts the repository-owned VMAP fixture in an isolated temporary addon",
   {
     skip: !(enabled && existsSync(converter) && existsSync(compiler) && existsSync(template)),
     timeout: 600_000,
@@ -27,20 +27,14 @@ test(
     const gameVpk = join(gameAddon, "maps", "polygon_fixture.vpk");
     try {
       await mkdir(dirname(contentMap), { recursive: true });
-      const source = await vmapToText(converter, template);
-      const generated = reconcileMapVolumes(source, [{
-        targetname: "fixture_polygon_no_wards",
-        recipe: "noWards",
-        center: [0, 0, 256],
-        polygon: {
-          points: Array.from({ length: 16 }, (_unused, index) => {
-            const angle = (index / 16) * Math.PI * 2;
-            return [Math.cos(angle) * 512, Math.sin(angle) * 512] as [number, number];
-          }),
-          height: 512,
-        },
-      }]);
-      await textToVmap(converter, generated.text, contentMap);
+      const structuralSeed = await vmapToText(converter, template);
+      await textToVmap(
+        converter,
+        buildRepositoryCompileFixtureText(structuralSeed),
+        contentMap,
+      );
+      const roundTripped = await vmapToText(converter, contentMap);
+      assert.match(roundTripped, /fixture_polygon_no_wards/);
       const compiled = await compileVmap(compiler, dotaGame, contentMap, gameVpk, true);
       assert.equal(compiled.timedOut, false, compiled.stderr || compiled.stdout);
       assert.equal(compiled.code, 0, compiled.stderr || compiled.stdout);

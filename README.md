@@ -447,8 +447,9 @@ Then launch it: `addon_launch_custom_game map="<name>"`.
 
 ```bash
 npm run dev    # run the server from source via tsx
-npm test       # KV parser/serializer unit tests
+npm test       # offline unit + integration tests (engine/compiler proofs stay opt-in)
 npm run smoke  # boot the server over stdio and exercise the tools end-to-end
+npm run test:compiler-fixture # with Workshop Tools: convert + compile the generated legal fixture, then clean up
 ```
 
 ## License
