@@ -22,12 +22,17 @@ Last updated: 2026-08-04
 10. `c421796` - added checked three- to 64-sided convex-prism volume authoring, exact polygon drift detection,
     reusable-component mirroring, true-footprint preview/reachability, compiled boss-pit no-ward volumes, and
     isolated `dmxconvert` plus `resourcecompiler` integration proofs.
+11. `0e63948` - added version-aware Valve recipe verification using Steam/Dota/tools build metadata and hashes
+    of the official terrain tilesets, PvP prefab, FGD, and compiler; exposed verified/compatible/changed status
+    through `dota_doctor` and `map_recipe_catalog`.
 
 ## Current verification record
 
 - TypeScript build passes.
-- 186 unit and integration tests pass; the opt-in compiler test is skipped during the default suite.
-- MCP smoke suite: 193 passed, 0 failed, 1 skipped because the remote Steam Workshop search service was unavailable.
+- 191 unit and integration tests pass; the opt-in compiler test is skipped during the default suite.
+- MCP smoke suite: 196 passed, 0 failed, 1 skipped because the remote Steam Workshop search service was unavailable.
+- Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
+  Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
 - Valve's installed `dmxconvert.exe` successfully round-trips generated camp, polygonal no-ward, and player-clip
   volumes from text to binary VMAP and back during the integration suite.
 - Valve's installed `resourcecompiler.exe` successfully compiled an isolated temporary addon containing a
@@ -37,6 +42,8 @@ Last updated: 2026-08-04
 - Official entity definitions: all 157 map entities recognized; zero invalid known property values.
 - Valve prefab references: 13 of 13 found in the installed Workshop Tools.
 - Acceptance map compiled successfully to `three_vs_three_blockout.vpk` on 2026-08-04.
+- The acceptance VMAP now contains two checked 32-sided boss no-ward prisms generated from one reusable component;
+  both are contract-idempotent, visible in the diagnostic preview, and included in the fresh compiled VPK.
 - Final offline acceptance: compiled map present, zero validation errors, 3,623 walkable cells,
   3,237 cells connected to the spawn network, zero terrain holes, and two known isolated-region warnings
   (a 2-cell shelf and a deliberate 384-cell off-map strip).
