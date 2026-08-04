@@ -84,6 +84,7 @@ export interface MapInspection {
   findings: {
     code:
       | "broken-path-target"
+      | "broken-fow-target"
       | "entity-out-of-bounds"
       | "path-out-of-bounds"
       | "path-crosses-water"
@@ -381,6 +382,18 @@ export function inspectMapText(text: string, options: MapInspectOptions = {}): M
       }
     }
     if (options.includePathNodes !== true) path.nodes = undefined;
+  }
+  const namedEntities = new Set(all.flatMap((entity) => entity.targetname ? [entity.targetname] : []));
+  for (const entity of all) {
+    if (entity.classname !== "ent_fow_blocker_node" || !entity.targetname) continue;
+    const targetNode = entity.properties.TargetNode;
+    if (targetNode && !namedEntities.has(targetNode)) {
+      findings.push({
+        code: "broken-fow-target",
+        targetname: entity.targetname,
+        detail: `Targets missing FoW blocker node "${targetNode}".`,
+      });
+    }
   }
   if (terrain) {
     if (terrain.abruptCellCount > 0) {

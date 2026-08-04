@@ -99,6 +99,21 @@ const gateComponentSchema = z.object({
   gateType: z.enum(["twin"]).optional(),
 }).strict();
 
+const baseBlockerComponentSchema = z.object({
+  kind: z.literal("baseBlocker"),
+  name: nameSchema,
+  team: teamSchema,
+  origin: point3,
+  yaw: yawSchema,
+}).strict();
+
+const fowBlockerComponentSchema = z.object({
+  kind: z.literal("fowBlocker"),
+  name: nameSchema,
+  points: z.array(point3).min(2).max(512),
+  closed: z.boolean().optional(),
+}).strict();
+
 const bossPitComponentSchema = z.object({
   kind: z.literal("bossPit"),
   name: nameSchema,
@@ -167,6 +182,7 @@ const baseComponentSchema = z.object({
   playerStarts: z.array(baseOffsetSchema).max(24).optional(),
   towers: z.array(baseTowerSchema).optional(),
   gates: z.array(baseOffsetSchema).optional(),
+  blockers: z.array(baseOffsetSchema).optional(),
 }).strict();
 
 export const dotaComponentInputSchema = z.union([
@@ -177,6 +193,8 @@ export const dotaComponentInputSchema = z.union([
   campComponentSchema,
   playerStartComponentSchema,
   gateComponentSchema,
+  baseBlockerComponentSchema,
+  fowBlockerComponentSchema,
   bossPitComponentSchema,
   baseComponentSchema,
 ]);
@@ -190,6 +208,19 @@ export interface ExpandedDotaComponents {
   managedTerrain: ManagedTerrainOperation[];
   managedVolumes: ManagedMapVolume[];
 }
+
+export const POINT_BLOCKER_RECIPES = {
+  baseBlocker: {
+    classname: "npc_dota_base_blocker",
+    purpose: "Stock team-aware Dota base entrance blocker.",
+    source: "Valve dota.fgd plus shipping dota_pvp_prefab.vmap instances",
+  },
+  fowBlockerNode: {
+    classname: "ent_fow_blocker_node",
+    purpose: "Fog-of-war blocker line linked to another named node through TargetNode.",
+    source: "Valve dota.fgd plus shipping dota_pvp_prefab.vmap node groups",
+  },
+} as const;
 
 function formatted(value: number): string {
   return String(Math.abs(value) < 1e-9 ? 0 : Number(value.toFixed(6)));
@@ -355,6 +386,43 @@ function gateEntity(component: z.infer<typeof gateComponentSchema>): ManagedMapE
   };
 }
 
+function baseBlockerEntity(component: z.infer<typeof baseBlockerComponentSchema>): ManagedMapEntity {
+  return {
+    targetname: component.name,
+    classname: POINT_BLOCKER_RECIPES.baseBlocker.classname,
+    origin: originString(component.origin),
+    angles: angleString(component.yaw),
+    properties: {
+      teamnumber: String(teamNumber(component.team)),
+      direside: "0",
+      solid: "6",
+      model: "",
+      MapUnitName: "",
+      vulnerableoncreepspawn: "0",
+    },
+  };
+}
+
+function fowBlockerEntities(component: z.infer<typeof fowBlockerComponentSchema>): ManagedMapEntity[] {
+  return component.points.map((origin, index) => {
+    const nextIndex = index + 1 < component.points.length
+      ? index + 1
+      : component.closed
+        ? 0
+        : undefined;
+    return {
+      targetname: `${component.name}_${index + 1}`,
+      classname: POINT_BLOCKER_RECIPES.fowBlockerNode.classname,
+      origin: originString(origin),
+      angles: "0 0 0",
+      properties: nextIndex === undefined
+        ? undefined
+        : { TargetNode: `${component.name}_${nextIndex + 1}` },
+      removeProperties: nextIndex === undefined ? ["TargetNode"] : undefined,
+    };
+  });
+}
+
 function pitOperations(component: z.infer<typeof bossPitComponentSchema>): ExpandedDotaComponents {
   const [cx, cy] = component.tileCenter;
   const rimWidth = component.rimWidth ?? 1.5;
@@ -518,6 +586,15 @@ function expandBase(component: z.infer<typeof baseComponentSchema>): ManagedMapE
       gateType: "twin",
     }));
   }
+  for (const blocker of component.blockers ?? []) {
+    entities.push(baseBlockerEntity({
+      kind: "baseBlocker",
+      name: `${component.name}_${blocker.name}`,
+      team: component.team,
+      origin: at(blocker.offset),
+      yaw: yaw + (blocker.yaw ?? 0),
+    }));
+  }
   return entities;
 }
 
@@ -548,6 +625,12 @@ export function expandDotaComponents(components: DotaComponentInput[]): Expanded
         break;
       case "gate":
         managedEntities.push(gateEntity(component));
+        break;
+      case "baseBlocker":
+        managedEntities.push(baseBlockerEntity(component));
+        break;
+      case "fowBlocker":
+        managedEntities.push(...fowBlockerEntities(component));
         break;
       case "bossPit": {
         const pit = pitOperations(component);

@@ -159,3 +159,20 @@ test("inspectMapText flags path samples outside the tile grid", () => {
     ),
   );
 });
+
+test("inspectMapText flags a broken explicit FoW blocker link", () => {
+  const blocker = buildEntityBlock(
+    {
+      classname: "ent_fow_blocker_node",
+      origin: "0 0 256",
+      properties: { targetname: "fow_wall_1", TargetNode: "fow_wall_missing" },
+    },
+    1,
+  );
+  const report = inspectMapText(`"world" "CMapWorld"\n{\n"children" "element_array" [ ${blocker} ]\n}`);
+  assert.ok(
+    report.findings.some(
+      (finding) => finding.code === "broken-fow-target" && finding.targetname === "fow_wall_1",
+    ),
+  );
+});

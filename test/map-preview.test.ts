@@ -72,6 +72,8 @@ test("diagnostic preview renders gameplay and navigation overlays", () => {
     entity("river_flow_center", "info_target", "768 256 128", {}, undefined, "0 90 0"),
     entity("path_radiant_1", "path_corner", "128 512 128", {}, "path_radiant_2"),
     entity("path_radiant_2", "path_corner", "1408 512 128"),
+    entity("fow_wall_1", "ent_fow_blocker_node", "256 896 256", { TargetNode: "fow_wall_2" }),
+    entity("fow_wall_2", "ent_fow_blocker_node", "1280 896 256"),
     entity("minimap_boundary_southwest", "dota_minimap_boundary", "0 0 128"),
     entity("minimap_boundary_northeast", "dota_minimap_boundary", "1536 1024 128"),
   ], { scale: 4 }, volumes);
@@ -87,6 +89,7 @@ test("diagnostic preview renders gameplay and navigation overlays", () => {
   assert.equal(rendered.stats.overlays.minimapBounds, 1);
   assert.equal(rendered.stats.overlays.volumes, 2);
   assert.equal(rendered.stats.overlays.blockingVolumes, 1);
+  assert.equal(rendered.stats.overlays.visionBlockers, 1);
   assert.equal(rendered.reachability.findings.length, 0);
   const colors = new Set<string>();
   for (let index = 0; index < decoded.rgba.length; index += 4) {

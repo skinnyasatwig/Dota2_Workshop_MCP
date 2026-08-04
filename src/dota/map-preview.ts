@@ -22,6 +22,7 @@ export interface MapPreviewOptions {
   showMinimapBounds?: boolean;
   showReachability?: boolean;
   showVolumes?: boolean;
+  showVisionBlockers?: boolean;
 }
 
 export interface MapPreviewStats {
@@ -45,6 +46,7 @@ export interface MapPreviewStats {
     minimapBounds: number;
     volumes: number;
     blockingVolumes: number;
+    visionBlockers: number;
   };
   legend: Record<string, string>;
 }
@@ -248,6 +250,23 @@ function drawPreview(
     }
   }
 
+  const visionNodes = named.filter((entity) => entity.classname === "ent_fow_blocker_node");
+  const visionByName = new Map(visionNodes.map((entity) => [entity.targetname!, entity]));
+  let visionBlockerSegments = 0;
+  if (options.showVisionBlockers !== false) {
+    for (const node of visionNodes) {
+      const targetName = node.properties.TargetNode;
+      const target = targetName ? visionByName.get(targetName) : undefined;
+      const from = vector3(node.origin);
+      const to = vector3(target?.origin);
+      if (!from || !to) continue;
+      const [x0, y0] = worldPixel(from);
+      const [x1, y1] = worldPixel(to);
+      line(x0, y0, x1, y1, [155, 88, 255], 0.9, 2);
+      visionBlockerSegments++;
+    }
+  }
+
   const minimap = named.filter((entity) => entity.classname === "dota_minimap_boundary");
   let minimapBounds = 0;
   if (options.showMinimapBounds !== false && minimap.length >= 2) {
@@ -329,6 +348,7 @@ function drawPreview(
       minimapBounds,
       volumes: volumes.length,
       blockingVolumes: volumes.filter((volume) => volume.blocking).length,
+      visionBlockers: visionBlockerSegments,
     },
     legend: {
       water: "blue",
@@ -343,6 +363,7 @@ function drawPreview(
       currents: "cyan arrows",
       minimapBounds: "magenta rectangle",
       volumes: "orange camp, purple no-ward, cyan trigger, pink player blocker outlines",
+      visionBlockers: "purple linked lines",
     },
   };
   return { png: encodeRgbaPng(width, height, rgba), stats, reachability };

@@ -66,6 +66,7 @@ test("base components rotate explicit local members into a reusable assembly", (
       playerStarts: [{ name: "start_1", offset: [-100, 100, 0] }],
       towers: [{ name: "t3", offset: [400, 0, 0], tier: 3, lane: "mid" }],
       gates: [{ name: "north_gate", offset: [0, 600, 0] }],
+      blockers: [{ name: "south_blocker", offset: [0, -600, 0], yaw: 90 }],
     },
   ]);
   const entities = expandDotaComponents([base]).managedEntities;
@@ -77,11 +78,50 @@ test("base components rotate explicit local members into a reusable assembly", (
     "dire_base_start_1",
     "dire_base_t3",
     "dire_base_north_gate",
+    "dire_base_south_blocker",
   ]);
   assert.equal(entities[1].origin, "1000 1800 256");
   assert.equal(entities[2].origin, "700 2000 256");
   assert.equal(entities[4].origin, "1000 2400 256");
   assert.equal(entities[4].angles, "0 90 0");
+  assert.equal(entities[6].classname, "npc_dota_base_blocker");
+  assert.equal(entities[6].origin, "1600 2000 256");
+  assert.equal(entities[6].angles, "0 180 0");
+  assert.equal(entities[6].properties?.teamnumber, "3");
+});
+
+test("checked point blockers expand to team gates and deterministic FoW chains", () => {
+  const components = componentList.parse([
+    {
+      kind: "baseBlocker",
+      name: "radiant_north_blocker",
+      team: "radiant",
+      origin: [-5000, 1200, 256],
+      yaw: 90,
+    },
+    {
+      kind: "fowBlocker",
+      name: "dragon_pit_fow",
+      points: [[-512, 2048, 512], [0, 2304, 512], [512, 2048, 512]],
+      closed: true,
+    },
+  ]);
+  const expanded = expandDotaComponents(components);
+
+  assert.equal(expanded.managedEntities[0].classname, "npc_dota_base_blocker");
+  assert.equal(expanded.managedEntities[0].properties?.teamnumber, "2");
+  assert.deepEqual(
+    expanded.managedEntities.slice(1).map((entity) => ({
+      targetname: entity.targetname,
+      classname: entity.classname,
+      target: entity.properties?.TargetNode,
+    })),
+    [
+      { targetname: "dragon_pit_fow_1", classname: "ent_fow_blocker_node", target: "dragon_pit_fow_2" },
+      { targetname: "dragon_pit_fow_2", classname: "ent_fow_blocker_node", target: "dragon_pit_fow_3" },
+      { targetname: "dragon_pit_fow_3", classname: "ent_fow_blocker_node", target: "dragon_pit_fow_1" },
+    ],
+  );
 });
 
 test("boss pit components create structured terrain, entrances, and an official spawn", () => {

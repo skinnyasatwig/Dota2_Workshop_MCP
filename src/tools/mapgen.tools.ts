@@ -23,6 +23,7 @@ import { resolveDataPath } from "../util/datapath.js";
 import { runMapTransaction } from "../dota/map-transaction.js";
 import { renderMapPreview } from "../dota/map-preview.js";
 import { MAP_VOLUME_RECIPES } from "../dota/map-volume.js";
+import { POINT_BLOCKER_RECIPES } from "../dota/dota-components.js";
 import {
   CLIFF_RECIPE_SETS,
   CORE_TERRAIN_RECIPES,
@@ -340,6 +341,7 @@ export function registerMapGenTools(server: McpServer) {
           cliffSets: CLIFF_RECIPE_SETS,
           rampFallback: "Ramp cells use the matching core corner tile without decorative cliff layers.",
           volumeRecipes: !category || category === "volume" ? MAP_VOLUME_RECIPES : {},
+          pointBlockerRecipes: !category || category === "base" ? POINT_BLOCKER_RECIPES : {},
           prefabs,
           installVerified: verifyInstalled === true && Boolean(dota),
         },
@@ -742,6 +744,7 @@ export function registerMapGenTools(server: McpServer) {
         showMinimapBounds: z.boolean().optional(),
         showReachability: z.boolean().optional(),
         showVolumes: z.boolean().optional(),
+        showVisionBlockers: z.boolean().optional(),
       },
     },
     guard(async ({
@@ -760,6 +763,7 @@ export function registerMapGenTools(server: McpServer) {
       showMinimapBounds,
       showReachability,
       showVolumes,
+      showVisionBlockers,
     }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
@@ -779,6 +783,7 @@ export function registerMapGenTools(server: McpServer) {
         showMinimapBounds,
         showReachability,
         showVolumes,
+        showVisionBlockers,
       });
       const reachability = {
         walkableCellCount: rendered.reachability.walkableCellCount,

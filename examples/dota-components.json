@@ -21,6 +21,10 @@
       "gates": [
         { "name": "north_gate", "offset": [-256, 1280, 0] },
         { "name": "south_gate", "offset": [-256, -1280, 0] }
+      ],
+      "blockers": [
+        { "name": "north_base_blocker", "offset": [-256, 1280, 0] },
+        { "name": "south_base_blocker", "offset": [-256, -1280, 0] }
       ]
     },
     {
@@ -43,6 +47,10 @@
       "gates": [
         { "name": "north_gate", "offset": [-256, 1280, 0] },
         { "name": "south_gate", "offset": [-256, -1280, 0] }
+      ],
+      "blockers": [
+        { "name": "north_base_blocker", "offset": [-256, 1280, 0] },
+        { "name": "south_base_blocker", "offset": [-256, -1280, 0] }
       ]
     },
     {
@@ -80,6 +88,17 @@
       "entrances": ["north", "east", "west"],
       "entranceWidth": 2.5,
       "noWardsRadius": 875
+    },
+    {
+      "kind": "fowBlocker",
+      "name": "south_rosh_fow",
+      "closed": true,
+      "points": [
+        [-896, -4608, 256],
+        [0, -5504, 256],
+        [896, -4608, 256],
+        [0, -3712, 256]
+      ]
     }
   ]
 }

@@ -262,12 +262,14 @@ targets with `@local:name`; it becomes the correct namespaced target for each co
 `around` tile point, which makes map-center symmetry explicit instead of relying on duplicated coordinates.
 
 For common gameplay structure, `dotaComponents` provides strongly checked `base`, `ancient`, `tower`, `fountain`,
-`shop`, `camp`, `bossPit`, `playerStart`, and `gate` entries. It derives team numbers, official entity classes,
+`shop`, `camp`, `bossPit`, `playerStart`, `gate`, `baseBlocker`, and `fowBlocker` entries. It derives team numbers, official entity classes,
 stock unit/model names, tower tier names, shop/camp numeric values, base member transforms, and boss-pit terrain.
 See [`examples/dota-components.json`](examples/dota-components.json). A `camp` can now include an optional checked
 rectangular `volume`, which creates the real `trigger_multiple` bounds referenced by its spawner. A boss pit's circular
 no-wards radius still creates a checked placement marker: the generator refuses to approximate a circle with a larger
 box and silently change gameplay. Use an explicit `managedVolumes` box only when a box is genuinely intended.
+`baseBlocker` uses Valve's team-aware base-gate entity. `fowBlocker` turns two or more points into uniquely named,
+explicitly linked `ent_fow_blocker_node` lines; broken links are reported by map inspection/validation and drawn in previews.
 
 ## Learn from other custom games
 
