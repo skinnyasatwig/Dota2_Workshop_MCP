@@ -245,7 +245,8 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
   `dota_doctor` includes the same concise compatibility status.
 - **`entity_catalog`** — the placeable-entity reference (spawners, `path_track` waypoints, triggers,
   lights, props, …) so you know what to place. Text searches augment the curated list with classes
-  and keyvalues parsed from the installed official `dota.fgd`.
+  and keyvalues parsed from the installed official `dota.fgd`. Matching results also include inherited
+  Valve constraints for dropdown choices, explicit numeric ranges, and named-entity destinations when declared.
 - **`map_tile_to_world`** — convert tile coords to world units so terrain and entities line up.
 
 Coordinates: terrain ops use tile units (default 64×64 grid; world = origin + tile×256); entity/path
@@ -376,7 +377,9 @@ playable `.vpk` — a pipeline verified end to end.
   or stale build an error. It automatically loads `.dota-workshop/map-contract.json` when the project
   provides one. Known property types are checked through inherited definitions from Valve's installed
   `base.fgd` and `dota.fgd`. Unknown custom metadata remains informational by default; pass
-  `strictEntityProperties:true` to turn unknown classes/properties into warnings.
+  `strictEntityProperties:true` to turn unknown classes/properties into warnings. Declared dropdown choices and
+  numeric bounds are enforced; a named destination that cannot be resolved is reported as a warning. Dynamic
+  targets such as `!activator`, wildcard targets, and existing class-name destinations are not misreported.
 - **`map_engine_nav_test`** — optional engine preflight for facts the text pipeline cannot prove.
   Call it once with `dryRun:true` to review route/check counts, then with `dryRun:false` when Dota is
   closed. The tool compiles, launches the requested map exactly once, runs `GridNav:CanFindPath`,

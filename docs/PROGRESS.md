@@ -25,12 +25,15 @@ Last updated: 2026-08-04
 11. `0e63948` - added version-aware Valve recipe verification using Steam/Dota/tools build metadata and hashes
     of the official terrain tilesets, PvP prefab, FGD, and compiler; exposed verified/compatible/changed status
     through `dota_doctor` and `map_recipe_catalog`.
+12. `1b4a1be` - taught the official FGD parser and validator to preserve and enforce inherited dropdown choices,
+    explicit numeric bounds, and resolvable named-entity destinations; exposed these constraints through the
+    entity catalog and accepted the stronger checks against the real 3v3 map.
 
 ## Current verification record
 
 - TypeScript build passes.
-- 191 unit and integration tests pass; the opt-in compiler test is skipped during the default suite.
-- MCP smoke suite: 196 passed, 0 failed, 1 skipped because the remote Steam Workshop search service was unavailable.
+- 193 unit and integration tests pass; the opt-in compiler test is skipped during the default suite.
+- MCP smoke suite: 197 passed, 0 failed, 1 skipped because the remote Steam Workshop search service was unavailable.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
 - Valve's installed `dmxconvert.exe` successfully round-trips generated camp, polygonal no-ward, and player-clip
@@ -39,7 +42,9 @@ Last updated: 2026-08-04
   16-sided generated no-ward prism to a real VPK; the fixture's content/game folders were removed afterward.
 - Real Dota 3v3 contract: 86 managed entities, 4 managed paths, 97 terrain operations, and zero desired-state drift.
 - Offline 3v3 terrain: zero holes; only two known isolated regions (a tiny shelf and a deliberate off-map strip).
-- Official entity definitions: all 157 map entities recognized; zero invalid known property values.
+- Installed official definitions expose 187 enum properties with 1,171 choices, 16 explicitly ranged properties,
+  and 297 named-destination fields. All 157 acceptance-map entities are recognized with zero invalid types,
+  choices, ranges, or unresolved named destinations.
 - Valve prefab references: 13 of 13 found in the installed Workshop Tools.
 - Acceptance map compiled successfully to `three_vs_three_blockout.vpk` on 2026-08-04.
 - The acceptance VMAP now contains two checked 32-sided boss no-ward prisms generated from one reusable component;
