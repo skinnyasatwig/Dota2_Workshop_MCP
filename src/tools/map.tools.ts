@@ -22,6 +22,7 @@ import { inspectMapText } from "../dota/map-inspect.js";
 import { reconcileMapTerrain } from "../dota/map-terrain.js";
 import { reconcileMapSpecification } from "../dota/map-spec.js";
 import { inspectMapArtifactFreshness } from "../dota/map-freshness.js";
+import { runMapTransaction } from "../dota/map-transaction.js";
 import {
   validateDotaBuildingEntities,
   validateDotaNeutralSpawners,
@@ -317,6 +318,7 @@ export function registerMapTools(server: McpServer) {
       const project = await resolveProject(projectRoot);
       const p = projectMapPaths(dota, project, map);
       if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}.`);
+      if (recompile && !apply) return error("recompile=true requires apply=true; preview mode never compiles or writes files.");
       const resolved = await loadMapContract(project.root, map, contractFile);
       if (!resolved) return error(`Map contract not found under ${project.root}.`);
       const specs = managedEntitiesForContract(resolved.contract);
@@ -340,7 +342,43 @@ export function registerMapTools(server: McpServer) {
       const terrain = synchronization.terrain;
       const changedEntities = result.added.length + result.updated.length + result.removed.length;
       const changed = changedEntities + (terrain.changed ? 1 : 0);
-      if (apply && changed) await textToVmap(dota.dmxconvertExe, synchronization.text, p.contentVmap);
+      const transaction = apply && (changed > 0 || recompile)
+        ? await runMapTransaction({
+            projectRoot: project.root,
+            label: `${map}-contract-sync`,
+            trackedPaths: [p.contentVmap, ...(recompile ? [p.gameVpk] : [])],
+            action: async () => {
+              if (changed > 0) await textToVmap(dota.dmxconvertExe, synchronization.text, p.contentVmap);
+              if (recompile) {
+                const res = await compileProjectMap(dota, project, map);
+                const compiled = res.code === 0 && (await pathExists(p.installedGameVpk));
+                if (!compiled) {
+                  throw new Error(
+                    `Compilation failed (exit ${res.code ?? "unknown"}).\n${(res.stderr || res.stdout).slice(-1600)}`,
+                  );
+                }
+              }
+              return { recompiled: recompile === true };
+            },
+          })
+        : undefined;
+      if (transaction && !transaction.committed) {
+        const failure = json(
+          {
+            map,
+            contract: resolved.path,
+            applied: false,
+            rolledBack: transaction.rolledBack,
+            backupDirectory: transaction.backupDirectory,
+            error: transaction.error,
+            rollbackErrors: transaction.rollbackErrors,
+          },
+          `Contract synchronization failed and ${transaction.rolledBack ? "was rolled back safely" : "the rollback needs attention"}.\n` +
+            `Backup: ${transaction.backupDirectory}\n${transaction.error ?? "Unknown transaction failure."}`,
+        );
+        failure.isError = true;
+        return failure;
+      }
       const steps = [
         `${apply ? "Synchronized" : "Previewed"} ${specs.length} desired entities and ` +
           `${absentEntities.length} absence selectors in "${map}".`,
@@ -352,10 +390,8 @@ export function registerMapTools(server: McpServer) {
           `${terrain.changedConfigurationCells} tile recipes plus ${terrain.changedPathEdges} path edges.`,
       ];
       if (!apply && changed) steps.push("No files changed. Pass apply=true to write this plan.");
-      if (apply && recompile) {
-        const res = await compileProjectMap(dota, project, map);
-        steps.push(res.code === 0 ? `Recompiled -> ${p.installedGameVpk}` : `Recompile FAILED (exit ${res.code})`);
-      }
+      if (apply && recompile) steps.push(`Recompiled -> ${p.installedGameVpk}`);
+      if (transaction) steps.push(`Recovery backup -> ${transaction.backupDirectory}`);
       return json(
         {
           map,
@@ -378,6 +414,8 @@ export function registerMapTools(server: McpServer) {
             operations: terrain.operations,
           },
           recompiled: apply === true && recompile === true,
+          backupDirectory: transaction?.backupDirectory,
+          rolledBack: false,
         },
         steps.join("\n"),
       );

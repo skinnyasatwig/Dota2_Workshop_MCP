@@ -5,11 +5,12 @@
 //
 // Proven pipeline: kv2 text -> dmxconvert (binary) -> resourcecompiler (-game game/dota) -> .vpk.
 
-import { writeFile, readFile, mkdtemp, rm, mkdir, copyFile } from "node:fs/promises";
+import { writeFile, readFile, mkdtemp, rm, mkdir, copyFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { run, RunResult } from "./process.js";
+import { replaceFileFromPath } from "../util/file-transaction.js";
 
 /** Convert a binary .vmap to keyvalues2 text. */
 export async function vmapToText(dmxconvert: string, vmapPath: string): Promise<string> {
@@ -28,11 +29,17 @@ export async function vmapToText(dmxconvert: string, vmapPath: string): Promise<
 export async function textToVmap(dmxconvert: string, text: string, vmapPath: string): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "d2vmap-"));
   const inTxt = join(dir, "map.kv2.txt");
+  const converted = join(dir, "map.vmap");
   try {
     await writeFile(inTxt, text, "utf8");
     await mkdir(dirname(vmapPath), { recursive: true });
-    const res = await run(dmxconvert, ["-i", inTxt, "-o", vmapPath, "-oe", "binary"], { timeoutMs: 120_000 });
+    const res = await run(dmxconvert, ["-i", inTxt, "-o", converted, "-oe", "binary"], { timeoutMs: 120_000 });
     if (res.code !== 0) throw new Error(`dmxconvert (to binary) failed: ${res.stderr || res.stdout}`);
+    const convertedStat = await stat(converted).catch(() => undefined);
+    if (!convertedStat?.isFile() || convertedStat.size === 0) {
+      throw new Error("dmxconvert reported success but did not produce a non-empty .vmap.");
+    }
+    await replaceFileFromPath(converted, vmapPath);
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }

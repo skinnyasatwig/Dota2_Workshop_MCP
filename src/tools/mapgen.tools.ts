@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { readFile } from "node:fs/promises";
 import { resolveProject } from "../config.js";
 import { requireDotaPaths, resolveDotaPaths } from "../dota/paths.js";
-import { vmapToText, textToVmap, cloneVmap, buildEntityBlock, insertEntity, maxNodeId } from "../dota/vmap.js";
+import { vmapToText, textToVmap, buildEntityBlock, insertEntity, maxNodeId } from "../dota/vmap.js";
 import { categoryForFgdEntity, parseFgdEntities } from "../dota/fgd.js";
 import { parseTileGrid, tileToWorld, vIndex, cIndex } from "../dota/tilegrid.js";
 import { registerMapFile } from "../dota/addoninfo.js";
@@ -19,6 +19,7 @@ import {
   terrainOperationInputSchema,
 } from "../dota/map-spec.js";
 import { resolveDataPath } from "../util/datapath.js";
+import { runMapTransaction } from "../dota/map-transaction.js";
 import { encodeRgbaPng } from "../util/png.js";
 import { writeTextFile, pathExists } from "../util/fsx.js";
 import { json, text, image, error, guard, ToolResult } from "../util/result.js";
@@ -384,14 +385,16 @@ export function registerMapGenTools(server: McpServer) {
           .string()
           .optional()
           .describe("Contract used to resolve managedPath shapes. Defaults to .dota-workshop/map-contract.json."),
-        recompile: z.boolean().optional(),
+        apply: z.boolean().optional().describe("Write the planned terrain changes (default false)."),
+        recompile: z.boolean().optional().describe("Compile after applying; requires apply=true."),
       },
     },
-    guard(async ({ projectRoot, map, ops, contractFile, recompile }): Promise<ToolResult> => {
+    guard(async ({ projectRoot, map, ops, contractFile, apply, recompile }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
       const p = projectMapPaths(dota, project, map);
       if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}. Create it with map_create or map_build.`);
+      if (recompile && !apply) return error("recompile=true requires apply=true; preview mode never compiles or writes files.");
       const log: string[] = [];
       const operations = parseManagedTerrain(ops, "ops", `map_terrain(${map})`) ?? [];
       const needsManagedPaths = operations.some(
@@ -405,21 +408,59 @@ export function registerMapGenTools(server: McpServer) {
       }
       const current = await vmapToText(dota.dmxconvertExe, p.contentVmap);
       const result = reconcileMapTerrain(current, operations, contract?.contract.managedPaths ?? []);
-      if (result.changed) await textToVmap(dota.dmxconvertExe, result.text, p.contentVmap);
+      const transaction = apply && (result.changed || recompile)
+        ? await runMapTransaction({
+            projectRoot: project.root,
+            label: `${map}-terrain`,
+            trackedPaths: [p.contentVmap, ...(recompile ? [p.gameVpk] : [])],
+            action: async () => {
+              if (result.changed) await textToVmap(dota.dmxconvertExe, result.text, p.contentVmap);
+              if (recompile) {
+                const res = await compileProjectMap(dota, project, map);
+                const compiled = res.code === 0 && (await pathExists(p.installedGameVpk));
+                if (!compiled) {
+                  throw new Error(
+                    `Compilation failed (exit ${res.code ?? "unknown"}).\n${(res.stderr || res.stdout).slice(-1600)}`,
+                  );
+                }
+              }
+              return { recompiled: recompile === true };
+            },
+          })
+        : undefined;
+      if (transaction && !transaction.committed) {
+        const failure = json(
+          {
+            map,
+            applied: false,
+            rolledBack: transaction.rolledBack,
+            backupDirectory: transaction.backupDirectory,
+            error: transaction.error,
+            rollbackErrors: transaction.rollbackErrors,
+          },
+          `Terrain update failed and ${transaction.rolledBack ? "was rolled back safely" : "the rollback needs attention"}.\n` +
+            `Backup: ${transaction.backupDirectory}\n${transaction.error ?? "Unknown transaction failure."}`,
+        );
+        failure.isError = true;
+        return failure;
+      }
       log.push(
-        `terrain ${result.changed ? "updated" : "unchanged"}: ` +
+        `terrain ${apply ? (result.changed ? "updated" : "unchanged") : "preview"}: ` +
           `${result.changedHeightVertices} height, ${result.changedWaterVertices} water, ` +
           `${result.changedTilesetCells} tileset, ${result.changedOrientationCells} orientation, ` +
           `${result.changedConfigurationCells} recipe, ${result.changedPathEdges} path-edge cells`,
       );
-      if (recompile) {
-        const res = await compileProjectMap(dota, project, map);
-        log.push(res.code === 0 ? `recompiled -> ${p.gameVpk}` : `recompile FAILED (${res.code})`);
-      }
+      if (!apply && result.changed) log.push("No files changed. Pass apply=true to write this plan.");
+      if (apply && recompile) log.push(`recompiled -> ${p.gameVpk}`);
+      if (transaction) log.push(`recovery backup -> ${transaction.backupDirectory}`);
       return json(
         {
           map,
           changed: result.changed,
+          applied: apply === true,
+          recompiled: apply === true && recompile === true,
+          backupDirectory: transaction?.backupDirectory,
+          rolledBack: false,
           operations: result.operations,
           changedHeightVertices: result.changedHeightVertices,
           changedWaterVertices: result.changedWaterVertices,
@@ -457,30 +498,31 @@ export function registerMapGenTools(server: McpServer) {
         ),
         compile: z.boolean().optional(),
         overwrite: z.boolean().optional(),
+        dryRun: z.boolean().optional().describe("Report the generated changes without writing, registering, or compiling."),
       },
     },
-    guard(async ({ projectRoot, name, maxPlayers, specification, terrain, entities, paths: paths_, compile, overwrite }): Promise<ToolResult> => {
+    guard(async ({ projectRoot, name, maxPlayers, specification, terrain, entities, paths: paths_, compile, overwrite, dryRun }): Promise<ToolResult> => {
       if (!NAME_RE.test(name)) return error(`Invalid map name "${name}".`);
       if (specification && ((terrain?.length ?? 0) || (entities?.length ?? 0) || (paths_?.length ?? 0))) {
         return error("Use specification or legacy terrain/entities/paths, not both.");
+      }
+      const parsedSpecification = specification
+        ? parseMapSpecification(specification, `map_build specification for "${name}"`)
+        : undefined;
+      if (parsedSpecification?.map && parsedSpecification.map !== name) {
+        return error(`Map specification is for "${parsedSpecification.map}", not "${name}".`);
       }
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
       const p = projectMapPaths(dota, project, name);
       if (!(await pathExists(p.baseTemplate))) return error(`Template base map not found: ${p.baseTemplate}`);
-      if ((await pathExists(p.contentVmap)) && !overwrite) return error(`Map "${name}" exists (pass overwrite=true).`);
+      const mapExists = await pathExists(p.contentVmap);
+      if (mapExists && !overwrite && !dryRun) return error(`Map "${name}" exists (pass overwrite=true).`);
 
-      await cloneVmap(p.baseTemplate, p.contentVmap);
-      await registerMapFile(p.addoninfo, name, maxPlayers ?? 10);
-
-      const log: string[] = [`cloned + registered "${name}"`];
-      let txt = await vmapToText(dota.dmxconvertExe, p.contentVmap);
-      if (specification) {
-        const parsed = parseMapSpecification(specification, `map_build specification for "${name}"`);
-        if (parsed.map && parsed.map !== name) {
-          return error(`Map specification is for "${parsed.map}", not "${name}".`);
-        }
-        const result = reconcileMapSpecification(txt, parsed);
+      const log: string[] = [`prepared "${name}" from the template`];
+      let txt = await vmapToText(dota.dmxconvertExe, p.baseTemplate);
+      if (parsedSpecification) {
+        const result = reconcileMapSpecification(txt, parsedSpecification);
         if (result.entities.conflicts.length) {
           return error(`Map specification has ambiguous duplicate targetnames: ${result.entities.conflicts.join(", ")}`);
         }
@@ -507,16 +549,78 @@ export function registerMapGenTools(server: McpServer) {
           txt = placeEntities(txt, entities ?? [], paths_ ?? [], log);
         }
       }
-      await textToVmap(dota.dmxconvertExe, txt, p.contentVmap);
+      if (dryRun) {
+        log.push(
+          `Dry run only: would ${mapExists ? "replace" : "create"} ${p.contentVmap}, register it in addoninfo, ` +
+            `and ${compile ? "compile it" : "leave compilation for later"}.`,
+        );
+        return json(
+          {
+            name,
+            dryRun: true,
+            wouldOverwrite: mapExists,
+            wouldCompile: compile === true,
+            vmap: p.contentVmap,
+          },
+          log.join("\n"),
+        );
+      }
 
+      const transaction = await runMapTransaction({
+        projectRoot: project.root,
+        label: `${name}-build`,
+        trackedPaths: [p.contentVmap, p.addoninfo, ...(compile ? [p.gameVpk] : [])],
+        action: async () => {
+          await textToVmap(dota.dmxconvertExe, txt, p.contentVmap);
+          await registerMapFile(p.addoninfo, name, maxPlayers ?? 10);
+          if (compile) {
+            const res = await compileProjectMap(dota, project, name);
+            const compiled = res.code === 0 && (await pathExists(p.installedGameVpk));
+            if (!compiled) {
+              throw new Error(
+                `Compilation failed (exit ${res.code ?? "unknown"}).\n${(res.stderr || res.stdout).slice(-1600)}`,
+              );
+            }
+          }
+          return { compiled: compile === true };
+        },
+      });
+      if (!transaction.committed) {
+        const failure = json(
+          {
+            name,
+            applied: false,
+            rolledBack: transaction.rolledBack,
+            backupDirectory: transaction.backupDirectory,
+            error: transaction.error,
+            rollbackErrors: transaction.rollbackErrors,
+          },
+          `Map build failed and ${transaction.rolledBack ? "was rolled back safely" : "the rollback needs attention"}.\n` +
+            `Backup: ${transaction.backupDirectory}\n${transaction.error ?? "Unknown transaction failure."}`,
+        );
+        failure.isError = true;
+        return failure;
+      }
+
+      log.push(`${mapExists ? "replaced" : "created"} + registered "${name}"`);
       if (compile) {
-        const res = await compileProjectMap(dota, project, name);
-        const ok = res.code === 0 && (await pathExists(p.installedGameVpk));
-        log.push(ok ? `compiled -> ${p.installedGameVpk}` : `compile FAILED (exit ${res.code})\n${res.stdout.slice(-1200)}`);
+        log.push(`compiled -> ${p.installedGameVpk}`);
       } else {
         log.push(`Next: map_compile name="${name}", then addon_launch_custom_game map="${name}".`);
       }
-      return json({ name, vmap: p.contentVmap }, log.join("\n"));
+      log.push(`recovery backup -> ${transaction.backupDirectory}`);
+      return json(
+        {
+          name,
+          dryRun: false,
+          applied: true,
+          compiled: compile === true,
+          vmap: p.contentVmap,
+          backupDirectory: transaction.backupDirectory,
+          rolledBack: false,
+        },
+        log.join("\n"),
+      );
     }),
   );
 

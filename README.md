@@ -210,10 +210,12 @@ walk — tower defense"* into a real map:
   register, and optionally compile it. The preferred `specification` object uses the same
   `managedTerrain` / `managedEntities` / `managedPaths` vocabulary as `map_sync_contract`; legacy
   `terrain` / `entities` / `paths` inputs remain compatible. See
-  [`examples/map-specification.json`](examples/map-specification.json) for a complete starter.
+  [`examples/map-specification.json`](examples/map-specification.json) for a complete starter. Pass
+  `dryRun:true` to generate and report the plan without writing, registering, or compiling anything.
 - **`map_terrain`** — apply the shared validated terrain vocabulary to an existing map. It supports
   `fill` / `height` / `water` / `tileset` / `ramp` over `rect` / `circle` / `ring` / `path` /
-  `polygon` / `managedPath` shapes and regenerates valid cliff orientation and tile recipes.
+  `polygon` / `managedPath` shapes and regenerates valid cliff orientation and tile recipes. It is
+  preview-only by default; pass `apply:true` after reviewing the exact change counts.
 - **`map_preview`** — render the map top-down to an **image straight from the data**, no game launch —
   the fast way to iterate on a layout (water = blue, road = tan, grass = green, shaded by height).
 - **`entity_catalog`** — the placeable-entity reference (spawners, `path_track` waypoints, triggers,
@@ -310,6 +312,10 @@ playable `.vpk` — a pipeline verified end to end.
   complete linked waypoint chains, repairs drifted class/position/rotation/keyvalues, prunes obsolete
   numbered nodes owned by those paths, preserves unrelated map data, and refuses ambiguous duplicate
   target names. Preview is the default; pass `apply:true` to write and `recompile:true` to compile.
+  Applied map changes use a transaction: the current source map (and compiled map when relevant) is
+  backed up under `.dota-workshop/backups`, conversion is staged before replacement, and a failed
+  conversion or compile restores the prior files automatically. `map_build` and `map_terrain` use the
+  same safety layer.
 - **`map_rewrite_path`** — convert/rename a complete numbered waypoint chain while repairing all
   target links (for example generated `path_track` routes → creep `path_corner` routes).
 - **`map_to_text` / `map_from_text`** — read/write the full vmap DMX text for arbitrary edits.
