@@ -251,6 +251,11 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
   versions and hashes of the official tilesets, PvP prefab, FGD, and compiler against the last proven baseline. A newer
   game build with unchanged recipe sources is reported as compatible; changed source/tools files request re-verification.
   `dota_doctor` includes the same concise compatibility status.
+- **`map_recipe_refresh_report`** — turn a real Valve source/tools change into an evidence-gated maintenance plan.
+  The read-only report names affected recipe families, compares every authoritative hash, prepares a candidate baseline,
+  and requires build, test, MCP smoke, compiler-fixture, and known-good acceptance-map evidence. It cannot update the
+  trusted baseline. Run `npm run recipe:refresh-report -- --run-safe-checks` to automate the four non-engine checks;
+  provide reviewed acceptance evidence separately before a maintainer records any candidate in source control.
 - **`entity_catalog`** — the placeable-entity reference (spawners, `path_track` waypoints, triggers,
   lights, props, …) so you know what to place. Text searches augment the curated list with classes
   and keyvalues parsed from the installed official `dota.fgd`. Matching results also include inherited

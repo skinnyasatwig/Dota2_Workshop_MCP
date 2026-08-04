@@ -52,14 +52,19 @@ Last updated: 2026-08-04
 20. `00c3849` - completed static Rubikon PHYS-family decoding. Version-3 cache entries apply per-part 3x4 bind
     poses, preserve exact convex hulls, build conservative mesh-vertex envelopes, derive posed sphere/capsule bounds,
     reject undecodable posed shapes, and report each projection class in preview and reachability output.
+21. `4a64271` - added an evidence-gated Valve recipe refresh workflow. The MCP now reports exact source comparisons,
+    affected recipe families, a reviewable candidate baseline, and explicit blockers; a safe CLI runner automates build,
+    tests, MCP smoke, and the isolated compiler fixture but cannot edit or auto-bless the trusted baseline.
 
 ## Current verification record
 
 - TypeScript build passes.
-- 209 unit and integration tests pass; the opt-in compiler and installed-VRF tests are skipped during the default suite.
-- MCP smoke suite: 197 passed, 0 failed, 1 skipped because the remote Steam Workshop search service was unavailable.
+- 213 unit and integration tests pass; the opt-in compiler and installed-VRF tests are skipped during the default suite.
+- MCP smoke suite: 200 passed, 0 failed, 0 skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
+- The guided refresh runner completed all four safe checks in 33 seconds without opening Dota or Hammer. Because the
+  installed fingerprint still matches, it correctly emitted `no-refresh-needed` and refused baseline recording.
 - Valve's installed `dmxconvert.exe` successfully round-trips generated camp, polygonal no-ward, and player-clip
   volumes from text to binary VMAP and back during the integration suite.
 - `npm run test:compiler-fixture` successfully round-tripped and compiled the repository-owned acceptance payload
