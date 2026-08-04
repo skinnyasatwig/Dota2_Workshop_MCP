@@ -16,11 +16,14 @@ Last updated: 2026-08-04
 8. `3250aa7` - added Valve-derived rectangular solid-volume authoring for camp bounds, checked triggers,
    no-ward zones, boss-attack areas, and player blockers; integrated volumes into the unified specification,
    mirroring, dry-run/sync reporting, validation, preview, reachability, reusable camps, and the recipe catalog.
+9. `c0195b8` - added reusable team-aware base blockers and deterministic linked fog-of-war blocker chains,
+   including preview lines, broken-link validation, base assembly support, official FGD checks, and a real
+   `dmxconvert` round-trip integration test.
 
 ## Current verification record
 
 - TypeScript build passes.
-- 179 unit and integration tests pass.
+- 182 unit and integration tests pass.
 - MCP smoke suite: 193 passed, 0 failed, 1 skipped because the remote Steam Workshop search service was unavailable.
 - Valve's installed `dmxconvert.exe` successfully round-trips generated camp, no-ward, and player-clip volumes
   from text to binary VMAP and back during the integration suite.
