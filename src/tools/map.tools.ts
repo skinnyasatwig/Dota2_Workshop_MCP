@@ -20,7 +20,7 @@ import { compileProjectMap, projectMapPaths } from "../dota/map-project.js";
 import { loadMapContract, managedEntitiesForContract } from "../dota/map-contract.js";
 import { inspectMapText } from "../dota/map-inspect.js";
 import { reconcileMapTerrain } from "../dota/map-terrain.js";
-import { reconcileMapSpecification } from "../dota/map-spec.js";
+import { parseMapSpecification, reconcileMapSpecification } from "../dota/map-spec.js";
 import { inspectMapArtifactFreshness } from "../dota/map-freshness.js";
 import { runMapTransaction } from "../dota/map-transaction.js";
 import { analyzeMapReachability } from "../dota/map-reachability.js";
@@ -28,6 +28,11 @@ import {
   validateDotaBuildingEntities,
   validateDotaNeutralSpawners,
 } from "../dota/map-semantics.js";
+import {
+  FgdValidationReport,
+  loadOfficialDotaFgdCatalog,
+  validateEntitiesAgainstFgd,
+} from "../dota/fgd-validation.js";
 import { pathExists } from "../util/fsx.js";
 import { json, text, error, guard, ToolResult } from "../util/result.js";
 
@@ -351,7 +356,8 @@ export function registerMapTools(server: McpServer) {
       description:
         "Preview or apply desired managedEntities, managedAbsentEntities, compact managedPaths, and managedTerrain " +
         "operations from " +
-        ".dota-workshop/map-contract.json. Paths expand into complete linked waypoint chains. Missing named entities " +
+        ".dota-workshop/map-contract.json. Reusable regions/components/placements are expanded before reconciliation. " +
+        "Paths expand into complete linked waypoint chains. Missing named entities " +
         "are created; existing named entities are repaired; obsolete managed path nodes are removed; and declared " +
         "terrain shapes are restored while terrain outside those shapes is preserved. The operation is idempotent and " +
         "refuses ambiguous duplicate targetnames. Defaults to preview-only; pass apply=true.",
@@ -372,7 +378,7 @@ export function registerMapTools(server: McpServer) {
       const p = projectMapPaths(dota, project, map);
       if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}.`);
       if (recompile && !apply) return error("recompile=true requires apply=true; preview mode never compiles or writes files.");
-      const resolved = await loadMapContract(project.root, map, contractFile);
+      const resolved = await loadMapContract(project.root, map, contractFile, parseMapSpecification);
       if (!resolved) return error(`Map contract not found under ${project.root}.`);
       const specs = managedEntitiesForContract(resolved.contract);
       const absentEntities = resolved.contract.managedAbsentEntities ?? [];
@@ -627,7 +633,8 @@ export function registerMapTools(server: McpServer) {
         "extracts entities, finds duplicate targetnames and broken path_corner/path_track links, and verifies required " +
         "targetname/classname pairs used by game scripts. When a project contract declares managedTerrain, validation " +
         "also reports tile-grid drift without writing it. Whole-map offline reachability checks detect terrain holes, " +
-        "trapped spawns, blocked entrances/path segments, and inaccessible objectives or camps.",
+        "trapped spawns, blocked entrances/path segments, and inaccessible objectives or camps. Known entity keyvalues " +
+        "are checked against the installed official Valve FGD definitions.",
       inputSchema: {
         projectRoot: z.string().optional(),
         map: z.string(),
@@ -652,14 +659,20 @@ export function registerMapTools(server: McpServer) {
           .boolean()
           .optional()
           .describe("Treat a missing or stale compiled VPK as an error (default false)."),
+        strictEntityProperties: z
+          .boolean()
+          .optional()
+          .describe("Also warn for classes/properties absent from Valve's installed FGD files (default false; custom metadata is otherwise informational)."),
       },
     },
-    guard(async ({ projectRoot, map, requiredEntities, contractFile, requireCompiled }): Promise<ToolResult> => {
+    guard(async ({ projectRoot, map, requiredEntities, contractFile, requireCompiled, strictEntityProperties }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
       const p = projectMapPaths(dota, project, map);
       const findings: { severity: "error" | "warn"; code: string; message: string }[] = [];
-      const resolvedContract = requiredEntities ? undefined : await loadMapContract(project.root, map, contractFile);
+      const resolvedContract = requiredEntities
+        ? undefined
+        : await loadMapContract(project.root, map, contractFile, parseMapSpecification);
       const managedContractEntities = resolvedContract
         ? managedEntitiesForContract(resolvedContract.contract)
         : [];
@@ -712,6 +725,7 @@ export function registerMapTools(server: McpServer) {
       }
 
       let entities: ReturnType<typeof parseMapEntities> = [];
+      let entityDefinitionValidation: FgdValidationReport | undefined;
       let terrainDrift:
         | {
             changedHeightVertices: number;
@@ -738,6 +752,18 @@ export function registerMapTools(server: McpServer) {
       if (source) {
         const mapText = await vmapToText(dota.dmxconvertExe, p.contentVmap);
         entities = parseMapEntities(mapText);
+        entityDefinitionValidation = validateEntitiesAgainstFgd(
+          entities,
+          await loadOfficialDotaFgdCatalog(dota.dotaGameDir),
+          { strictUnknown: strictEntityProperties === true },
+        );
+        for (const finding of entityDefinitionValidation.findings) {
+          findings.push({
+            severity: finding.severity,
+            code: finding.code,
+            message: `${finding.targetname || finding.classname}: ${finding.detail}`,
+          });
+        }
         findings.push(...validateDotaBuildingEntities(entities));
         findings.push(...validateDotaNeutralSpawners(entities));
         const geometryReport = inspectMapText(mapText, {
@@ -943,6 +969,7 @@ export function registerMapTools(server: McpServer) {
           entityCount: entities.length,
           contract: resolvedContract?.path ?? null,
           requirementCount: requirements.length,
+          entityDefinitions: entityDefinitionValidation ?? null,
           terrainDrift: terrainDrift ?? null,
           reachability: reachabilitySummary ?? null,
           findings,

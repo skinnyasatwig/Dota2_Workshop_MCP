@@ -55,6 +55,8 @@ export interface ResolvedMapContract {
   contract: MapContract;
 }
 
+export type MapContractParser = (value: unknown, path: string) => MapContract;
+
 function scalarProperties(value: unknown, field: string, path: string): Record<string, string> | undefined {
   if (value === undefined) return undefined;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -418,6 +420,7 @@ export async function loadMapContract(
   projectRoot: string,
   map: string,
   contractFile?: string,
+  parser: MapContractParser = parseMapContract,
 ): Promise<ResolvedMapContract | undefined> {
   const path = contractFile
     ? isAbsolute(contractFile)
@@ -428,7 +431,7 @@ export async function loadMapContract(
     if (contractFile) throw new Error(`Map contract not found: ${path}`);
     return undefined;
   }
-  const contract = parseMapContract(JSON.parse(await readFile(path, "utf8")), path);
+  const contract = parser(JSON.parse(await readFile(path, "utf8")), path);
   if (contract.map && contract.map !== map) {
     throw new Error(`Map contract ${path} is for "${contract.map}", not "${map}".`);
   }

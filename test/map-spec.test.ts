@@ -112,3 +112,144 @@ test("reconcileMapSpecification applies entities and paths idempotently", () => 
   assert.equal(second.changed, false);
   assert.deepEqual(second.entities.unchanged, ["objective", "creep_route_1", "creep_route_2"]);
 });
+
+test("named regions can be reused and mirrored around a chosen tile point", () => {
+  const specification = parseMapSpecification({
+    regions: {
+      west_platform: {
+        shape: { kind: "rect", x0: 2, y0: 4, x1: 6, y1: 10 },
+      },
+      east_platform: {
+        mirrorOf: "west_platform",
+        mirrorAxis: "x",
+        around: [16, 16],
+      },
+    },
+    managedTerrain: [
+      { op: "height", level: 1, shape: { kind: "region", name: "west_platform" } },
+      { op: "height", level: 1, shape: { kind: "region", name: "east_platform" } },
+    ],
+  });
+
+  assert.deepEqual(specification.managedTerrain, [
+    { op: "height", level: 1, dome: undefined, shape: { kind: "rect", x0: 2, y0: 4, x1: 6, y1: 10 } },
+    { op: "height", level: 1, dome: undefined, shape: { kind: "rect", x0: 26, y0: 4, x1: 30, y1: 10 } },
+  ]);
+});
+
+test("component placements namespace and transform entities, paths, references, and terrain", () => {
+  const specification = parseMapSpecification({
+    regions: {
+      platform: { shape: { kind: "circle", cx: 0, cy: 0, r: 3 } },
+    },
+    components: {
+      guarded_platform: {
+        managedEntities: [
+          {
+            targetname: "tower",
+            classname: "npc_dota_tower",
+            origin: "10 20 30",
+            angles: "0 30 0",
+            properties: { target: "@local:route_1", teamnumber: 2 },
+          },
+        ],
+        managedPaths: [
+          {
+            name: "route",
+            points: [[0, 0, 0], [100, 0, 0]],
+          },
+        ],
+        managedTerrain: [
+          {
+            op: "height",
+            level: 1,
+            shape: { kind: "region", name: "platform" },
+          },
+          {
+            op: "ramp",
+            shape: { kind: "managedPath", name: "route", width: 2 },
+          },
+        ],
+      },
+    },
+    placements: [
+      {
+        component: "guarded_platform",
+        name: "west",
+        worldOffset: [-1000, 0, 128],
+        tileOffset: [8, 12],
+      },
+      {
+        component: "guarded_platform",
+        name: "east",
+        worldOffset: [1000, 0, 128],
+        tileOffset: [24, 12],
+        mirrorAxis: "x",
+      },
+    ],
+  });
+
+  assert.deepEqual(
+    specification.managedEntities?.map(({ targetname, origin, angles, properties }) => ({
+      targetname,
+      origin,
+      angles,
+      properties,
+    })),
+    [
+      {
+        targetname: "west_tower",
+        origin: "-990 20 158",
+        angles: "0 30 0",
+        properties: { target: "west_route_1", teamnumber: "2" },
+      },
+      {
+        targetname: "east_tower",
+        origin: "990 20 158",
+        angles: "0 150 0",
+        properties: { target: "east_route_1", teamnumber: "2" },
+      },
+    ],
+  );
+  assert.deepEqual(specification.managedPaths?.map(({ name, points }) => ({ name, points })), [
+    { name: "west_route", points: [[-1000, 0, 128], [-900, 0, 128]] },
+    { name: "east_route", points: [[1000, 0, 128], [900, 0, 128]] },
+  ]);
+  assert.deepEqual(specification.managedTerrain, [
+    { op: "height", level: 1, dome: undefined, shape: { kind: "circle", cx: 8, cy: 12, r: 3 } },
+    { op: "ramp", shape: { kind: "managedPath", name: "west_route", width: 2 } },
+    { op: "height", level: 1, dome: undefined, shape: { kind: "circle", cx: 24, cy: 12, r: 3 } },
+    { op: "ramp", shape: { kind: "managedPath", name: "east_route", width: 2 } },
+  ]);
+});
+
+test("component definitions reject unsafe or unresolved reuse", () => {
+  assert.throws(
+    () =>
+      parseMapSpecification({
+        components: {
+          whole_map: {
+            managedTerrain: [{ op: "fill", level: 1 }],
+          },
+        },
+      }),
+    /cannot contain a fill terrain operation/,
+  );
+  assert.throws(
+    () =>
+      parseMapSpecification({
+        placements: [{ component: "missing", name: "instance" }],
+      }),
+    /references missing component "missing"/,
+  );
+  assert.throws(
+    () =>
+      parseMapSpecification({
+        regions: {
+          a: { mirrorOf: "b", mirrorAxis: "x" },
+          b: { mirrorOf: "a", mirrorAxis: "y" },
+        },
+      }),
+    /mirror cycle/,
+  );
+});

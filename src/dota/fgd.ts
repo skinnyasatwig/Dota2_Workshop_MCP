@@ -54,7 +54,9 @@ function parseTopLevelProperties(block: string): FgdProperty[] {
           kind: io[1].toLowerCase() as "input" | "output",
         });
       } else {
-        const keyvalue = line.match(/^([A-Za-z_]\w*)\s*\(\s*([^)]+?)\s*\)\s*:/);
+        const keyvalue = line.match(
+          /^([A-Za-z_]\w*)\s*\(\s*([^)]+?)\s*\)\s*(?:(?:\{[^}]*\}|\[[^\]]*\])\s*)*:/,
+        );
         if (keyvalue) {
           properties.push({
             name: keyvalue[1],
@@ -72,39 +74,91 @@ function parseTopLevelProperties(block: string): FgdProperty[] {
   return properties;
 }
 
+function classDeclaration(segment: string):
+  | { name: string; start: number; end: number; open: number }
+  | undefined {
+  let quoted = false;
+  let escaped = false;
+  let braces = 0;
+  let brackets = 0;
+  let declaration: { name: string; start: number; end: number } | undefined;
+  for (let index = 0; index < segment.length; index++) {
+    const char = segment[index];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') quoted = false;
+      continue;
+    }
+    if (char === '"') {
+      quoted = true;
+      continue;
+    }
+    if (char === "{") braces++;
+    else if (char === "}") braces = Math.max(0, braces - 1);
+    else if (char === "[") {
+      if (braces === 0 && brackets === 0 && declaration) {
+        return { ...declaration, open: index };
+      }
+      brackets++;
+    } else if (char === "]") {
+      brackets = Math.max(0, brackets - 1);
+    } else if (char === "=" && braces === 0 && brackets === 0) {
+      const match = segment.slice(index).match(/^=\s*([A-Za-z_]\w*)/);
+      if (match) {
+        declaration = {
+          name: match[1],
+          start: index,
+          end: index + match[0].length,
+        };
+      }
+    }
+  }
+  return undefined;
+}
+
 export function parseFgdEntities(text: string): FgdEntity[] {
   const entities: FgdEntity[] = [];
-  const declaration = /=\s*([A-Za-z_]\w*)\s*:\s*"([^"]*)"/g;
-  let match: RegExpExecArray | null;
-  while ((match = declaration.exec(text))) {
-    const pointAt = text.lastIndexOf("@PointClass", match.index);
-    const solidAt = text.lastIndexOf("@SolidClass", match.index);
-    const baseAt = text.lastIndexOf("@BaseClass", match.index);
-    const classAt = Math.max(pointAt, solidAt, baseAt);
-    if (classAt < 0) continue;
-
-    const nextClassAt = text.indexOf("@", match.index + match[0].length);
-    const openAt = text.indexOf("[", match.index + match[0].length);
-    if (openAt < 0 || (nextClassAt >= 0 && nextClassAt < openAt)) continue;
+  const marker = /@(PointClass|SolidClass|BaseClass|OverrideClass)\b/g;
+  const markers: { index: number; classType: string; length: number }[] = [];
+  let markerMatch: RegExpExecArray | null;
+  while ((markerMatch = marker.exec(text))) {
+    markers.push({
+      index: markerMatch.index,
+      classType: markerMatch[1],
+      length: markerMatch[0].length,
+    });
+  }
+  for (let markerIndex = 0; markerIndex < markers.length; markerIndex++) {
+    const current = markers[markerIndex];
+    const end = markers[markerIndex + 1]?.index ?? text.length;
+    const segment = text.slice(current.index, end);
+    const parsedDeclaration = classDeclaration(segment);
+    if (!parsedDeclaration) continue;
+    const openRelative = parsedDeclaration.open;
+    const header = segment.slice(0, openRelative);
+    const openAt = current.index + openRelative;
     const closeAt = matchingBracket(text, openAt);
-    if (closeAt < 0) continue;
-
-    const header = text.slice(classAt, match.index);
-    const classType = header.match(/^@(PointClass|SolidClass|BaseClass)/)?.[1] ?? "Class";
+    if (closeAt < 0 || closeAt >= end) continue;
+    const rawDescription = header.slice(parsedDeclaration.end).replace(/^\s*:\s*/, "").trim();
+    const quotedDescription = [...rawDescription.matchAll(/"([^"]*)"/g)]
+      .map((match) => match[1])
+      .join(" ")
+      .trim();
     const bases =
       header
+        .slice(current.length, parsedDeclaration.start)
         .match(/base\s*\(([^)]*)\)/i)?.[1]
         .split(",")
         .map((base) => base.trim())
         .filter(Boolean) ?? [];
     entities.push({
-      name: match[1],
-      classType,
-      description: match[2],
+      name: parsedDeclaration.name,
+      classType: current.classType,
+      description: quotedDescription || rawDescription.replace(/^"|"$/g, ""),
       bases,
       properties: parseTopLevelProperties(text.slice(openAt + 1, closeAt)),
     });
-    declaration.lastIndex = closeAt + 1;
   }
   return entities;
 }

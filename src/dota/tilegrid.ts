@@ -1,4 +1,10 @@
 // Programmatic terrain authoring for the Dota tile grid (CMapDotaTileGrid).
+import {
+  cornerPattern,
+  orientationForCornerPattern,
+  terrainRecipeForCell,
+} from "./terrain-recipes.js";
+
 //
 // The ground is a grid of W x H cells with (W+1) x (H+1) vertices. We parse the
 // editable arrays out of a vmap's kv2 text, mutate them with shape ops (rect / circle /
@@ -237,24 +243,6 @@ export function setPathEdges(g: TileGrid, shape: Shape, on: boolean): number {
  * it explicitly or Source 2 can select an incompatible/missing cliff mesh.
  */
 export function orientCellsFromHeights(g: TileGrid): number {
-  const orientationByPattern: Record<string, number> = {
-    "0000": 0,
-    "0001": 3,
-    "0010": 0,
-    "0011": 0,
-    "0100": 2,
-    "0101": 3,
-    "0110": 0,
-    "0111": 3,
-    "1000": 1,
-    "1001": 1,
-    "1010": 1,
-    "1011": 0,
-    "1100": 2,
-    "1101": 2,
-    "1110": 1,
-    "1111": 0,
-  };
   let touched = 0;
   for (let cy = 0; cy < g.height; cy++) {
     for (let cx = 0; cx < g.width; cx++) {
@@ -264,13 +252,8 @@ export function orientCellsFromHeights(g: TileGrid): number {
         g.heights[vIndex(g, cx, cy + 1)],
         g.heights[vIndex(g, cx + 1, cy + 1)],
       ];
-      const minimum = Math.min(...corners);
-      const maximum = Math.max(...corners);
-      const pattern =
-        maximum === minimum
-          ? "0000"
-          : corners.map((height) => (height === maximum ? "1" : "0")).join("");
-      g.orientations[cIndex(g, cx, cy)] = orientationByPattern[pattern] ?? 0;
+      const pattern = cornerPattern(corners);
+      g.orientations[cIndex(g, cx, cy)] = orientationForCornerPattern(pattern);
       touched++;
     }
   }
@@ -293,40 +276,9 @@ export function configureCellsFromHeights(g: TileGrid, rampCells: ReadonlySet<nu
         g.heights[vIndex(g, cx, cy + 1)],
         g.heights[vIndex(g, cx + 1, cy + 1)],
       ];
-      const minimum = Math.min(...corners);
-      const maximum = Math.max(...corners);
-      const pattern =
-        maximum === minimum
-          ? "0000"
-          : corners.map((height) => (height === maximum ? "1" : "0")).join("");
-      const raisedCorners = [...pattern].filter((value) => value === "1").length;
-      const tileNode =
-        raisedCorners === 0
-          ? 5292
-          : raisedCorners === 1
-            ? 5183
-            : raisedCorners === 3
-              ? 5180
-              : pattern === "0110" || pattern === "1001"
-                ? 5177
-                : 5186;
+      const pattern = cornerPattern(corners);
       const index = cIndex(g, cx, cy);
-      const cliffRecipes: Record<number, Record<number, number[]>> = {
-        0: {
-          1: [5183, -1, 5925, 5938, -1, 6967, 5939, -1, 20862, 5939, 20884, -1],
-          2: [5186, -1, 5943, 5949, -1, 21178, 5949, 21180, -1, 5948, 5950, -1, 0, 5950, 6080, -1],
-          3: [5180, -1, 6487, 5974, -1, 20900, 5974, 20915, -1, 5969, 5975, -1],
-        },
-        1: {
-          1: [5183, -1, 6361, 5938, -1, 6382, 5939, -1, 15301, 5939, 15346, -1],
-          2: [5186, -1, 5944, 5949, -1, 15412, 5949, 15511, -1, 5948, 5950, -1, 0, 5950, 6080, -1],
-          3: [5180, -1, 6468, 5974, -1, 15616, 5974, 15624, -1, 5969, 5975, -1],
-        },
-      };
-      const next =
-        raisedCorners === 0 || rampCells.has(index) || raisedCorners === 2 && (pattern === "0110" || pattern === "1001")
-          ? [tileNode, -1]
-          : cliffRecipes[g.tileset[index] ?? 0]?.[raisedCorners] ?? [tileNode, -1];
+      const next = terrainRecipeForCell(pattern, g.tileset[index] ?? 0, rampCells.has(index));
       const current = g.configurations[index] ?? [];
       if (current.length !== next.length || current.some((value, entry) => value !== next[entry])) {
         g.configurations[index] = next;

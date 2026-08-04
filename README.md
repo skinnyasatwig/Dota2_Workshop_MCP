@@ -11,7 +11,7 @@ template](https://github.com/ModDota/TypeScript-Addon-Template) it scaffolds **T
 wiring) and drives the template's `npm` scripts. It also has a raw-Lua + `resourcecompiler.exe`
 fallback for non-tstl addons.
 
-> Status: working — **117 tools**, end-to-end tested. It can search the Workshop for custom games by
+> Status: working — **118 tools**, end-to-end tested. It can search the Workshop for custom games by
 > name and download them outside the client (SteamCMD) to study, generates whole playable maps from a spec
 > (terrain shaping via the Dota tile grid + entities + waypoint paths → compile → .vpk), previews them
 > top-down as an image without launching the game, edits KV1 + KV3 (soundevents/particles) data, reads
@@ -40,7 +40,7 @@ fallback for non-tstl addons.
 | **Reference library** | `ref_harvest`, `ref_harvest_top`, `ref_list`, `ref_search`, `ref_find`, `ref_passport`, `ref_inspect`, `ref_get`, `ref_recipe`, `ref_curate`, `ref_stats`, `asset_db` (SQLite index: fast structured search by kind/ext/name) |
 | **Docs & references** | `docs_search`, `docs_get`, `docs_list`, `dota_patterns`, `panorama_api_search`, `panorama_api_get`, `tools_catalog` |
 | **Maps** | `map_create`, `map_add_entity`, `map_inspect`, `map_patch_entities`, `map_sync_contract`, `map_rewrite_path`, `map_to_text`, `map_from_text`, `map_compile`, `map_list`, `map_validate` |
-| **Map generation** | `map_build`, `map_terrain`, `map_preview`, `map_tile_to_world`, `entity_catalog`, `scaffold_td` |
+| **Map generation** | `map_build`, `map_terrain`, `map_preview`, `map_tile_to_world`, `map_recipe_catalog`, `entity_catalog`, `scaffold_td` |
 | **Reference games** | `workshop_search`, `workshop_download`, `workshop_list`, `workshop_inspect`, `workshop_read`, `workshop_grep`, `panorama_decompile` |
 | **Asset preview (out of engine)** | `asset_preview` (particles/textures/models → inline contact-sheet image + HTML gallery), `sound_preview` (sounds → inline waveform/icon image + playable HTML soundboard + inline audio), `preview_studio` / `preview_studio_stop` (interactive gallery + public share link: animated particles, 3D models, audio players, click-to-select), `preview_pick` / `preview_selections` (resolve the IDs the user picked/clicked → game + asset path) — decoded via ValveResourceFormat, no Dota launch |
 | **Sounds & KV3** | `soundevents_list`, `soundevents_get`, `soundevents_upsert`, `kv3_read` |
@@ -208,13 +208,15 @@ walk — tower defense"* into a real map:
 
 - **`map_build`** — one call: clone the template, apply one validated desired-state map specification,
   register, and optionally compile it. The preferred `specification` object uses the same
-  `managedTerrain` / `managedEntities` / `managedPaths` vocabulary as `map_sync_contract`; legacy
+  `managedTerrain` / `managedEntities` / `managedPaths` vocabulary as `map_sync_contract`. A specification can
+  also define reusable named `regions`, reusable `components`, and transformed `placements`; one component may
+  contain local entities, paths, and terrain, and every placement is automatically namespaced. Legacy
   `terrain` / `entities` / `paths` inputs remain compatible. See
   [`examples/map-specification.json`](examples/map-specification.json) for a complete starter. Pass
   `dryRun:true` to generate and report the plan without writing, registering, or compiling anything.
 - **`map_terrain`** — apply the shared validated terrain vocabulary to an existing map. It supports
   `fill` / `height` / `water` / `tileset` / `ramp` over `rect` / `circle` / `ring` / `path` /
-  `polygon` / `managedPath` shapes and regenerates valid cliff orientation and tile recipes. It is
+  `polygon` / reusable `region` / `managedPath` shapes and regenerates valid cliff orientation and tile recipes. It is
   preview-only by default; pass `apply:true` after reviewing the exact change counts.
 - **`map_preview`** — render a diagnostic top-down **image straight from the data**, no game launch.
   In addition to shaded terrain and water it overlays contours, cliff cells, ramp cells, current arrows,
@@ -224,6 +226,9 @@ walk — tower defense"* into a real map:
   cliff-separated regions, trapped spawns, blocked entrances, inaccessible objectives or camps, and
   waypoint segments that cross blocked cells. It recognizes generated ramps and treats Dota river water
   as walkable. Mesh collision and Valve's final navmesh remain an engine-test responsibility.
+- **`map_recipe_catalog`** — inspect the named terrain cores, Radiant/Dire cliff recipes, ramp-safe
+  fallbacks, and official Valve prefab references used by the generator. `verifyInstalled:true` checks
+  the references against the current Workshop Tools install without opening Hammer.
 - **`entity_catalog`** — the placeable-entity reference (spawners, `path_track` waypoints, triggers,
   lights, props, …) so you know what to place. Text searches augment the curated list with classes
   and keyvalues parsed from the installed official `dota.fgd`.
@@ -231,6 +236,20 @@ walk — tower defense"* into a real map:
 
 Coordinates: terrain ops use tile units (default 64×64 grid; world = origin + tile×256); entity/path
 positions use world units.
+
+Reusable component coordinates are local. A placement uses `tileOffset` for its terrain and `worldOffset` for its
+entities and paths, with optional `mirrorAxis: "x" | "y" | "xy"`. Local names are prefixed with the placement name,
+so two copies cannot silently overwrite each other. A component property can explicitly refer to one of its local
+targets with `@local:name`; it becomes the correct namespaced target for each copy. Region mirrors can specify an
+`around` tile point, which makes map-center symmetry explicit instead of relying on duplicated coordinates.
+
+For common gameplay structure, `dotaComponents` provides strongly checked `base`, `ancient`, `tower`, `fountain`,
+`shop`, `camp`, `bossPit`, `playerStart`, and `gate` entries. It derives team numbers, official entity classes,
+stock unit/model names, tower tier names, shop/camp numeric values, base member transforms, and boss-pit terrain.
+See [`examples/dota-components.json`](examples/dota-components.json). A real `camp` intentionally requires the name
+of an existing Hammer-authored camp volume; creating arbitrary solid brush volumes is not yet safe in the text-only
+pipeline. Likewise, a boss pit's no-wards radius currently creates a checked placement marker for a future
+`trigger_no_wards` solid rather than pretending that a point entity supplies the trigger volume.
 
 ## Learn from other custom games
 
@@ -316,7 +335,7 @@ playable `.vpk` — a pipeline verified end to end.
 - **`map_sync_contract`** — preview or apply the same desired-state map specification accepted by
   `map_build`, conventionally stored in `.dota-workshop/map-contract.json`. It creates missing named entities, expands
   complete linked waypoint chains, repairs drifted class/position/rotation/keyvalues, prunes obsolete
-  numbered nodes owned by those paths, preserves unrelated map data, and refuses ambiguous duplicate
+  numbered nodes owned by those paths, expands reusable regions/components/placements, preserves unrelated map data, and refuses ambiguous duplicate
   target names. Preview is the default; pass `apply:true` to write and `recompile:true` to compile.
   Applied map changes use a transaction: the current source map (and compiled map when relevant) is
   backed up under `.dota-workshop/backups`, conversion is staged before replacement, and a failed
@@ -331,7 +350,9 @@ playable `.vpk` — a pipeline verified end to end.
   script-facing entities, duplicate target names, and broken `path_corner`/`path_track` chains. It
   reports when the compiled VPK is older than the VMAP source; `requireCompiled:true` makes a missing
   or stale build an error. It automatically loads `.dota-workshop/map-contract.json` when the project
-  provides one.
+  provides one. Known property types are checked through inherited definitions from Valve's installed
+  `base.fgd` and `dota.fgd`. Unknown custom metadata remains informational by default; pass
+  `strictEntityProperties:true` to turn unknown classes/properties into warnings.
 
 Contract entries under `requiredEntities` are validation-only. Entries under `managedEntities`
 are declarative desired state and require `targetname`, `classname`, and `origin`; `angles` and
@@ -344,7 +365,7 @@ the terminal node explicitly removes stale `target` values (`startIndex`, `class
 `mirrorOf` plus `mirrorAxis` (`x`, `y`, or `xy`) enforces exact route symmetry. `map_validate`
 checks all expanded entities. `managedTerrain` is an ordered list of the same idempotent tile-grid
 operations accepted by `map_terrain`: `fill`, `height`, `water`, `tileset`, and `ramp`, using `rect`,
-`circle`, `ring`, `path`, or `polygon` shapes in tile coordinates. Contract sync previews exact height-vertex,
+`circle`, `ring`, `path`, `polygon`, reusable `region`, or `managedPath` shapes in tile coordinates. Contract sync previews exact height-vertex,
 water-vertex, and tileset-cell drift before writing; undeclared terrain remains untouched unless the
 contract explicitly uses `fill`. A terrain shape can also use
 `{"kind":"managedPath","name":"path_name","width":2}` to derive its tile-space stroke from an

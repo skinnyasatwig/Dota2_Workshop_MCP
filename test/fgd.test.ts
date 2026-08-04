@@ -40,6 +40,37 @@ test("parseFgdEntities extracts classes, bases, and top-level properties", () =>
   assert.equal(entities[1].classType, "SolidClass");
 });
 
+test("parseFgdEntities includes base and override classes without descriptions", () => {
+  const entities = parseFgdEntities(`
+@BaseClass = teamnumber
+[
+  teamnumber(choices) : "Team Number" : 0 =
+  [
+    0: "Unassigned"
+    2: "Good Guys"
+  ]
+]
+
+@BaseClass base(Targetname, teamnumber) = dota_building
+[
+  MapUnitName(string) : "Unit Name" : ""
+]
+
+@OverrideClass = prop_dynamic_base
+[
+  StartingAnim(sequence) : "Starting Animation" : ""
+]
+`);
+
+  assert.deepEqual(entities.map(({ name, classType, bases }) => ({ name, classType, bases })), [
+    { name: "teamnumber", classType: "BaseClass", bases: [] },
+    { name: "dota_building", classType: "BaseClass", bases: ["Targetname", "teamnumber"] },
+    { name: "prop_dynamic_base", classType: "OverrideClass", bases: [] },
+  ]);
+  assert.equal(entities[0].properties[0].name, "teamnumber");
+  assert.equal(entities[1].properties[0].name, "MapUnitName");
+});
+
 test("categoryForFgdEntity groups official Dota entities for catalog filtering", () => {
   assert.equal(categoryForFgdEntity("npc_dota_neutral_spawner"), "spawn");
   assert.equal(categoryForFgdEntity("ent_dota_tree"), "prop");

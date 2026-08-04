@@ -17,6 +17,47 @@
       }
     }
   ],
+  "regions": {
+    "arena_highground": {
+      "shape": {
+        "kind": "polygon",
+        "points": [[16, 20], [48, 20], [52, 32], [48, 44], [16, 44], [12, 32]]
+      }
+    },
+    "arena_highground_mirror": {
+      "mirrorOf": "arena_highground",
+      "mirrorAxis": "x",
+      "around": [32, 32]
+    }
+  },
+  "components": {
+    "watch_marker": {
+      "managedEntities": [
+        {
+          "targetname": "marker",
+          "classname": "info_target",
+          "origin": "0 0 128",
+          "angles": "0 0 0",
+          "properties": {
+            "comment": "Reusable marker placed as @local:marker"
+          }
+        }
+      ]
+    }
+  },
+  "placements": [
+    {
+      "component": "watch_marker",
+      "name": "radiant_watch",
+      "worldOffset": [-1024, 1024, 0]
+    },
+    {
+      "component": "watch_marker",
+      "name": "dire_watch",
+      "worldOffset": [1024, 1024, 0],
+      "mirrorAxis": "x"
+    }
+  ],
   "managedPaths": [
     {
       "name": "radiant_north_route",
@@ -48,8 +89,8 @@
       "op": "height",
       "level": 1,
       "shape": {
-        "kind": "polygon",
-        "points": [[16, 20], [48, 20], [52, 32], [48, 44], [16, 44], [12, 32]]
+        "kind": "region",
+        "name": "arena_highground"
       }
     },
     {

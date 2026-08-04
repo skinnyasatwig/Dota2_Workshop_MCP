@@ -16,11 +16,18 @@ import {
   mapSpecificationInputSchema,
   parseMapSpecification,
   reconcileMapSpecification,
+  regionDefinitionInputSchema,
   terrainOperationInputSchema,
 } from "../dota/map-spec.js";
 import { resolveDataPath } from "../util/datapath.js";
 import { runMapTransaction } from "../dota/map-transaction.js";
 import { renderMapPreview } from "../dota/map-preview.js";
+import {
+  CLIFF_RECIPE_SETS,
+  CORE_TERRAIN_RECIPES,
+  VALVE_PREFAB_RECIPES,
+  validateTerrainRecipeLibrary,
+} from "../dota/terrain-recipes.js";
 import { writeTextFile, pathExists } from "../util/fsx.js";
 import { json, text, image, error, guard, ToolResult } from "../util/result.js";
 
@@ -296,6 +303,51 @@ function leak(this: void, unit: CDOTA_BaseNPC): void {
 
 export function registerMapGenTools(server: McpServer) {
   server.registerTool(
+    "map_recipe_catalog",
+    {
+      title: "Known-good Dota map recipes",
+      description:
+        "List the MCP's validated Valve-derived terrain core, cliff decoration, ramp-safe fallback, and official " +
+        "prefab references. Optionally verify that referenced Valve prefabs are present in the installed Workshop content.",
+      inputSchema: {
+        category: z
+          .enum(["base", "ancient", "tower", "fountain", "shop", "camp", "boss"])
+          .optional(),
+        verifyInstalled: z.boolean().optional().describe("Check prefab paths under the installed Dota content tree."),
+      },
+    },
+    guard(async ({ category, verifyInstalled }): Promise<ToolResult> => {
+      const errors = validateTerrainRecipeLibrary();
+      const dota = verifyInstalled ? await resolveDotaPaths() : undefined;
+      const prefabs = await Promise.all(
+        VALVE_PREFAB_RECIPES
+          .filter((recipe) => !category || recipe.category === category)
+          .map(async (recipe) => ({
+            ...recipe,
+            installed:
+              !verifyInstalled || !dota
+                ? null
+                : await pathExists(join(dota.root, "content", "dota", recipe.source)),
+          })),
+      );
+      return json(
+        {
+          valid: errors.length === 0,
+          validationErrors: errors,
+          coreTerrain: CORE_TERRAIN_RECIPES,
+          cliffSets: CLIFF_RECIPE_SETS,
+          rampFallback: "Ramp cells use the matching core corner tile without decorative cliff layers.",
+          prefabs,
+          installVerified: verifyInstalled === true && Boolean(dota),
+        },
+        `Recipe library ${errors.length ? `has ${errors.length} validation error(s)` : "is valid"}: ` +
+          `${CORE_TERRAIN_RECIPES.length} terrain cores, ${CLIFF_RECIPE_SETS.length} cliff sets, ` +
+          `${prefabs.length} Valve prefab references.`,
+      );
+    }),
+  );
+
+  server.registerTool(
     "entity_catalog",
     {
       title: "Dota map entity catalog",
@@ -375,12 +427,17 @@ export function registerMapGenTools(server: McpServer) {
       description:
         "Apply the same validated terrain operations used by map specifications and map_sync_contract. Coordinates " +
         "are in tile units. Supports fill, height, water, tileset, and ramp operations over rect, circle, ring, path, " +
-        "polygon, or managedPath shapes. managedPath shapes resolve against the project's map contract. Valid cliff " +
-        "orientation and tile recipes are regenerated automatically. Recompile after (or pass recompile=true).",
+        "polygon, named region, or managedPath shapes. Pass reusable region definitions alongside the operations; " +
+        "managedPath shapes resolve against the project's map contract. Valid cliff orientation and tile recipes are " +
+        "regenerated automatically. Recompile after (or pass recompile=true).",
       inputSchema: {
         projectRoot: z.string().optional(),
         map: z.string(),
         ops: z.array(terrainOperationInputSchema).min(1).describe("Validated terrain operations."),
+        regions: z
+          .record(regionDefinitionInputSchema)
+          .optional()
+          .describe("Optional reusable named terrain shapes referenced by region operations."),
         contractFile: z
           .string()
           .optional()
@@ -389,23 +446,30 @@ export function registerMapGenTools(server: McpServer) {
         recompile: z.boolean().optional().describe("Compile after applying; requires apply=true."),
       },
     },
-    guard(async ({ projectRoot, map, ops, contractFile, apply, recompile }): Promise<ToolResult> => {
+    guard(async ({ projectRoot, map, ops, regions, contractFile, apply, recompile }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
       const p = projectMapPaths(dota, project, map);
       if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}. Create it with map_create or map_build.`);
       if (recompile && !apply) return error("recompile=true requires apply=true; preview mode never compiles or writes files.");
       const log: string[] = [];
-      const operations = parseManagedTerrain(ops, "ops", `map_terrain(${map})`) ?? [];
-      const needsManagedPaths = operations.some(
+      const needsManagedPaths = ops.some(
         (operation) => operation.op !== "fill" && operation.shape.kind === "managedPath",
       );
       const contract = needsManagedPaths
-        ? await loadMapContract(project.root, map, contractFile)
+        ? await loadMapContract(project.root, map, contractFile, parseMapSpecification)
         : undefined;
       if (needsManagedPaths && !contract) {
         return error(`Terrain operations reference managedPath shapes, but no map contract was found under ${project.root}.`);
       }
+      const operations = parseMapSpecification(
+        {
+          regions,
+          managedPaths: contract?.contract.managedPaths ?? [],
+          managedTerrain: ops,
+        },
+        `map_terrain(${map})`,
+      ).managedTerrain ?? [];
       const current = await vmapToText(dota.dmxconvertExe, p.contentVmap);
       const result = reconcileMapTerrain(current, operations, contract?.contract.managedPaths ?? []);
       const transaction = apply && (result.changed || recompile)
@@ -481,8 +545,8 @@ export function registerMapGenTools(server: McpServer) {
       description:
         "Generate a whole playable map in one call. Prefer specification, which uses the same validated desired-state " +
         "format as map_sync_contract: managedTerrain, managedEntities, managedAbsentEntities, managedPaths, and " +
-        "requiredEntities. Legacy terrain/entities/paths remain supported. Terrain coordinates are tile units; " +
-        "entity/path coordinates are world units.",
+        "requiredEntities, plus reusable regions, components, and transformed placements. Legacy terrain/entities/paths " +
+        "remain supported. Terrain coordinates are tile units; entity/path coordinates are world units.",
       inputSchema: {
         projectRoot: z.string().optional(),
         name: z.string(),

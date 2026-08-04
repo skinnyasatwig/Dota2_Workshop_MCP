@@ -1,0 +1,81 @@
+{
+  "map": "component_arena",
+  "dotaComponents": [
+    {
+      "kind": "base",
+      "name": "radiant_base",
+      "team": "radiant",
+      "origin": [-5000, 0, 256],
+      "yaw": 0,
+      "fountain": { "name": "fountain", "offset": [-768, 0, 0] },
+      "shop": { "name": "home_shop", "offset": [-640, 768, 0], "yaw": -45, "shopType": "home" },
+      "playerStarts": [
+        { "name": "start_1", "offset": [-512, 384, 0] },
+        { "name": "start_2", "offset": [-512, 0, 0] },
+        { "name": "start_3", "offset": [-512, -384, 0] }
+      ],
+      "towers": [
+        { "name": "t3_north", "offset": [512, 384, 0], "tier": 3, "lane": "mid" },
+        { "name": "t3_south", "offset": [512, -384, 0], "tier": 3, "lane": "mid" }
+      ],
+      "gates": [
+        { "name": "north_gate", "offset": [-256, 1280, 0] },
+        { "name": "south_gate", "offset": [-256, -1280, 0] }
+      ]
+    },
+    {
+      "kind": "base",
+      "name": "dire_base",
+      "team": "dire",
+      "origin": [5000, 0, 256],
+      "yaw": 180,
+      "fountain": { "name": "fountain", "offset": [-768, 0, 0] },
+      "shop": { "name": "home_shop", "offset": [-640, 768, 0], "yaw": -45, "shopType": "home" },
+      "playerStarts": [
+        { "name": "start_1", "offset": [-512, 384, 0] },
+        { "name": "start_2", "offset": [-512, 0, 0] },
+        { "name": "start_3", "offset": [-512, -384, 0] }
+      ],
+      "towers": [
+        { "name": "t3_north", "offset": [512, 384, 0], "tier": 3, "lane": "mid" },
+        { "name": "t3_south", "offset": [512, -384, 0], "tier": 3, "lane": "mid" }
+      ],
+      "gates": [
+        { "name": "north_gate", "offset": [-256, 1280, 0] },
+        { "name": "south_gate", "offset": [-256, -1280, 0] }
+      ]
+    },
+    {
+      "kind": "tower",
+      "name": "radiant_t1",
+      "team": "radiant",
+      "origin": [-1800, 0, 128],
+      "yaw": 0,
+      "tier": 1,
+      "lane": "mid"
+    },
+    {
+      "kind": "camp",
+      "name": "west_bog_camp",
+      "origin": [-2400, -2800, 0],
+      "size": "medium",
+      "forcedSubtype": 7,
+      "volumeName": "west_bog_camp_volume"
+    },
+    {
+      "kind": "bossPit",
+      "name": "south_rosh",
+      "boss": "roshan",
+      "worldCenter": [0, -4608, 0],
+      "tileCenter": [32, 14],
+      "radius": 3.5,
+      "rimWidth": 1.5,
+      "floorLevel": -1,
+      "rimLevel": 0,
+      "tileset": 1,
+      "entrances": ["north", "east", "west"],
+      "entranceWidth": 2.5,
+      "noWardsRadius": 875
+    }
+  ]
+}
