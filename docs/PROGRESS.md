@@ -19,14 +19,19 @@ Last updated: 2026-08-04
 9. `c0195b8` - added reusable team-aware base blockers and deterministic linked fog-of-war blocker chains,
    including preview lines, broken-link validation, base assembly support, official FGD checks, and a real
    `dmxconvert` round-trip integration test.
+10. `c421796` - added checked three- to 64-sided convex-prism volume authoring, exact polygon drift detection,
+    reusable-component mirroring, true-footprint preview/reachability, compiled boss-pit no-ward volumes, and
+    isolated `dmxconvert` plus `resourcecompiler` integration proofs.
 
 ## Current verification record
 
 - TypeScript build passes.
-- 182 unit and integration tests pass.
+- 186 unit and integration tests pass; the opt-in compiler test is skipped during the default suite.
 - MCP smoke suite: 193 passed, 0 failed, 1 skipped because the remote Steam Workshop search service was unavailable.
-- Valve's installed `dmxconvert.exe` successfully round-trips generated camp, no-ward, and player-clip volumes
-  from text to binary VMAP and back during the integration suite.
+- Valve's installed `dmxconvert.exe` successfully round-trips generated camp, polygonal no-ward, and player-clip
+  volumes from text to binary VMAP and back during the integration suite.
+- Valve's installed `resourcecompiler.exe` successfully compiled an isolated temporary addon containing a
+  16-sided generated no-ward prism to a real VPK; the fixture's content/game folders were removed afterward.
 - Real Dota 3v3 contract: 86 managed entities, 4 managed paths, 97 terrain operations, and zero desired-state drift.
 - Offline 3v3 terrain: zero holes; only two known isolated regions (a tiny shelf and a deliberate off-map strip).
 - Official entity definitions: all 157 map entities recognized; zero invalid known property values.
