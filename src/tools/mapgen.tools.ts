@@ -872,6 +872,7 @@ export function registerMapGenTools(server: McpServer) {
         collisionObstacleCount: rendered.reachability.collisionObstacleCount,
         physicalBoundsCollisionObstacleCount: rendered.reachability.physicalBoundsCollisionObstacleCount,
         exactHullProjectionCount: rendered.reachability.exactHullProjectionCount,
+        meshVertexHullProjectionCount: rendered.reachability.meshVertexHullProjectionCount,
         boundsProjectionCount: rendered.reachability.boundsProjectionCount,
         approximatedCollisionObstacleCount: rendered.reachability.approximatedCollisionObstacleCount,
         unknownBoundsCollisionObstacleCount: rendered.reachability.unknownBoundsCollisionObstacleCount,

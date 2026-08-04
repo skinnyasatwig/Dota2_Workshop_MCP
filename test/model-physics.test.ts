@@ -35,8 +35,8 @@ test("VRF parser accepts only bounds inside the PHYS data block", () => {
     }
   `;
   assert.deepEqual(parseVrfPhysicsBounds(text), [
-    { min: [-10.5, -20, 0], max: [10.5, 20, 48] },
-    { min: [50, 60, -4], max: [70, 80, 12] },
+    { min: [-10.5, -20, 0], max: [10.5, 20, 48], geometry: "bounds" },
+    { min: [50, 60, -4], max: [70, 80, 12], geometry: "bounds" },
   ]);
   assert.deepEqual(parseVrfPhysicsBounds("render bounds only"), []);
 });
@@ -67,6 +67,7 @@ test("VRF parser recovers validated exact convex-hull vertices", () => {
     min: [-10, -20, 0],
     max: [10, 20, 48],
     vertices,
+    geometry: "convex-hull",
   }]);
 });
 
@@ -96,7 +97,70 @@ test("new vertex-position blobs take precedence and unsafe local vertices stay b
   const outside = vertices.map((vertex) => [...vertex] as [number, number, number]);
   outside[0][0] = -100;
   assert.equal(parseVrfPhysicsBounds(block(outside))[0].vertices, undefined);
-  assert.equal(parseVrfPhysicsBounds(block(vertices, "1, 0, 0"))[0].vertices, undefined);
+  const translated = parseVrfPhysicsBounds(block(
+    vertices,
+    "1, 0, 0, 10, 0, 1, 0, 20, 0, 0, 1, 30",
+  ))[0];
+  assert.deepEqual(translated.min, [9, 19, 30]);
+  assert.deepEqual(translated.max, [11, 21, 32]);
+  assert.deepEqual(translated.vertices?.[0], [9, 19, 30]);
+});
+
+test("bind poses carry mesh, sphere, and capsule PHYS shapes into model space", () => {
+  const meshVertices: [number, number, number][] = [
+    [-1, -1, 0],
+    [1, -1, 0],
+    [0, 1, 0],
+    [0, 0, 2],
+  ];
+  const text = `
+    --- Data for block "PHYS" ---
+    {
+      m_bindPose = [ [
+        1, 0, 0, 10,
+        0, 1, 0, 20,
+        0, 0, 1, 30,
+      ] ]
+      m_parts = [ {
+        m_rnShape = {
+          m_spheres = [ { m_Sphere = {
+            m_vCenter = [ 2, 0, 0 ]
+            m_flRadius = 1
+          } } ]
+          m_capsules = [ { m_Capsule = {
+            m_vCenter = [ [ -2, 0, 0 ], [ -2, 0, 4 ] ]
+            m_flRadius = 0.5
+          } } ]
+          m_hulls = [ { m_Hull = {
+            m_Bounds = {
+              m_vMinBounds = [ -2, -2, -2 ]
+              m_vMaxBounds = [ 0, 0, 0 ]
+            }
+            m_Vertices = [
+              [ -2, -2, -2 ],
+              [ 0, -2, -2 ],
+              [ -2, 0, -2 ],
+              [ -2, -2, 0 ],
+            ]
+          } } ]
+          m_meshes = [ { m_Mesh = {
+            m_vMin = [ -1, -1, 0 ]
+            m_vMax = [ 1, 1, 2 ]
+            m_Vertices = #[ ${float3Blob(meshVertices)} ]
+          } } ]
+        }
+      } ]
+    }
+  `;
+  const shapes = parseVrfPhysicsBounds(text);
+  assert.deepEqual(shapes.map(({ min, max, geometry }) => ({ min, max, geometry })), [
+    { min: [8, 18, 28], max: [10, 20, 30], geometry: "convex-hull" },
+    { min: [9, 19, 30], max: [11, 21, 32], geometry: "mesh-vertex-hull" },
+    { min: [11, 19, 29], max: [13, 21, 31], geometry: "sphere-bounds" },
+    { min: [7.5, 19.5, 29.5], max: [8.5, 20.5, 34.5], geometry: "capsule-bounds" },
+  ]);
+  assert.deepEqual(shapes[0].vertices?.[0], [8, 18, 28]);
+  assert.deepEqual(shapes[1].vertices?.[0], [9, 19, 30]);
 });
 
 test("compiled model paths are normalized without accepting arbitrary resources", () => {
@@ -125,6 +189,7 @@ test("VRF recovers and caches a known base-game model PHYS hull", {
   assert.equal(first.status, "physical-bounds");
   assert.ok(first.bounds.length >= 1);
   assert.ok(first.bounds.some((bounds) => bounds.vertices?.length));
+  assert.ok(first.bounds.some((bounds) => bounds.geometry === "convex-hull"));
   assert.equal(second.status, "physical-bounds");
   assert.equal(second.fromCache, true);
 });

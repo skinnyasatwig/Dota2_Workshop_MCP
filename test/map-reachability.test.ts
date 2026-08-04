@@ -220,6 +220,7 @@ test("resolved PHYS bounds conservatively block covered terrain cells and route 
 
   assert.equal(report.physicalBoundsCollisionObstacleCount, 1);
   assert.equal(report.exactHullProjectionCount, 0);
+  assert.equal(report.meshVertexHullProjectionCount, 0);
   assert.equal(report.boundsProjectionCount, 1);
   assert.equal(report.modelCollisionBlockedCellCount, 1);
   assert.equal(report.cells.find((cell) => cell.x === 2 && cell.y === 1)?.collisionObstacle, "physical_prop");

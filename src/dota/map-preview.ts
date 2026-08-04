@@ -235,7 +235,9 @@ function drawPreview(
             const to = pixels[(index + 1) % pixels.length];
             const color: Color = footprint.projection === "exact-hull"
               ? [57, 232, 255]
-              : [61, 146, 176];
+              : footprint.projection === "mesh-vertex-hull"
+                ? [82, 189, 214]
+                : [61, 146, 176];
             line(from[0], from[1], to[0], to[1], color, 0.95, 2);
           }
         }
@@ -400,7 +402,7 @@ function drawPreview(
       minimapBounds: "magenta rectangle",
       volumes: "orange camp, purple no-ward, cyan trigger, pink player blocker outlines",
       visionBlockers: "purple linked lines",
-      collisionObstacles: "bright cyan exact PHYS hulls; muted cyan PHYS bounds; dark green/orange class approximations; white X means model bounds unknown",
+      collisionObstacles: "bright cyan exact PHYS hulls; medium cyan mesh envelopes; muted cyan PHYS bounds; dark green/orange class approximations; white X means model bounds unknown",
     },
   };
   return { png: encodeRgbaPng(width, height, rgba), stats, reachability };

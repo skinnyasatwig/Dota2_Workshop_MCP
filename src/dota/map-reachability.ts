@@ -84,6 +84,7 @@ export interface MapReachabilityReport {
   collisionObstacleCount: number;
   physicalBoundsCollisionObstacleCount: number;
   exactHullProjectionCount: number;
+  meshVertexHullProjectionCount: number;
   boundsProjectionCount: number;
   approximatedCollisionObstacleCount: number;
   unknownBoundsCollisionObstacleCount: number;
@@ -523,6 +524,11 @@ export function analyzeTileGridReachability(
     exactHullProjectionCount: collisionObstacles.reduce(
       (count, obstacle) => count +
         (obstacle.physicalFootprints?.filter((footprint) => footprint.projection === "exact-hull").length ?? 0),
+      0,
+    ),
+    meshVertexHullProjectionCount: collisionObstacles.reduce(
+      (count, obstacle) => count +
+        (obstacle.physicalFootprints?.filter((footprint) => footprint.projection === "mesh-vertex-hull").length ?? 0),
       0,
     ),
     boundsProjectionCount: collisionObstacles.reduce(

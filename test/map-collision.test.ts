@@ -204,6 +204,7 @@ test("exact PHYS hull vertices replace the enclosing bounds projection", async (
         min: [-10, -10, 0],
         max: [10, 10, 20],
         vertices: [[-10, -10, 0], [10, -10, 0], [0, 10, 0], [0, 0, 20]],
+        geometry: "convex-hull",
       }],
       source: "vrf-phys",
       fromCache: false,

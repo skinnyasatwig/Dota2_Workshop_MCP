@@ -21,7 +21,7 @@ export interface MapCollisionFootprint {
   minZ: number;
   maxZ: number;
   localBounds: ModelPhysicsBounds;
-  projection: "exact-hull" | "bounds";
+  projection: "exact-hull" | "mesh-vertex-hull" | "bounds";
 }
 
 export interface MapCollisionObstacle {
@@ -282,7 +282,11 @@ function transformedFootprints(
       minZ: Math.min(...transformed.map((point) => point[2])),
       maxZ: Math.max(...transformed.map((point) => point[2])),
       localBounds,
-      projection: localBounds.vertices?.length ? "exact-hull" : "bounds",
+      projection: localBounds.geometry === "convex-hull"
+        ? "exact-hull"
+        : localBounds.geometry === "mesh-vertex-hull"
+          ? "mesh-vertex-hull"
+          : "bounds",
     };
   });
   if (footprints.some((footprint) => footprint === undefined)) return undefined;
