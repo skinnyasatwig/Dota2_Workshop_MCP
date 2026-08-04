@@ -31,11 +31,14 @@ Last updated: 2026-08-04
 13. `a7f8be8` - added conservative collision diagnostics: explicit Valve tree/obstruction classes receive
     warning-only route broad phases, solid props with unavailable model bounds are inventoried and drawn without
     guessed footprints, and nav-ignore/initially-disabled declarations are honored.
+14. `1531961` - added cached base-game model collision inspection through ValveResourceFormat. Only bounds from
+    real non-empty `PHYS` blocks are promoted; yaw/scale transforms feed cyan preview footprints, conservative
+    blocked-cell analysis, and route warnings, while render/hitbox bounds and unsafe transforms remain unknown.
 
 ## Current verification record
 
 - TypeScript build passes.
-- 196 unit and integration tests pass; the opt-in compiler test is skipped during the default suite.
+- 200 unit and integration tests pass; the opt-in compiler and installed-VRF tests are skipped during the default suite.
 - MCP smoke suite: 197 passed, 0 failed, 1 skipped because the remote Steam Workshop search service was unavailable.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
@@ -43,6 +46,10 @@ Last updated: 2026-08-04
   volumes from text to binary VMAP and back during the integration suite.
 - Valve's installed `resourcecompiler.exe` successfully compiled an isolated temporary addon containing a
   16-sided generated no-ward prism to a real VPK; the fixture's content/game folders were removed afterward.
+- Installed ValveResourceFormat 19.2 recovered the physical hull bounds of
+  `models/props_gameplay/cap_point001.vmdl_c` directly from `pak01_dir.vpk`; a second lookup reused the fingerprinted
+  disk cache. Empty-PHYS walls, barrels, trees, gates, and props remain explicitly unresolved rather than borrowing
+  their render or hitbox bounds.
 - Real Dota 3v3 contract: 86 managed entities, 4 managed paths, 97 terrain operations, and zero desired-state drift.
 - Offline 3v3 terrain: zero holes; only two known isolated regions (a tiny shelf and a deliberate off-map strip).
 - Installed official definitions expose 187 enum properties with 1,171 choices, 16 explicitly ranged properties,
