@@ -6,9 +6,18 @@ import { resolveProject } from "../config.js";
 import { requireDotaPaths, resolveDotaPaths } from "../dota/paths.js";
 import { vmapToText, textToVmap, cloneVmap, buildEntityBlock, insertEntity, maxNodeId } from "../dota/vmap.js";
 import { categoryForFgdEntity, parseFgdEntities } from "../dota/fgd.js";
-import { parseTileGrid, applyTileGrid, setHeight, setWater, setTileset, fill, tileToWorld, vIndex, cIndex, Shape } from "../dota/tilegrid.js";
+import { parseTileGrid, tileToWorld, vIndex, cIndex } from "../dota/tilegrid.js";
 import { registerMapFile } from "../dota/addoninfo.js";
 import { compileProjectMap, projectMapPaths } from "../dota/map-project.js";
+import { loadMapContract } from "../dota/map-contract.js";
+import { parseManagedTerrain, reconcileMapTerrain } from "../dota/map-terrain.js";
+import {
+  managedMapPathInputSchema,
+  mapSpecificationInputSchema,
+  parseMapSpecification,
+  reconcileMapSpecification,
+  terrainOperationInputSchema,
+} from "../dota/map-spec.js";
 import { resolveDataPath } from "../util/datapath.js";
 import { encodeRgbaPng } from "../util/png.js";
 import { writeTextFile, pathExists } from "../util/fsx.js";
@@ -16,35 +25,18 @@ import { json, text, image, error, guard, ToolResult } from "../util/result.js";
 
 const NAME_RE = /^[a-z][a-z0-9_]+$/;
 
-// Build a Shape from a loose JSON object.
-function toShape(s: any): Shape {
-  if (!s || typeof s !== "object") throw new Error("shape must be an object");
-  switch (s.kind) {
-    case "rect": return { kind: "rect", x0: +s.x0, y0: +s.y0, x1: +s.x1, y1: +s.y1 };
-    case "circle": return { kind: "circle", cx: +s.cx, cy: +s.cy, r: +s.r };
-    case "ring": return { kind: "ring", cx: +s.cx, cy: +s.cy, rInner: +s.rInner, rOuter: +s.rOuter };
-    case "path": return { kind: "path", points: (s.points || []).map((p: number[]) => [+p[0], +p[1]] as [number, number]), width: +s.width };
-    default: throw new Error(`unknown shape kind "${s.kind}" (rect|circle|ring|path)`);
-  }
-}
-
-function applyTerrainOps(textIn: string, ops: any[], log: string[]): string {
-  const g = parseTileGrid(textIn);
-  log.push(`tile grid ${g.width}x${g.height} (origin ${g.origin.join(",")}, ${g.tileSize}u/tile)`);
-  for (const op of ops) {
-    if (op.op === "fill") {
-      fill(g, { height: op.level, water: op.water, tileset: op.tileset });
-      log.push(`fill height=${op.level ?? "-"} water=${op.water ?? "-"} tileset=${op.tileset ?? "-"}`);
-      continue;
-    }
-    const shape = toShape(op.shape);
-    if (op.op === "height") log.push(`height ${op.level} (${op.dome ? "dome" : "flat"}) -> ${setHeight(g, shape, +op.level, !!op.dome)} verts`);
-    else if (op.op === "water") log.push(`water=${op.on !== false} (invert=${!!op.invert}) -> ${setWater(g, shape, op.on !== false, !!op.invert)} verts`);
-    else if (op.op === "tileset") log.push(`tileset=${op.tileset} -> ${setTileset(g, shape, +op.tileset)} cells`);
-    else throw new Error(`unknown terrain op "${op.op}" (height|water|tileset|fill)`);
-  }
-  return applyTileGrid(textIn, g);
-}
+const scalar = z.union([z.string(), z.number(), z.boolean()]);
+const legacyEntityInputSchema = z.object({
+  classname: z.string().min(1),
+  origin: z.string().min(1).optional(),
+  angles: z.string().min(1).optional(),
+  properties: z.record(scalar).optional(),
+}).strict();
+const legacyPathInputSchema = managedMapPathInputSchema.extend({
+  speed: scalar.optional(),
+});
+type LegacyEntityInput = z.infer<typeof legacyEntityInputSchema>;
+type WaypointPathInput = z.infer<typeof legacyPathInputSchema>;
 
 export interface WaypointEntity {
   classname: string;
@@ -52,14 +44,16 @@ export interface WaypointEntity {
   properties: Record<string, string>;
 }
 
-export function expandWaypointPath(path: any): WaypointEntity[] {
-  const points: number[][] = path.points ?? [];
-  const startIndex = Number.isInteger(path.startIndex) ? path.startIndex : 0;
+export function expandWaypointPath(path: WaypointPathInput): WaypointEntity[] {
+  const points = path.points ?? [];
+  const startIndex = Number.isInteger(path.startIndex) ? path.startIndex! : 0;
   const classname = path.classname ?? "path_track";
   return points.map((point, offset) => {
     const index = startIndex + offset;
     const properties: Record<string, string> = {
-      ...(path.properties ?? {}),
+      ...Object.fromEntries(
+        Object.entries(path.properties ?? {}).map(([key, value]) => [key, String(value)]),
+      ),
       targetname: `${path.name}_${index}`,
     };
     if (offset < points.length - 1) properties.target = `${path.name}_${index + 1}`;
@@ -69,11 +63,30 @@ export function expandWaypointPath(path: any): WaypointEntity[] {
   });
 }
 
-function placeEntities(textIn: string, entities: any[], paths_: any[], log: string[]): string {
+function placeEntities(
+  textIn: string,
+  entities: LegacyEntityInput[],
+  paths_: WaypointPathInput[],
+  log: string[],
+): string {
   let txt = textIn;
   let node = maxNodeId(txt);
   for (const e of entities ?? []) {
-    txt = insertEntity(txt, buildEntityBlock({ classname: e.classname, origin: e.origin, angles: e.angles, properties: e.properties }, ++node));
+    const normalizedProperties = e.properties
+      ? Object.fromEntries(Object.entries(e.properties).map(([key, value]) => [key, String(value)]))
+      : undefined;
+    txt = insertEntity(
+      txt,
+      buildEntityBlock(
+        {
+          classname: e.classname,
+          origin: e.origin,
+          angles: e.angles,
+          properties: normalizedProperties,
+        },
+        ++node,
+      ),
+    );
     log.push(`entity ${e.classname} @ ${e.origin ?? "0 0 0"}`);
   }
   for (const p of paths_ ?? []) {
@@ -359,50 +372,86 @@ export function registerMapGenTools(server: McpServer) {
     {
       title: "Shape map terrain",
       description:
-        "Apply terrain operations to a map's Dota tile grid. Coordinates are in TILE units (0..gridWidth, default grid " +
-        "64x64; world = origin + tile*256). Ops: {op:'height', shape, level, dome?}, {op:'water', shape, on?, invert?}, " +
-        "{op:'tileset', shape, tileset}, {op:'fill', level?, water?, tileset?}. Shapes: {kind:'rect',x0,y0,x1,y1}, " +
-        "{kind:'circle',cx,cy,r}, {kind:'ring',cx,cy,rInner,rOuter}, {kind:'path',points:[[x,y]...],width}. heights are " +
-        "integer levels (~0-3 typical). Recompile after (or pass recompile=true).",
+        "Apply the same validated terrain operations used by map specifications and map_sync_contract. Coordinates " +
+        "are in tile units. Supports fill, height, water, tileset, and ramp operations over rect, circle, ring, path, " +
+        "polygon, or managedPath shapes. managedPath shapes resolve against the project's map contract. Valid cliff " +
+        "orientation and tile recipes are regenerated automatically. Recompile after (or pass recompile=true).",
       inputSchema: {
         projectRoot: z.string().optional(),
         map: z.string(),
-        ops: z.array(z.any()).describe("Array of terrain ops (see description)."),
+        ops: z.array(terrainOperationInputSchema).min(1).describe("Validated terrain operations."),
+        contractFile: z
+          .string()
+          .optional()
+          .describe("Contract used to resolve managedPath shapes. Defaults to .dota-workshop/map-contract.json."),
         recompile: z.boolean().optional(),
       },
     },
-    guard(async ({ projectRoot, map, ops, recompile }): Promise<ToolResult> => {
+    guard(async ({ projectRoot, map, ops, contractFile, recompile }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
       const p = projectMapPaths(dota, project, map);
       if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}. Create it with map_create or map_build.`);
       const log: string[] = [];
-      const txt = applyTerrainOps(await vmapToText(dota.dmxconvertExe, p.contentVmap), ops, log);
-      await textToVmap(dota.dmxconvertExe, txt, p.contentVmap);
+      const operations = parseManagedTerrain(ops, "ops", `map_terrain(${map})`) ?? [];
+      const needsManagedPaths = operations.some(
+        (operation) => operation.op !== "fill" && operation.shape.kind === "managedPath",
+      );
+      const contract = needsManagedPaths
+        ? await loadMapContract(project.root, map, contractFile)
+        : undefined;
+      if (needsManagedPaths && !contract) {
+        return error(`Terrain operations reference managedPath shapes, but no map contract was found under ${project.root}.`);
+      }
+      const current = await vmapToText(dota.dmxconvertExe, p.contentVmap);
+      const result = reconcileMapTerrain(current, operations, contract?.contract.managedPaths ?? []);
+      if (result.changed) await textToVmap(dota.dmxconvertExe, result.text, p.contentVmap);
+      log.push(
+        `terrain ${result.changed ? "updated" : "unchanged"}: ` +
+          `${result.changedHeightVertices} height, ${result.changedWaterVertices} water, ` +
+          `${result.changedTilesetCells} tileset, ${result.changedOrientationCells} orientation, ` +
+          `${result.changedConfigurationCells} recipe, ${result.changedPathEdges} path-edge cells`,
+      );
       if (recompile) {
         const res = await compileProjectMap(dota, project, map);
         log.push(res.code === 0 ? `recompiled -> ${p.gameVpk}` : `recompile FAILED (${res.code})`);
       }
-      return json({ map, ops: ops.length }, log.join("\n"));
+      return json(
+        {
+          map,
+          changed: result.changed,
+          operations: result.operations,
+          changedHeightVertices: result.changedHeightVertices,
+          changedWaterVertices: result.changedWaterVertices,
+          changedTilesetCells: result.changedTilesetCells,
+          changedOrientationCells: result.changedOrientationCells,
+          changedConfigurationCells: result.changedConfigurationCells,
+          changedPathEdges: result.changedPathEdges,
+        },
+        log.join("\n"),
+      );
     }),
   );
 
   server.registerTool(
     "map_build",
     {
-      title: "Build a map from a spec",
+      title: "Build a map from a validated specification",
       description:
-        "Generate a whole playable map in one call: clone the template, shape terrain, place entities, lay waypoint " +
-        "paths, register it, and (optionally) compile. This is what a natural-language map request compiles down to. " +
-        "Terrain coords are TILE units; entity/path coords are WORLD units (use map_tile_to_world math: world = -8192 + " +
-        "tile*256). See map_terrain for terrain op/shape forms.",
+        "Generate a whole playable map in one call. Prefer specification, which uses the same validated desired-state " +
+        "format as map_sync_contract: managedTerrain, managedEntities, managedAbsentEntities, managedPaths, and " +
+        "requiredEntities. Legacy terrain/entities/paths remain supported. Terrain coordinates are tile units; " +
+        "entity/path coordinates are world units.",
       inputSchema: {
         projectRoot: z.string().optional(),
         name: z.string(),
         maxPlayers: z.number().int().min(1).max(24).optional(),
-        terrain: z.array(z.any()).optional().describe("Terrain ops (tile coords)."),
-        entities: z.array(z.any()).optional().describe("[{classname, origin:'x y z', angles?, properties?}] (world coords)."),
-        paths: z.array(z.any()).optional().describe(
+        specification: mapSpecificationInputSchema
+          .optional()
+          .describe("Preferred desired-state map specification; uses the map contract format."),
+        terrain: z.array(terrainOperationInputSchema).optional().describe("Legacy terrain operations (tile coords)."),
+        entities: z.array(legacyEntityInputSchema).optional().describe("Legacy entity list (world coords)."),
+        paths: z.array(legacyPathInputSchema).optional().describe(
           "[{name, points:[[x,y,z]...], classname?, startIndex?, loop?, speed?, properties?}] -> chained waypoints. " +
             "Defaults to path_track starting at _0; Dota creep routes usually use classname:'path_corner', startIndex:1.",
         ),
@@ -410,8 +459,11 @@ export function registerMapGenTools(server: McpServer) {
         overwrite: z.boolean().optional(),
       },
     },
-    guard(async ({ projectRoot, name, maxPlayers, terrain, entities, paths: paths_, compile, overwrite }): Promise<ToolResult> => {
+    guard(async ({ projectRoot, name, maxPlayers, specification, terrain, entities, paths: paths_, compile, overwrite }): Promise<ToolResult> => {
       if (!NAME_RE.test(name)) return error(`Invalid map name "${name}".`);
+      if (specification && ((terrain?.length ?? 0) || (entities?.length ?? 0) || (paths_?.length ?? 0))) {
+        return error("Use specification or legacy terrain/entities/paths, not both.");
+      }
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
       const p = projectMapPaths(dota, project, name);
@@ -423,8 +475,38 @@ export function registerMapGenTools(server: McpServer) {
 
       const log: string[] = [`cloned + registered "${name}"`];
       let txt = await vmapToText(dota.dmxconvertExe, p.contentVmap);
-      if (terrain && terrain.length) txt = applyTerrainOps(txt, terrain, log);
-      if ((entities && entities.length) || (paths_ && paths_.length)) txt = placeEntities(txt, entities ?? [], paths_ ?? [], log);
+      if (specification) {
+        const parsed = parseMapSpecification(specification, `map_build specification for "${name}"`);
+        if (parsed.map && parsed.map !== name) {
+          return error(`Map specification is for "${parsed.map}", not "${name}".`);
+        }
+        const result = reconcileMapSpecification(txt, parsed);
+        if (result.entities.conflicts.length) {
+          return error(`Map specification has ambiguous duplicate targetnames: ${result.entities.conflicts.join(", ")}`);
+        }
+        txt = result.text;
+        log.push(
+          `specification: add ${result.entities.added.length}, update ${result.entities.updated.length}, ` +
+            `remove ${result.entities.removed.length}; terrain ${result.terrain.changed ? "changed" : "unchanged"}`,
+        );
+      } else {
+        if (terrain?.length) {
+          const operations = parseManagedTerrain(terrain, "terrain", `map_build(${name})`) ?? [];
+          const pathReferences = (paths_ ?? []).map((managedPath) => ({
+            name: managedPath.name,
+            points: managedPath.points,
+          }));
+          const result = reconcileMapTerrain(txt, operations, pathReferences);
+          txt = result.text;
+          log.push(
+            `terrain: ${operations.length} operations; ${result.changedHeightVertices} height, ` +
+              `${result.changedConfigurationCells} recipe, ${result.changedPathEdges} path-edge changes`,
+          );
+        }
+        if (entities?.length || paths_?.length) {
+          txt = placeEntities(txt, entities ?? [], paths_ ?? [], log);
+        }
+      }
       await textToVmap(dota.dmxconvertExe, txt, p.contentVmap);
 
       if (compile) {

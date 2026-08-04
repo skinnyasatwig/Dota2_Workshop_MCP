@@ -96,7 +96,7 @@ export function managedEntitiesForContract(contract: MapContract): ManagedMapEnt
   ];
 }
 
-function validateContract(value: unknown, path: string): MapContract {
+export function parseMapContract(value: unknown, path: string): MapContract {
   if (!value || typeof value !== "object") throw new Error(`Map contract must be a JSON object: ${path}`);
   const raw = value as Record<string, unknown>;
   if (raw.map !== undefined && typeof raw.map !== "string") throw new Error(`Map contract "map" must be a string: ${path}`);
@@ -428,7 +428,7 @@ export async function loadMapContract(
     if (contractFile) throw new Error(`Map contract not found: ${path}`);
     return undefined;
   }
-  const contract = validateContract(JSON.parse(await readFile(path, "utf8")), path);
+  const contract = parseMapContract(JSON.parse(await readFile(path, "utf8")), path);
   if (contract.map && contract.map !== map) {
     throw new Error(`Map contract ${path} is for "${contract.map}", not "${map}".`);
   }

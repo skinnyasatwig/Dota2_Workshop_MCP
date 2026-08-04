@@ -11,7 +11,6 @@ import {
   insertEntity,
   parseMapEntities,
   patchMapEntities,
-  reconcileMapEntities,
   rewriteWaypointPath,
   absentSelectorLabel,
   matchesAbsentSelector,
@@ -21,6 +20,7 @@ import { compileProjectMap, projectMapPaths } from "../dota/map-project.js";
 import { loadMapContract, managedEntitiesForContract } from "../dota/map-contract.js";
 import { inspectMapText } from "../dota/map-inspect.js";
 import { reconcileMapTerrain } from "../dota/map-terrain.js";
+import { reconcileMapSpecification } from "../dota/map-spec.js";
 import { inspectMapArtifactFreshness } from "../dota/map-freshness.js";
 import {
   validateDotaBuildingEntities,
@@ -329,25 +329,18 @@ export function registerMapTools(server: McpServer) {
       }
 
       const current = await vmapToText(dota.dmxconvertExe, p.contentVmap);
-      const prunePrefixes = (resolved.contract.managedPaths ?? []).map((path) => path.name);
-      const result = reconcileMapEntities(current, specs, {
-        prunePrefixes,
-        absentEntities,
-      });
+      const synchronization = reconcileMapSpecification(current, resolved.contract);
+      const result = synchronization.entities;
       if (result.conflicts.length) {
         return error(
           `No changes written. Duplicate targetnames make these managed entities ambiguous: ${result.conflicts.join(", ")}`,
         );
       }
 
-      const terrain = reconcileMapTerrain(
-        result.text,
-        terrainOperations,
-        resolved.contract.managedPaths ?? [],
-      );
+      const terrain = synchronization.terrain;
       const changedEntities = result.added.length + result.updated.length + result.removed.length;
       const changed = changedEntities + (terrain.changed ? 1 : 0);
-      if (apply && changed) await textToVmap(dota.dmxconvertExe, terrain.text, p.contentVmap);
+      if (apply && changed) await textToVmap(dota.dmxconvertExe, synchronization.text, p.contentVmap);
       const steps = [
         `${apply ? "Synchronized" : "Previewed"} ${specs.length} desired entities and ` +
           `${absentEntities.length} absence selectors in "${map}".`,

@@ -11,7 +11,7 @@ template](https://github.com/ModDota/TypeScript-Addon-Template) it scaffolds **T
 wiring) and drives the template's `npm` scripts. It also has a raw-Lua + `resourcecompiler.exe`
 fallback for non-tstl addons.
 
-> Status: working — **107 tools**, end-to-end tested. It can search the Workshop for custom games by
+> Status: working — **116 tools**, end-to-end tested. It can search the Workshop for custom games by
 > name and download them outside the client (SteamCMD) to study, generates whole playable maps from a spec
 > (terrain shaping via the Dota tile grid + entities + waypoint paths → compile → .vpk), previews them
 > top-down as an image without launching the game, edits KV1 + KV3 (soundevents/particles) data, reads
@@ -206,12 +206,14 @@ shipping game do X?"). Stored under `~/.dota2-workshop-mcp/reflib` (override `DO
 Turn a request like *"a small square map with a central platform, ringed by a road the monsters
 walk — tower defense"* into a real map:
 
-- **`map_build`** — one call: clone the template, shape terrain, place entities, lay waypoint paths,
-  register and compile. Terrain ops work on the **Dota tile grid** (`verticesHeight` / `verticesWater` /
-  `cellsTileSet`) over shapes (`rect` / `circle` / `ring` / `path`): raise platforms, carve roads
-  (different tileset), flood water moats, etc. Waypoint paths can choose their entity class and starting
-  index; Dota creep routes typically use `classname: "path_corner"` and `startIndex: 1`.
-- **`map_terrain`** — apply terrain ops to an existing map.
+- **`map_build`** — one call: clone the template, apply one validated desired-state map specification,
+  register, and optionally compile it. The preferred `specification` object uses the same
+  `managedTerrain` / `managedEntities` / `managedPaths` vocabulary as `map_sync_contract`; legacy
+  `terrain` / `entities` / `paths` inputs remain compatible. See
+  [`examples/map-specification.json`](examples/map-specification.json) for a complete starter.
+- **`map_terrain`** — apply the shared validated terrain vocabulary to an existing map. It supports
+  `fill` / `height` / `water` / `tileset` / `ramp` over `rect` / `circle` / `ring` / `path` /
+  `polygon` / `managedPath` shapes and regenerates valid cliff orientation and tile recipes.
 - **`map_preview`** — render the map top-down to an **image straight from the data**, no game launch —
   the fast way to iterate on a layout (water = blue, road = tan, grass = green, shaded by height).
 - **`entity_catalog`** — the placeable-entity reference (spawners, `path_track` waypoints, triggers,
@@ -303,8 +305,8 @@ playable `.vpk` — a pipeline verified end to end.
   final Valve navmesh behavior still needs compilation or an in-game self-test.
 - **`map_patch_entities`** — batch-convert named layout markers into real gameplay entities and
   update their class, name, transform, and keyvalues without disturbing unrelated map data.
-- **`map_sync_contract`** — preview or apply desired-state `managedEntities` and compact
-  `managedPaths` from `.dota-workshop/map-contract.json`. It creates missing named entities, expands
+- **`map_sync_contract`** — preview or apply the same desired-state map specification accepted by
+  `map_build`, conventionally stored in `.dota-workshop/map-contract.json`. It creates missing named entities, expands
   complete linked waypoint chains, repairs drifted class/position/rotation/keyvalues, prunes obsolete
   numbered nodes owned by those paths, preserves unrelated map data, and refuses ambiguous duplicate
   target names. Preview is the default; pass `apply:true` to write and `recompile:true` to compile.
@@ -329,8 +331,8 @@ the terminal node explicitly removes stale `target` values (`startIndex`, `class
 `angles`, and shared `properties` are optional). `maxSegmentLength` rejects accidental large jumps;
 `mirrorOf` plus `mirrorAxis` (`x`, `y`, or `xy`) enforces exact route symmetry. `map_validate`
 checks all expanded entities. `managedTerrain` is an ordered list of the same idempotent tile-grid
-operations accepted by `map_terrain`: `fill`, `height`, `water`, and `tileset`, using `rect`,
-`circle`, `ring`, or `path` shapes in tile coordinates. Contract sync previews exact height-vertex,
+operations accepted by `map_terrain`: `fill`, `height`, `water`, `tileset`, and `ramp`, using `rect`,
+`circle`, `ring`, `path`, or `polygon` shapes in tile coordinates. Contract sync previews exact height-vertex,
 water-vertex, and tileset-cell drift before writing; undeclared terrain remains untouched unless the
 contract explicitly uses `fill`. A terrain shape can also use
 `{"kind":"managedPath","name":"path_name","width":2}` to derive its tile-space stroke from an
