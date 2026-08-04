@@ -6,6 +6,7 @@ import {
   DOTA_OBSTRUCTION_BROAD_PHASE_RADIUS,
   physicalObstacleContainsPoint,
   resolveMapCollisionObstacles,
+  sourceAngleMatrix,
 } from "../src/dota/map-collision.js";
 import { ParsedMapEntity } from "../src/dota/vmap.js";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
@@ -56,6 +57,41 @@ test("2D segment distance supports conservative route proximity checks", () => {
   assert.equal(distanceToSegment2d([3, 4], [0, 0], [0, 0]), 5);
 });
 
+function assertMatrixNear(actual: number[][], expected: number[][]): void {
+  for (const [row, expectedRow] of expected.entries()) {
+    for (const [column, expectedValue] of expectedRow.entries()) {
+      assert.ok(
+        Math.abs(actual[row][column] - expectedValue) < 1e-9,
+        `matrix[${row}][${column}] expected ${expectedValue}, got ${actual[row][column]}`,
+      );
+    }
+  }
+}
+
+function assertPointsNear(
+  actual: readonly [number, number][],
+  expected: readonly [number, number][],
+): void {
+  assert.equal(actual.length, expected.length);
+  for (const [index, expectedPoint] of expected.entries()) {
+    assert.ok(Math.abs(actual[index][0] - expectedPoint[0]) < 1e-9);
+    assert.ok(Math.abs(actual[index][1] - expectedPoint[1]) < 1e-9);
+  }
+}
+
+test("Source QAngle matrices preserve Valve pitch and roll conventions", () => {
+  assertMatrixNear(sourceAngleMatrix([90, 0, 0]), [
+    [0, 0, 1],
+    [0, 1, 0],
+    [-1, 0, 0],
+  ]);
+  assertMatrixNear(sourceAngleMatrix([0, 0, 90]), [
+    [1, 0, 0],
+    [0, 0, -1],
+    [0, 1, 0],
+  ]);
+});
+
 test("solid props are promoted only by real model PHYS bounds", async () => {
   let inspections = 0;
   const prop = entity("prop_static", "physical_prop", {
@@ -92,9 +128,64 @@ test("solid props are promoted only by real model PHYS bounds", async () => {
   assert.equal(inspections, 1, "the same model is inspected once per map");
   assert.equal(obstacles[0].confidence, "physical-model-bounds");
   assert.equal(obstacles[1].confidence, "physical-model-bounds");
-  assert.equal(obstacles[2].confidence, "unknown-model-bounds");
+  assert.equal(obstacles[2].confidence, "physical-model-bounds");
   assert.equal(physicalObstacleContainsPoint(obstacles[0], [256, 512], 140), true);
   assert.equal(physicalObstacleContainsPoint(obstacles[0], [400, 512], 140), false);
+});
+
+test("pitched and rolled PHYS bounds project all eight corners conservatively", async () => {
+  const pitched = entity("prop_static", "pitched_prop", {
+    solid: "6",
+    model: "models/props/tilted.vmdl",
+  });
+  pitched.origin = "0 0 0";
+  pitched.angles = "90 0 0";
+  const rolled = { ...pitched, targetname: "rolled_prop", angles: "0 0 90", properties: {
+    ...pitched.properties,
+    targetname: "rolled_prop",
+  } };
+  const compound = { ...pitched, targetname: "compound_prop", angles: "35 25 15", properties: {
+    ...pitched.properties,
+    targetname: "compound_prop",
+  } };
+  const malformed = { ...pitched, targetname: "malformed_prop", angles: "not angles", properties: {
+    ...pitched.properties,
+    targetname: "malformed_prop",
+  } };
+  const obstacles = await resolveMapCollisionObstacles(
+    [pitched, rolled, compound, malformed],
+    "test.vpk",
+    async (_vpk, model) => ({
+      model,
+      status: "physical-bounds",
+      bounds: [{ min: [-1, -2, 0], max: [1, 2, 4] }],
+      source: "vrf-phys",
+      fromCache: false,
+      detail: "one PHYS hull",
+    }),
+  );
+
+  assertPointsNear(obstacles[0].physicalFootprints![0].points, [
+    [0, -2],
+    [4, -2],
+    [4, 2],
+    [0, 2],
+  ]);
+  assert.ok(Math.abs(obstacles[0].physicalFootprints![0].minZ + 1) < 1e-9);
+  assert.ok(Math.abs(obstacles[0].physicalFootprints![0].maxZ - 1) < 1e-9);
+  assert.equal(physicalObstacleContainsPoint(obstacles[0], [2, 0], 0), true);
+
+  assertPointsNear(obstacles[1].physicalFootprints![0].points, [
+    [-1, -4],
+    [1, -4],
+    [1, 0],
+    [-1, 0],
+  ]);
+  assert.ok(Math.abs(obstacles[1].physicalFootprints![0].minZ + 2) < 1e-9);
+  assert.ok(Math.abs(obstacles[1].physicalFootprints![0].maxZ - 2) < 1e-9);
+  assert.equal(obstacles[2].physicalFootprints?.[0].points.length, 6);
+  assert.equal(obstacles[3].confidence, "unknown-model-bounds");
+  assert.match(obstacles[3].reason, /malformed or degenerate transform/);
 });
 
 test("loose compiled addon models take precedence over the base VPK", async () => {

@@ -16,7 +16,7 @@ export type MapCollisionConfidence =
   | "unknown-model-bounds";
 
 export interface MapCollisionFootprint {
-  /** Conservative oriented rectangle derived from one physical hull's local bounds. */
+  /** Conservative convex XY projection derived from one physical hull's local bounds. */
   points: [number, number][];
   minZ: number;
   maxZ: number;
@@ -161,43 +161,120 @@ export interface MapCollisionResolutionOptions {
   inspectCompiledModel?: CompiledModelPhysicsInspector;
 }
 
+export type SourceAngleMatrix = [
+  [number, number, number],
+  [number, number, number],
+  [number, number, number],
+];
+
+/**
+ * Build Valve's left-handed QAngle matrix for [pitch, yaw, roll] in degrees.
+ *
+ * The formula and multiplication order match Valve's published AngleMatrix implementation:
+ * https://github.com/ValveSoftware/source-sdk-2013/blob/master/src/mathlib/mathlib_base.cpp
+ */
+export function sourceAngleMatrix(
+  angles: readonly [number, number, number],
+): SourceAngleMatrix {
+  const pitch = (angles[0] * Math.PI) / 180;
+  const yaw = (angles[1] * Math.PI) / 180;
+  const roll = (angles[2] * Math.PI) / 180;
+  const sp = Math.sin(pitch);
+  const cp = Math.cos(pitch);
+  const sy = Math.sin(yaw);
+  const cy = Math.cos(yaw);
+  const sr = Math.sin(roll);
+  const cr = Math.cos(roll);
+  const crcy = cr * cy;
+  const crsy = cr * sy;
+  const srcy = sr * cy;
+  const srsy = sr * sy;
+  return [
+    [cp * cy, sp * srcy - crsy, sp * crcy + srsy],
+    [cp * sy, sp * srsy + crcy, sp * crsy - srcy],
+    [-sp, sr * cp, cr * cp],
+  ];
+}
+
+function transformSourcePoint(
+  matrix: SourceAngleMatrix,
+  point: readonly [number, number, number],
+  origin: readonly [number, number, number],
+): [number, number, number] {
+  return [
+    origin[0] + matrix[0][0] * point[0] + matrix[0][1] * point[1] + matrix[0][2] * point[2],
+    origin[1] + matrix[1][0] * point[0] + matrix[1][1] * point[1] + matrix[1][2] * point[2],
+    origin[2] + matrix[2][0] * point[0] + matrix[2][1] * point[1] + matrix[2][2] * point[2],
+  ];
+}
+
+function convexHull2d(points: readonly [number, number][]): [number, number][] {
+  const epsilon = 1e-9;
+  const sorted = [...points]
+    .sort((left, right) => left[0] - right[0] || left[1] - right[1])
+    .filter((point, index, all) => index === 0 ||
+      Math.abs(point[0] - all[index - 1][0]) > epsilon ||
+      Math.abs(point[1] - all[index - 1][1]) > epsilon);
+  if (sorted.length < 3) return [];
+  const cross = (
+    origin: readonly [number, number],
+    left: readonly [number, number],
+    right: readonly [number, number],
+  ) => (left[0] - origin[0]) * (right[1] - origin[1]) -
+    (left[1] - origin[1]) * (right[0] - origin[0]);
+  const half = (input: readonly [number, number][]) => {
+    const output: [number, number][] = [];
+    for (const point of input) {
+      while (output.length >= 2 && cross(output.at(-2)!, output.at(-1)!, point) <= epsilon) {
+        output.pop();
+      }
+      output.push(point);
+    }
+    return output;
+  };
+  const lower = half(sorted);
+  const upper = half([...sorted].reverse());
+  return [...lower.slice(0, -1), ...upper.slice(0, -1)];
+}
+
 function transformedFootprints(
   entity: ParsedMapEntity,
   bounds: readonly ModelPhysicsBounds[],
 ): MapCollisionFootprint[] | undefined {
   const origin = vector3(entity.origin);
   if (!origin) return undefined;
-  const angles = vector3(entity.angles) ?? [0, 0, 0];
-  // A full pitched/rolled Source transform is easy to get subtly wrong. Refuse to promote
-  // those props rather than claiming a trustworthy footprint from a yaw-only projection.
-  if (Math.abs(angles[0]) > 1e-6 || Math.abs(angles[2]) > 1e-6) return undefined;
-  const scales = vector3(entity.scales) ?? [1, 1, 1];
-  const yaw = (angles[1] * Math.PI) / 180;
-  const cos = Math.cos(yaw);
-  const sin = Math.sin(yaw);
-  return bounds.map((localBounds) => {
+  const angles: [number, number, number] | undefined = entity.angles === undefined
+    ? [0, 0, 0]
+    : vector3(entity.angles);
+  const scales: [number, number, number] | undefined = entity.scales === undefined
+    ? [1, 1, 1]
+    : vector3(entity.scales);
+  if (!angles || !scales || scales.some((scale) => Math.abs(scale) <= 1e-9)) return undefined;
+  const matrix = sourceAngleMatrix(angles);
+  const footprints = bounds.map((localBounds) => {
     const xs = [localBounds.min[0] * scales[0], localBounds.max[0] * scales[0]];
     const ys = [localBounds.min[1] * scales[1], localBounds.max[1] * scales[1]];
-    const localCorners: [number, number][] = [
-      [xs[0], ys[0]],
-      [xs[1], ys[0]],
-      [xs[1], ys[1]],
-      [xs[0], ys[1]],
-    ];
-    const zs = [
-      origin[2] + localBounds.min[2] * scales[2],
-      origin[2] + localBounds.max[2] * scales[2],
-    ];
+    const zs = [localBounds.min[2] * scales[2], localBounds.max[2] * scales[2]];
+    const transformed: [number, number, number][] = [];
+    for (const x of xs) {
+      for (const y of ys) {
+        for (const z of zs) transformed.push(transformSourcePoint(matrix, [x, y, z], origin));
+      }
+    }
+    if (transformed.some((point) => point.some((coordinate) => !Number.isFinite(coordinate)))) {
+      return undefined;
+    }
+    const points = convexHull2d(transformed.map((point) => [point[0], point[1]]));
+    if (points.length < 3) return undefined;
     return {
-      points: localCorners.map(([x, y]) => [
-        origin[0] + x * cos - y * sin,
-        origin[1] + x * sin + y * cos,
-      ]),
-      minZ: Math.min(...zs),
-      maxZ: Math.max(...zs),
+      points,
+      minZ: Math.min(...transformed.map((point) => point[2])),
+      maxZ: Math.max(...transformed.map((point) => point[2])),
       localBounds,
     };
   });
+  if (footprints.some((footprint) => footprint === undefined)) return undefined;
+  return footprints as MapCollisionFootprint[];
 }
 
 /**
@@ -263,7 +340,7 @@ export async function resolveMapCollisionObstacles(
       }
       const footprints = transformedFootprints(entity, inspection.bounds);
       if (!footprints?.length) {
-        obstacle.reason = "Physical bounds exist, but pitched/rolled or malformed transforms cannot be projected safely.";
+        obstacle.reason = "Physical bounds exist, but a malformed or degenerate transform cannot be projected safely.";
         continue;
       }
       obstacle.confidence = "physical-model-bounds";
