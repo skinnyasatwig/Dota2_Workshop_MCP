@@ -12,10 +12,12 @@ export interface LaunchOpts {
   dev?: boolean; // -dev -uidev (developer/UI dev mode)
   vconPort?: number; // -vconport <port> (pins the VConsole listener port)
   cheats?: boolean; // +sv_cheats 1 +developer 1 (default true when a map is launched)
+  renderer?: "dx11" | "vulkan"; // checked renderer override for startup diagnostics
 }
 
 export function buildLaunchArgs(o: LaunchOpts): string[] {
   const args = ["-novid"];
+  if (o.renderer) args.push(`-${o.renderer}`);
   if (o.tools !== false) args.push("-tools");
   args.push("-addon", o.addon);
   if (o.console !== false) args.push("-console");

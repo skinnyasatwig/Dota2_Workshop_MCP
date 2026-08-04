@@ -2,7 +2,7 @@
 
 Items are ordered by leverage. “Human” means the MCP should not guess.
 
-1. **Supervised engine-readiness check (Human + engine).** Open the compiled 3v3 map once and observe whether it reaches hero selection, stalls on a modal, or remains in the tools shell. Then run one diagnostic engine navigation test and use its preserved console/window evidence.
+1. **Restore NVIDIA driver profiles, then rerun readiness (Human + engine).** The probe proved that Dota is blocked before its game window exists by `NVAPI_ACCESS_DENIED`; both the configured renderer and an explicit Vulkan run fail the same way. Restore the Dota application profile and global 3D profile to NVIDIA defaults, resolve the visible Steam Cloud warning, then run one readiness probe followed by one GridNav test. Do not keep relaunching until the profile repair is complete.
 2. **Safe solid-volume authoring (Valve-format research).** Add checked brush/mesh volume recipes for camp bounds, no-ward volumes, base blockers, vision blockers, and trigger areas. Refuse unknown solid layouts.
 3. **Engine navigation fixture (Engine).** Once readiness is resolved, save a known-good tiny map fixture whose GridNav endpoint and segment results are stable across runs.
 4. **Valve recipe versioning (Valve-format research).** Record Dota build/version fingerprints beside terrain, cliff, ramp, and prefab recipes; warn when the installed game differs from the last verification.

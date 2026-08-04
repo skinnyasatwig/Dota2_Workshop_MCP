@@ -4,6 +4,7 @@ This is the plain-language answer to â€œwhat can the MCP do without Hammer now?â
 
 | Capability | Status | What it means | Remaining limit |
 |---|---|---|---|
+| Engine readiness diagnosis | Ready and demonstrated | `map_engine_readiness_probe` performs one command-free diagnostic launch, records game-state transitions, console evidence, dialogs, and a screenshot, then always shuts down. Fatal startup lines and blocking dialogs stop observation early. | The current PC blocks Dota before map load with NVIDIA `NVAPI_ACCESS_DENIED`; an NVIDIA profile reset is a human/system prerequisite. |
 | One map specification | Ready | Build, terrain, sync, preview, validation, and engine-route tools read the same checked JSON contract. | A malformed or ambiguous contract is rejected instead of guessed. |
 | Terrain generation | Ready | Rectangles, circles, rings, paths, polygons, named regions, water, height, tilesets, cliffs, and ramps can be generated repeatably. | Arbitrary Source 2 polygon meshes still need Hammer or more Valve-format research. |
 | Reuse and symmetry | Ready | Regions, paths, and whole components can be mirrored and placed repeatedly with automatic name isolation. | Visual composition still needs a human eye. |

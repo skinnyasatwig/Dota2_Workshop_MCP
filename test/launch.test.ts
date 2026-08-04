@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildDirectDotaLaunchTarget, buildDotaLaunchTarget } from "../src/dota/launch.js";
+import { buildDirectDotaLaunchTarget, buildDotaLaunchTarget, buildLaunchArgs } from "../src/dota/launch.js";
 
 const root = String.raw`C:\Program Files (x86)\Steam\steamapps\common\dota 2 beta`;
 const dota = String.raw`C:\Program Files (x86)\Steam\steamapps\common\dota 2 beta\game\bin\win64\dota2.exe`;
@@ -58,4 +58,14 @@ test("explicit direct launch keeps the installed executable and arguments", () =
   assert.equal(target.executable, dota);
   assert.deepEqual(target.args, args);
   assert.equal(target.cwd, String.raw`C:\Program Files (x86)\Steam\steamapps\common\dota 2 beta\game\bin\win64`);
+});
+
+test("renderer overrides are checked and precede tools startup", () => {
+  assert.deepEqual(buildLaunchArgs({ addon: "example", renderer: "vulkan" }).slice(0, 4), [
+    "-novid",
+    "-vulkan",
+    "-tools",
+    "-addon",
+  ]);
+  assert.ok(buildLaunchArgs({ addon: "example", renderer: "dx11" }).includes("-dx11"));
 });

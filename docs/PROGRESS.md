@@ -10,11 +10,14 @@ Last updated: 2026-08-04
 4. `e348177` — added reusable components, checked Dota structures, Valve terrain/prefab recipes, and official FGD validation.
 5. `bdec2f0` — added guarded one-launch GridNav testing and automatic shutdown.
 6. `b877b03` — added a bounded Steam-to-direct launch fallback when Steam ignores `-applaunch`.
+7. Working tree — added and live-tested a dedicated one-launch readiness probe with state timeline,
+   console filtering, early fatal/modal detection, dialog/process diagnosis, screenshot capture, checked
+   DX11/Vulkan overrides, and mandatory shutdown.
 
 ## Current verification record
 
 - TypeScript build passes.
-- 167 unit and integration tests pass.
+- 172 unit and integration tests pass.
 - MCP smoke suite: 193 passed, 0 failed, 1 skipped because the remote Steam Workshop search service was unavailable.
 - Real Dota 3v3 contract: 86 managed entities, 4 managed paths, 97 terrain operations, and zero desired-state drift.
 - Offline 3v3 terrain: zero holes; only two known isolated regions (a tiny shelf and a deliberate off-map strip).
@@ -37,4 +40,11 @@ The guarded runner was exercised without leaving Dota open:
 - The addon did not reach game state 3 before the fixed deadline, so Valve `GridNav` route results remain uncollected.
 - Three attempts were the stated limit. No further blind engine retries were made.
 
-The tool now preserves the last DebugSDK ping, recent console output, and pre-shutdown Dota window diagnosis on readiness failures, so the next supervised attempt will be evidence-rich rather than repetitive.
+The navigation tool preserves the last DebugSDK ping, recent console output, and pre-shutdown Dota window diagnosis on readiness failures. The separate readiness-only probe gathers a full state timeline, filtered startup evidence, hidden/visible dialog diagnosis, and a screenshot without issuing gameplay or GridNav commands.
+
+The first live readiness run found the actual pre-map blocker: Dota displayed `Unable To Start Game` with
+`NVIDIA driver profile error at NVAPI_ACCESS_DENIED`. It never created a game window or loaded the addon.
+The initial probe retained the complete evidence and shut Dota down. A targeted Vulkan run produced the
+same NVIDIA error, proving it was not a DirectX-only failure; after early-failure detection was added, the
+observer stopped in 605 ms and the entire launched process was closed in 24 seconds. No further engine
+retries should occur until the user restores the Dota and global NVIDIA profiles to defaults.

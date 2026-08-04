@@ -39,6 +39,12 @@ import { restartGame, shutdownGame } from "../dota/game-session.js";
 import { defaultVconPort, getVConsole } from "../dota/vconsole.js";
 import { isProcessRunning } from "../dota/process.js";
 import { diagnoseDota } from "../dota/diagnose.js";
+import { captureWindowPng } from "../dota/capture.js";
+import {
+  explainEngineReadiness,
+  observeEngineReadiness,
+  selectEngineReadinessSignals,
+} from "../dota/engine-readiness.js";
 import {
   validateDotaBuildingEntities,
   validateDotaNeutralSpawners,
@@ -311,6 +317,271 @@ export function registerMapTools(server: McpServer) {
   );
 
   server.registerTool(
+    "map_engine_readiness_probe",
+    {
+      title: "Diagnose whether a map reaches a playable Dota state",
+      description:
+        "Launch a compiled map once without issuing gameplay or GridNav commands, record the DebugSDK game-state " +
+        "timeline, relevant console output, process/window/dialog diagnosis, and a screenshot, then automatically " +
+        "close Dota. This is the low-risk diagnostic step to run before map_engine_nav_test. Dry-run is the default.",
+      inputSchema: {
+        projectRoot: z.string().optional(),
+        map: z.string(),
+        compile: z.boolean().optional().describe("Compile the map before launch (default false)."),
+        forceCompile: z.boolean().optional().describe("Force the Source 2 compiler to rebuild unchanged inputs."),
+        ensureDebugSdk: z
+          .boolean()
+          .optional()
+          .describe("Idempotently attach/update the bundled DebugSDK before launch (default true)."),
+        targetGameState: z
+          .number()
+          .int()
+          .min(1)
+          .max(9)
+          .optional()
+          .describe("Game state that counts as ready (default 3, hero selection)."),
+        observationMs: z
+          .number()
+          .int()
+          .min(5000)
+          .max(180000)
+          .optional()
+          .describe("Maximum observation window after VConsole connects (default 90000ms)."),
+        pollMs: z.number().int().min(250).max(5000).optional().describe("DebugSDK ping interval (default 1000ms)."),
+        captureScreenshot: z
+          .boolean()
+          .optional()
+          .describe("Capture the Dota window before shutdown, falling back to background capture (default true)."),
+        shutdownTimeoutMs: z.number().int().min(1000).max(60000).optional(),
+        replaceRunningDota: z
+          .boolean()
+          .optional()
+          .describe("Allow this tool to close an existing Dota session before its one launch (default false)."),
+        launchStrategy: z
+          .enum(["auto", "steam", "direct"])
+          .optional()
+          .describe("Launch transport (default auto)."),
+        renderer: z
+          .enum(["default", "dx11", "vulkan"])
+          .optional()
+          .describe("Checked rendering backend override for startup diagnosis (default: Dota's configured renderer)."),
+        vconPort: z.number().int().min(1).max(65535).optional(),
+        dryRun: z
+          .boolean()
+          .optional()
+          .describe("Return the one-launch diagnostic plan without compiling or launching (default true)."),
+      },
+    },
+    guard(
+      async ({
+        projectRoot,
+        map,
+        compile,
+        forceCompile,
+        ensureDebugSdk,
+        targetGameState,
+        observationMs,
+        pollMs,
+        captureScreenshot,
+        shutdownTimeoutMs,
+        replaceRunningDota,
+        launchStrategy,
+        renderer,
+        vconPort,
+        dryRun,
+      }): Promise<ToolResult> => {
+        const dota = await requireDotaPaths();
+        const project = await resolveProject(projectRoot);
+        const p = projectMapPaths(dota, project, map);
+        if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}.`);
+
+        const shouldCompile = compile === true;
+        const shouldAttach = ensureDebugSdk !== false;
+        const shouldCapture = captureScreenshot !== false;
+        const targetState = targetGameState ?? 3;
+        const observeFor = observationMs ?? 90_000;
+        const pingEvery = pollMs ?? 1000;
+        const port = vconPort ?? defaultVconPort();
+        const isDryRun = dryRun !== false;
+        const dotaWasRunning = await isProcessRunning("dota2.exe");
+
+        if (isDryRun) {
+          return json(
+            {
+              dryRun: true,
+              map,
+              compile: shouldCompile,
+              ensureDebugSdk: shouldAttach,
+              targetGameState: targetState,
+              observationMs: observeFor,
+              pollMs: pingEvery,
+              captureScreenshot: shouldCapture,
+              dotaWasRunning,
+              replaceRunningDota: replaceRunningDota === true,
+              launchCount: 1,
+              launchStrategy: launchStrategy ?? "auto",
+              renderer: renderer ?? "default",
+              gameplayCommands: 0,
+              automaticShutdown: true,
+            },
+            [
+              `[dry run] ${map}: one readiness-only Dota launch; no gameplay or navigation commands.`,
+              `Observe up to ${observeFor}ms for game state ${targetState}; screenshot: ${shouldCapture ? "yes" : "no"}.`,
+              `Compile first: ${shouldCompile}; attach DebugSDK: ${shouldAttach}; automatic shutdown: yes.`,
+              `Dota currently running: ${dotaWasRunning}${dotaWasRunning && !replaceRunningDota ? " (actual run would refuse)" : ""}.`,
+            ].join("\n"),
+          );
+        }
+
+        if (dotaWasRunning && replaceRunningDota !== true) {
+          return error(
+            "Dota is already running. The readiness probe refused to close it. Exit Dota first or explicitly pass replaceRunningDota=true.",
+          );
+        }
+        if (!shouldCompile && !(await pathExists(p.gameVpk)) && !(await pathExists(p.installedGameVpk))) {
+          return error("No compiled map VPK was found. Run map_compile or pass compile=true; Dota was not launched.");
+        }
+        if (shouldCompile) {
+          const compileResult = await compileProjectMap(dota, project, map, forceCompile === true);
+          if (compileResult.code !== 0) {
+            return error(
+              `Map compilation failed; Dota was not launched.\n${compileResult.stdout.slice(-3000)}\n${compileResult.stderr.slice(-3000)}`.trim(),
+            );
+          }
+        }
+
+        const attached = shouldAttach ? await attachDebugSdk(project, false) : undefined;
+        const vc = getVConsole(port);
+        let launchAttempted = false;
+        let launched = false;
+        let launchResult: Awaited<ReturnType<typeof restartGame>> | undefined;
+        let observation: Awaited<ReturnType<typeof observeEngineReadiness>> | undefined;
+        let diagnosis: Awaited<ReturnType<typeof diagnoseDota>> | undefined;
+        let nextDiagnosisAt = 0;
+        let screenshot: Awaited<ReturnType<typeof captureWindowPng>> | undefined;
+        let screenshotBuffer: Buffer | undefined;
+        let consoleTail: string[] = [];
+        let consoleSignals: string[] = [];
+        let fatalError: string | undefined;
+        let shutdown: Awaited<ReturnType<typeof shutdownGame>> | undefined;
+
+        try {
+          launchAttempted = true;
+          launchResult = await restartGame(
+            dota,
+            project.addonName,
+            map,
+            port,
+            true,
+            true,
+            launchStrategy ?? "auto",
+            renderer === "default" ? undefined : renderer,
+          );
+          launched = true;
+          if (!vc.isConnected()) await vc.connectWithRetry(60_000, 1000);
+          vc.clearRing();
+          observation = await observeEngineReadiness(vc, targetState, observeFor, pingEvery, async () => {
+            if (Date.now() < nextDiagnosisAt) return undefined;
+            nextDiagnosisAt = Date.now() + 3000;
+            try {
+              diagnosis = await diagnoseDota();
+              if (diagnosis.blocked) {
+                const blocker = diagnosis.blockers[0];
+                return `Dota is blocked by ${blocker?.role ?? "a dialog"}: ${blocker?.title || blocker?.className || "unknown window"}.`;
+              }
+            } catch {
+              // The final diagnostic pass will report persistent failures.
+            }
+            return undefined;
+          });
+        } catch (caught) {
+          fatalError = caught instanceof Error ? caught.message : String(caught);
+        } finally {
+          if (launchAttempted) {
+            consoleTail = vc.recent(300).map((line) => line.text);
+            consoleSignals = selectEngineReadinessSignals(vc.recent(4000), 240);
+            try {
+              diagnosis = await diagnoseDota();
+            } catch {
+              // Window/process diagnosis is best effort; shutdown remains mandatory.
+            }
+            if (shouldCapture && diagnosis?.running) {
+              screenshot = await captureWindowPng("screen", true);
+              if (!screenshot.buf) {
+                const foregroundError = screenshot.error;
+                const fallback = await captureWindowPng("print", false);
+                screenshot = fallback.buf
+                  ? fallback
+                  : { ...fallback, error: [foregroundError, fallback.error].filter(Boolean).join(" | ") };
+              }
+              screenshotBuffer = screenshot.buf;
+            }
+            if (launched || diagnosis?.running || (await isProcessRunning("dota2.exe"))) {
+              shutdown = await shutdownGame(port, shutdownTimeoutMs ?? 15_000);
+            }
+          }
+        }
+
+        const blocked = diagnosis?.blocked === true;
+        const failed =
+          !!fatalError ||
+          !observation?.ready ||
+          blocked ||
+          !shutdown?.stopped;
+        const explanation = explainEngineReadiness(observation, blocked);
+        const screenshotInfo = {
+          requested: shouldCapture,
+          captured: !!screenshotBuffer,
+          mode: screenshot?.mode,
+          error: screenshot?.error,
+        };
+        const data = {
+          dryRun: false,
+          map,
+          compiled: shouldCompile,
+          debugSdk: attached
+            ? { copiedTo: attached.copiedTo, bootstrapAction: attached.bootstrapAction }
+            : { skipped: true },
+          launch: launchResult,
+          observation,
+          explanation,
+          consoleSignals,
+          consoleTail,
+          diagnosis,
+          screenshot: screenshotInfo,
+          fatalError,
+          shutdown,
+          passed: !failed,
+        };
+        const timeline = observation?.timeline.length
+          ? observation.timeline.map(
+              (sample) =>
+                `  +${sample.elapsedMs}ms: state=${sample.state}${sample.gameTime === undefined ? "" : ` gameTime=${sample.gameTime}`}`,
+            )
+          : ["  (no DebugSDK state samples)"];
+        const output = [
+          `${map} ENGINE READINESS: ${failed ? "NOT READY" : "READY"}`,
+          explanation,
+          `Pings: ${observation?.pongCount ?? 0}; highest state: ${observation?.highestState ?? "none"}; target: ${targetState}.`,
+          "State timeline:",
+          ...timeline,
+          `Blocking dialog: ${blocked ? "YES" : "no"}; screenshot: ${screenshotBuffer ? `captured (${screenshot?.mode})` : shouldCapture ? "failed" : "skipped"}.`,
+          `Automatic shutdown: ${shutdown?.stopped ? "complete" : "FAILED"}.`,
+          ...(fatalError ? [`Fatal: ${fatalError}`] : []),
+          ...(diagnosis?.summary ? ["Window diagnosis:", diagnosis.summary] : []),
+          ...(screenshot?.error ? [`Screenshot note: ${screenshot.error}`] : []),
+          ...(shutdown ? [`Shutdown: ${shutdown.detail}`] : []),
+        ].join("\n");
+        const result = json(data, output);
+        if (screenshotBuffer) {
+          result.content.push({ type: "image", data: screenshotBuffer.toString("base64"), mimeType: "image/png" });
+        }
+        return { ...result, isError: failed };
+      },
+    ),
+  );
+
+  server.registerTool(
     "map_engine_nav_test",
     {
       title: "Test map routes with Dota's real navigation",
@@ -365,6 +636,10 @@ export function registerMapTools(server: McpServer) {
           .enum(["auto", "steam", "direct"])
           .optional()
           .describe("Launch transport (default auto: Steam, then direct only if Steam creates no Dota process)."),
+        renderer: z
+          .enum(["default", "dx11", "vulkan"])
+          .optional()
+          .describe("Checked rendering backend override (default: Dota's configured renderer)."),
         vconPort: z.number().int().min(1).max(65535).optional(),
         dryRun: z
           .boolean()
@@ -389,6 +664,7 @@ export function registerMapTools(server: McpServer) {
         shutdownTimeoutMs,
         replaceRunningDota,
         launchStrategy,
+        renderer,
         vconPort,
         dryRun,
       }): Promise<ToolResult> => {
@@ -448,6 +724,7 @@ export function registerMapTools(server: McpServer) {
               replaceRunningDota: replaceRunningDota === true,
               launchCount: 1,
               launchStrategy: launchStrategy ?? "auto",
+              renderer: renderer ?? "default",
               automaticShutdown: true,
               commandBytes: commands.map((command) => command.length),
             },
@@ -497,6 +774,7 @@ export function registerMapTools(server: McpServer) {
             true,
             true,
             launchStrategy ?? "auto",
+            renderer === "default" ? undefined : renderer,
           );
           launched = true;
           if (!vc.isConnected()) await vc.connectWithRetry(60_000, 1000);

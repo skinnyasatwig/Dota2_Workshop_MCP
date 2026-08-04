@@ -39,7 +39,7 @@ fallback for non-tstl addons.
 | **In-game DebugSDK** | `addon_attach_debug_sdk`, `addon_detach_debug_sdk`, `dota_lua_eval`, `dota_debug_dump`, `dota_selftest` |
 | **Reference library** | `ref_harvest`, `ref_harvest_top`, `ref_list`, `ref_search`, `ref_find`, `ref_passport`, `ref_inspect`, `ref_get`, `ref_recipe`, `ref_curate`, `ref_stats`, `asset_db` (SQLite index: fast structured search by kind/ext/name) |
 | **Docs & references** | `docs_search`, `docs_get`, `docs_list`, `dota_patterns`, `panorama_api_search`, `panorama_api_get`, `tools_catalog` |
-| **Maps** | `map_create`, `map_add_entity`, `map_inspect`, `map_patch_entities`, `map_sync_contract`, `map_rewrite_path`, `map_to_text`, `map_from_text`, `map_compile`, `map_list`, `map_validate`, `map_engine_nav_test` |
+| **Maps** | `map_create`, `map_add_entity`, `map_inspect`, `map_patch_entities`, `map_sync_contract`, `map_rewrite_path`, `map_to_text`, `map_from_text`, `map_compile`, `map_list`, `map_validate`, `map_engine_readiness_probe`, `map_engine_nav_test` |
 | **Map generation** | `map_build`, `map_terrain`, `map_preview`, `map_tile_to_world`, `map_recipe_catalog`, `entity_catalog`, `scaffold_td` |
 | **Reference games** | `workshop_search`, `workshop_download`, `workshop_list`, `workshop_inspect`, `workshop_read`, `workshop_grep`, `panorama_decompile` |
 | **Asset preview (out of engine)** | `asset_preview` (particles/textures/models → inline contact-sheet image + HTML gallery), `sound_preview` (sounds → inline waveform/icon image + playable HTML soundboard + inline audio), `preview_studio` / `preview_studio_stop` (interactive gallery + public share link: animated particles, 3D models, audio players, click-to-select), `preview_pick` / `preview_selections` (resolve the IDs the user picked/clicked → game + asset path) — decoded via ValveResourceFormat, no Dota launch |
@@ -247,6 +247,13 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
 Coordinates: terrain ops use tile units (default 64×64 grid; world = origin + tile×256); entity/path
 positions use world units.
 
+Before a live navigation test, use **`map_engine_readiness_probe`** for one diagnostic launch. It sends
+only DebugSDK health pings, records every game-state transition, keeps useful startup console evidence,
+enumerates visible and hidden Dota dialogs, captures the Dota window, and automatically shuts down. It
+is a dry run by default and refuses to replace an existing Dota session without explicit permission.
+Known fatal startup evidence ends the observation immediately, and `renderer: "dx11" | "vulkan"` provides
+a bounded diagnostic override without exposing arbitrary launch arguments.
+
 Reusable component coordinates are local. A placement uses `tileOffset` for its terrain and `worldOffset` for its
 entities and paths, with optional `mirrorAxis: "x" | "y" | "xy"`. Local names are prefixed with the placement name,
 so two copies cannot silently overwrite each other. A component property can explicitly refer to one of its local
@@ -367,6 +374,10 @@ playable `.vpk` — a pipeline verified end to end.
   Call it once with `dryRun:true` to review route/check counts, then with `dryRun:false` when Dota is
   closed. The tool compiles, launches the requested map exactly once, runs `GridNav:CanFindPath`,
   `GridNav:FindPathLength`, and `GridNav:IsTraversable` over managed paths, and automatically exits.
+
+If engine startup is uncertain, run `map_engine_readiness_probe` before `map_engine_nav_test`; unlike the
+navigation test, the readiness probe sends no gameplay command and returns a screenshot plus structured
+console/window evidence explaining where startup stopped.
 
 Contract entries under `requiredEntities` are validation-only. Entries under `managedEntities`
 are declarative desired state and require `targetname`, `classname`, and `origin`; `angles` and

@@ -33,8 +33,9 @@ export async function restartGame(
   cheats: boolean,
   reconnect: boolean,
   strategy: GameLaunchStrategy = "auto",
+  renderer?: "dx11" | "vulkan",
 ): Promise<GameLaunchResult> {
-  const args = buildLaunchArgs({ addon, map, insecure: true, dev: true, cheats, vconPort: port });
+  const args = buildLaunchArgs({ addon, map, insecure: true, dev: true, cheats, vconPort: port, renderer });
   let target =
     strategy === "direct"
       ? buildDirectDotaLaunchTarget(dota.dota2Exe, args)
