@@ -244,7 +244,10 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
   for endpoint and segment reachability/path lengths, returns structured failures, and automatically
   shuts Dota down even when a check fails. It is a dry run by default and refuses to replace an existing
   Dota session unless that permission is explicit. Its default `auto` launcher gives Steam a bounded chance
-  to start the game, then uses the installed executable only when Steam created no Dota process.
+  to start the game, then uses the installed executable only when Steam created no Dota process. An explicit
+  Steam launch now fails in 20 seconds when Steam does not forward `-applaunch`. When automatic startup is
+  unreliable, `attachToRunningDota:true` checks a user-started, VConsole-enabled tools session without compiling,
+  launching, replacing, or closing that session.
 - **`map_recipe_catalog`** — inspect the named terrain cores, Radiant/Dire cliff recipes, ramp-safe
   fallbacks, checked solid-volume recipes, and official Valve prefab references used by the generator. `verifyInstalled:true` checks
   the references against the current Workshop Tools install without opening Hammer. It also compares Steam/Dota/tools
@@ -402,7 +405,8 @@ playable `.vpk` — a pipeline verified end to end.
 
 If engine startup is uncertain, run `map_engine_readiness_probe` before `map_engine_nav_test`; unlike the
 navigation test, the readiness probe sends no gameplay command and returns a screenshot plus structured
-console/window evidence explaining where startup stopped.
+console/window evidence explaining where startup stopped. Both tools accept `attachToRunningDota:true` for a
+map already loaded through the normal Workshop Tools UI. Set `compile:false`; the attached session is preserved.
 
 Contract entries under `requiredEntities` are validation-only. Entries under `managedEntities`
 are declarative desired state and require `targetname`, `classname`, and `origin`; `angles` and

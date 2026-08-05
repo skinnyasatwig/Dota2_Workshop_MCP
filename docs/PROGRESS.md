@@ -1,6 +1,6 @@
 # Automation improvement progress
 
-Last updated: 2026-08-04
+Last updated: 2026-08-05
 
 ## Verified milestones
 
@@ -55,12 +55,15 @@ Last updated: 2026-08-04
 21. `4a64271` - added an evidence-gated Valve recipe refresh workflow. The MCP now reports exact source comparisons,
     affected recipe families, a reviewable candidate baseline, and explicit blockers; a safe CLI runner automates build,
     tests, MCP smoke, and the isolated compiler fixture but cannot edit or auto-bless the trusted baseline.
+22. This milestone - bounded explicit Steam launches when `-applaunch` is not forwarded and added non-owning attach
+    mode to readiness and GridNav tools. A user-started, VConsole-enabled Workshop Tools session can now be checked
+    without compiling underneath it, relaunching Dota, or closing the user's session.
 
 ## Current verification record
 
 - TypeScript build passes.
-- 213 unit and integration tests pass; the opt-in compiler and installed-VRF tests are skipped during the default suite.
-- MCP smoke suite: 200 passed, 0 failed, 0 skipped.
+- Default suite: 215 passed, 0 failed, and 2 opt-in compiler/installed-VRF tests skipped.
+- MCP smoke suite: 199 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
 - The guided refresh runner completed all four safe checks in 33 seconds without opening Dota or Hammer. Because the
@@ -110,3 +113,11 @@ The initial probe retained the complete evidence and shut Dota down. A targeted 
 same NVIDIA error, proving it was not a DirectX-only failure; after early-failure detection was added, the
 observer stopped in 605 ms and the entire launched process was closed in 24 seconds. No further engine
 retries should occur until the user restores the Dota and global NVIDIA profiles to defaults.
+
+On 2026-08-05, the NVIDIA DRS database was backed up and both predefined profiles were restored through NVIDIA's
+own NVAPI. The global profile lost its one override and the Dota profile lost its one override, but a guarded direct
+readiness run still produced the same `NVAPI_ACCESS_DENIED` startup modal. A distinct explicit-Steam run produced no
+Dota process and no modal: the already-running Steam client did not forward `-applaunch`. Engine retries stopped there.
+The MCP now fails that Steam condition after 20 seconds and supports attaching to a map launched normally through
+the Workshop Tools UI. Attach-mode dry runs for readiness and all four managed GridNav routes passed; the real attached
+check awaits one normal user-started tools session.

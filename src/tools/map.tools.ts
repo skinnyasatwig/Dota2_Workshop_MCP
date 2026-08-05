@@ -345,9 +345,10 @@ export function registerMapTools(server: McpServer) {
     {
       title: "Diagnose whether a map reaches a playable Dota state",
       description:
-        "Launch a compiled map once without issuing gameplay or GridNav commands, record the DebugSDK game-state " +
-        "timeline, relevant console output, process/window/dialog diagnosis, and a screenshot, then automatically " +
-        "close Dota. This is the low-risk diagnostic step to run before map_engine_nav_test. Dry-run is the default.",
+        "Launch a compiled map once, or attach to a user-started Dota tools session, without issuing gameplay or " +
+        "GridNav commands. Record the DebugSDK game-state timeline, relevant console output, process/window/dialog " +
+        "diagnosis, and a screenshot. Sessions launched by the tool are closed automatically; attached sessions are " +
+        "left running. This is the low-risk diagnostic step to run before map_engine_nav_test. Dry-run is the default.",
       inputSchema: {
         projectRoot: z.string().optional(),
         map: z.string(),
@@ -381,6 +382,12 @@ export function registerMapTools(server: McpServer) {
           .boolean()
           .optional()
           .describe("Allow this tool to close an existing Dota session before its one launch (default false)."),
+        attachToRunningDota: z
+          .boolean()
+          .optional()
+          .describe(
+            "Use an already-running, VConsole-enabled Dota tools session instead of launching or closing Dota (default false).",
+          ),
         launchStrategy: z
           .enum(["auto", "steam", "direct"])
           .optional()
@@ -409,6 +416,7 @@ export function registerMapTools(server: McpServer) {
         captureScreenshot,
         shutdownTimeoutMs,
         replaceRunningDota,
+        attachToRunningDota,
         launchStrategy,
         renderer,
         vconPort,
@@ -428,6 +436,7 @@ export function registerMapTools(server: McpServer) {
         const port = vconPort ?? defaultVconPort();
         const isDryRun = dryRun !== false;
         const dotaWasRunning = await isProcessRunning("dota2.exe");
+        const attachMode = attachToRunningDota === true;
 
         if (isDryRun) {
           return json(
@@ -442,27 +451,37 @@ export function registerMapTools(server: McpServer) {
               captureScreenshot: shouldCapture,
               dotaWasRunning,
               replaceRunningDota: replaceRunningDota === true,
-              launchCount: 1,
+              attachToRunningDota: attachMode,
+              launchCount: attachMode ? 0 : 1,
               launchStrategy: launchStrategy ?? "auto",
               renderer: renderer ?? "default",
               gameplayCommands: 0,
-              automaticShutdown: true,
+              automaticShutdown: !attachMode,
             },
             [
-              `[dry run] ${map}: one readiness-only Dota launch; no gameplay or navigation commands.`,
+              `[dry run] ${map}: ${attachMode ? "attach to the running Dota session" : "one readiness-only Dota launch"}; no gameplay or navigation commands.`,
               `Observe up to ${observeFor}ms for game state ${targetState}; screenshot: ${shouldCapture ? "yes" : "no"}.`,
-              `Compile first: ${shouldCompile}; attach DebugSDK: ${shouldAttach}; automatic shutdown: yes.`,
-              `Dota currently running: ${dotaWasRunning}${dotaWasRunning && !replaceRunningDota ? " (actual run would refuse)" : ""}.`,
+              `Compile first: ${shouldCompile}; attach DebugSDK: ${shouldAttach}; automatic shutdown: ${attachMode ? "no (attached session is preserved)" : "yes"}.`,
+              `Dota currently running: ${dotaWasRunning}${attachMode && !dotaWasRunning ? " (attach run would refuse)" : !attachMode && dotaWasRunning && !replaceRunningDota ? " (launch run would refuse)" : ""}.`,
             ].join("\n"),
           );
         }
 
-        if (dotaWasRunning && replaceRunningDota !== true) {
+        if (attachMode && !dotaWasRunning) {
+          return error("No Dota process is running. Start Dota Workshop Tools with VConsole enabled, load the map, then retry attachToRunningDota=true.");
+        }
+        if (attachMode && shouldCompile) {
+          return error("Attach mode cannot compile underneath a running Dota session. Compile first, then load the map and attach with compile=false.");
+        }
+        if (attachMode && renderer && renderer !== "default") {
+          return error("Attach mode cannot change the renderer of an already-running Dota session.");
+        }
+        if (!attachMode && dotaWasRunning && replaceRunningDota !== true) {
           return error(
             "Dota is already running. The readiness probe refused to close it. Exit Dota first or explicitly pass replaceRunningDota=true.",
           );
         }
-        if (!shouldCompile && !(await pathExists(p.gameVpk)) && !(await pathExists(p.installedGameVpk))) {
+        if (!attachMode && !shouldCompile && !(await pathExists(p.gameVpk)) && !(await pathExists(p.installedGameVpk))) {
           return error("No compiled map VPK was found. Run map_compile or pass compile=true; Dota was not launched.");
         }
         if (shouldCompile) {
@@ -475,6 +494,11 @@ export function registerMapTools(server: McpServer) {
         }
 
         const attached = shouldAttach ? await attachDebugSdk(project, false) : undefined;
+        if (attachMode && attached && attached.bootstrapAction !== "already-present") {
+          return error(
+            "The DebugSDK was attached, but the running Dota session cannot load a newly inserted bootstrap. Restart Dota normally, load the map again, then retry attach mode.",
+          );
+        }
         const vc = getVConsole(port);
         let launchAttempted = false;
         let launched = false;
@@ -490,18 +514,20 @@ export function registerMapTools(server: McpServer) {
         let shutdown: Awaited<ReturnType<typeof shutdownGame>> | undefined;
 
         try {
-          launchAttempted = true;
-          launchResult = await restartGame(
-            dota,
-            project.addonName,
-            map,
-            port,
-            true,
-            true,
-            launchStrategy ?? "auto",
-            renderer === "default" ? undefined : renderer,
-          );
-          launched = true;
+          if (!attachMode) {
+            launchAttempted = true;
+            launchResult = await restartGame(
+              dota,
+              project.addonName,
+              map,
+              port,
+              true,
+              true,
+              launchStrategy ?? "auto",
+              renderer === "default" ? undefined : renderer,
+            );
+            launched = true;
+          }
           if (!vc.isConnected()) await vc.connectWithRetry(60_000, 1000);
           vc.clearRing();
           observation = await observeEngineReadiness(vc, targetState, observeFor, pingEvery, async () => {
@@ -521,7 +547,7 @@ export function registerMapTools(server: McpServer) {
         } catch (caught) {
           fatalError = caught instanceof Error ? caught.message : String(caught);
         } finally {
-          if (launchAttempted) {
+          if (launchAttempted || attachMode) {
             consoleTail = vc.recent(300).map((line) => line.text);
             consoleSignals = selectEngineReadinessSignals(vc.recent(4000), 240);
             try {
@@ -540,7 +566,7 @@ export function registerMapTools(server: McpServer) {
               }
               screenshotBuffer = screenshot.buf;
             }
-            if (launched || diagnosis?.running || (await isProcessRunning("dota2.exe"))) {
+            if (!attachMode && (launched || diagnosis?.running || (await isProcessRunning("dota2.exe")))) {
               shutdown = await shutdownGame(port, shutdownTimeoutMs ?? 15_000);
             }
           }
@@ -551,7 +577,7 @@ export function registerMapTools(server: McpServer) {
           !!fatalError ||
           !observation?.ready ||
           blocked ||
-          !shutdown?.stopped;
+          (!attachMode && !shutdown?.stopped);
         const explanation = explainEngineReadiness(observation, blocked);
         const screenshotInfo = {
           requested: shouldCapture,
@@ -562,6 +588,8 @@ export function registerMapTools(server: McpServer) {
         const data = {
           dryRun: false,
           map,
+          sessionMode: attachMode ? "attached" : "launched",
+          automaticShutdown: !attachMode,
           compiled: shouldCompile,
           debugSdk: attached
             ? { copiedTo: attached.copiedTo, bootstrapAction: attached.bootstrapAction }
@@ -590,7 +618,7 @@ export function registerMapTools(server: McpServer) {
           "State timeline:",
           ...timeline,
           `Blocking dialog: ${blocked ? "YES" : "no"}; screenshot: ${screenshotBuffer ? `captured (${screenshot?.mode})` : shouldCapture ? "failed" : "skipped"}.`,
-          `Automatic shutdown: ${shutdown?.stopped ? "complete" : "FAILED"}.`,
+          attachMode ? "Attached Dota session: preserved." : `Automatic shutdown: ${shutdown?.stopped ? "complete" : "FAILED"}.`,
           ...(fatalError ? [`Fatal: ${fatalError}`] : []),
           ...(diagnosis?.summary ? ["Window diagnosis:", diagnosis.summary] : []),
           ...(screenshot?.error ? [`Screenshot note: ${screenshot.error}`] : []),
@@ -610,9 +638,9 @@ export function registerMapTools(server: McpServer) {
     {
       title: "Test map routes with Dota's real navigation",
       description:
-        "Compile and launch a map exactly once, test specification paths with Valve's real GridNav API, return " +
-        "route/segment/path-length results, then automatically close Dota. Refuses to replace an already-running " +
-        "Dota session unless replaceRunningDota=true. Dry-run is the default; pass dryRun=false for the engine test.",
+        "Compile and launch a map exactly once, or attach to a user-started Dota tools session, then test specification " +
+        "paths with Valve's real GridNav API and return route/segment/path-length results. Sessions launched by the tool " +
+        "are closed automatically; attached sessions are left running. Dry-run is the default; pass dryRun=false for the engine test.",
       inputSchema: {
         projectRoot: z.string().optional(),
         map: z.string(),
@@ -656,6 +684,12 @@ export function registerMapTools(server: McpServer) {
           .boolean()
           .optional()
           .describe("Allow this tool to close an existing Dota session before its one launch (default false)."),
+        attachToRunningDota: z
+          .boolean()
+          .optional()
+          .describe(
+            "Use an already-running, VConsole-enabled Dota tools session instead of launching or closing Dota (default false).",
+          ),
         launchStrategy: z
           .enum(["auto", "steam", "direct"])
           .optional()
@@ -687,6 +721,7 @@ export function registerMapTools(server: McpServer) {
         errorWindowMs,
         shutdownTimeoutMs,
         replaceRunningDota,
+        attachToRunningDota,
         launchStrategy,
         renderer,
         vconPort,
@@ -731,6 +766,7 @@ export function registerMapTools(server: McpServer) {
         const shouldAttach = ensureDebugSdk !== false;
         const isDryRun = dryRun !== false;
         const port = vconPort ?? defaultVconPort();
+        const attachMode = attachToRunningDota === true;
 
         if (isDryRun) {
           return json(
@@ -746,22 +782,32 @@ export function registerMapTools(server: McpServer) {
               ensureDebugSdk: shouldAttach,
               dotaWasRunning,
               replaceRunningDota: replaceRunningDota === true,
-              launchCount: 1,
+              attachToRunningDota: attachMode,
+              launchCount: attachMode ? 0 : 1,
               launchStrategy: launchStrategy ?? "auto",
               renderer: renderer ?? "default",
-              automaticShutdown: true,
+              automaticShutdown: !attachMode,
               commandBytes: commands.map((command) => command.length),
             },
             [
               `[dry run] ${map}: ${chosenRoutes.length} route(s), ${pointCount} points, ${checkCount} GridNav checks.`,
               `Routes: ${routeSource}`,
-              `Compile first: ${shouldCompile}; attach DebugSDK: ${shouldAttach}; launch count: 1; automatic shutdown: yes.`,
-              `Dota currently running: ${dotaWasRunning}${dotaWasRunning && !replaceRunningDota ? " (actual run would refuse)" : ""}.`,
+              `Compile first: ${shouldCompile}; attach DebugSDK: ${shouldAttach}; launch count: ${attachMode ? 0 : 1}; automatic shutdown: ${attachMode ? "no (attached session is preserved)" : "yes"}.`,
+              `Dota currently running: ${dotaWasRunning}${attachMode && !dotaWasRunning ? " (attach run would refuse)" : !attachMode && dotaWasRunning && !replaceRunningDota ? " (launch run would refuse)" : ""}.`,
             ].join("\n"),
           );
         }
 
-        if (dotaWasRunning && replaceRunningDota !== true) {
+        if (attachMode && !dotaWasRunning) {
+          return error("No Dota process is running. Start Dota Workshop Tools with VConsole enabled, load the map, then retry attachToRunningDota=true.");
+        }
+        if (attachMode && shouldCompile) {
+          return error("Attach mode cannot compile underneath a running Dota session. Compile first, then load the map and attach with compile=false.");
+        }
+        if (attachMode && renderer && renderer !== "default") {
+          return error("Attach mode cannot change the renderer of an already-running Dota session.");
+        }
+        if (!attachMode && dotaWasRunning && replaceRunningDota !== true) {
           return error(
             "Dota is already running. The engine navigation test refused to close it. Exit Dota first or explicitly pass replaceRunningDota=true.",
           );
@@ -777,6 +823,11 @@ export function registerMapTools(server: McpServer) {
         }
 
         const attached = shouldAttach ? await attachDebugSdk(project, false) : undefined;
+        if (attachMode && attached && attached.bootstrapAction !== "already-present") {
+          return error(
+            "The DebugSDK was attached, but the running Dota session cannot load a newly inserted bootstrap. Restart Dota normally, load the map again, then retry attach mode.",
+          );
+        }
         const vc = getVConsole(port);
         let launched = false;
         let launchResult: Awaited<ReturnType<typeof restartGame>> | undefined;
@@ -790,17 +841,19 @@ export function registerMapTools(server: McpServer) {
         let shutdown: Awaited<ReturnType<typeof shutdownGame>> | undefined;
 
         try {
-          launchResult = await restartGame(
-            dota,
-            project.addonName,
-            map,
-            port,
-            true,
-            true,
-            launchStrategy ?? "auto",
-            renderer === "default" ? undefined : renderer,
-          );
-          launched = true;
+          if (!attachMode) {
+            launchResult = await restartGame(
+              dota,
+              project.addonName,
+              map,
+              port,
+              true,
+              true,
+              launchStrategy ?? "auto",
+              renderer === "default" ? undefined : renderer,
+            );
+            launched = true;
+          }
           if (!vc.isConnected()) await vc.connectWithRetry(60_000, 1000);
           vc.clearRing();
           const ready = await waitForEngineNavigationReady(
@@ -831,7 +884,7 @@ export function registerMapTools(server: McpServer) {
         } catch (caught) {
           fatalError = caught instanceof Error ? caught.message : String(caught);
         } finally {
-          if (launched && fatalError) {
+          if ((launched || attachMode) && fatalError) {
             consoleTail = vc.recent(200).map((line) => line.text);
             try {
               preShutdownDiagnosis = await diagnoseDota();
@@ -839,7 +892,7 @@ export function registerMapTools(server: McpServer) {
               // Readiness diagnostics are best effort; shutdown is mandatory.
             }
           }
-          if (launched) shutdown = await shutdownGame(port, shutdownTimeoutMs ?? 15_000);
+          if (launched && !attachMode) shutdown = await shutdownGame(port, shutdownTimeoutMs ?? 15_000);
         }
 
         const failedRouteResults = execution.results.filter((result) => !result.passed);
@@ -855,10 +908,12 @@ export function registerMapTools(server: McpServer) {
           execution.failures.length > 0 ||
           failedRouteResults.length > 0 ||
           consoleErrors.length > 0 ||
-          !shutdown?.stopped;
+          (!attachMode && !shutdown?.stopped);
         const data = {
           dryRun: false,
           map,
+          sessionMode: attachMode ? "attached" : "launched",
+          automaticShutdown: !attachMode,
           routeSource,
           routeCount: chosenRoutes.length,
           pointCount,
@@ -885,7 +940,7 @@ export function registerMapTools(server: McpServer) {
         const output = [
           `${map} ENGINE NAV: ${failed ? "FAILED" : "PASSED"}`,
           `${execution.results.length}/${chosenRoutes.length} route responses; ${failedRouteResults.length} failed route(s), ${failedChecks} failed check(s).`,
-          `Console errors: ${consoleErrors.length}; automatic shutdown: ${shutdown?.stopped ? "complete" : "FAILED"}.`,
+          `Console errors: ${consoleErrors.length}; ${attachMode ? "attached Dota session preserved" : `automatic shutdown: ${shutdown?.stopped ? "complete" : "FAILED"}`}.`,
           ...(fatalError ? [`Fatal: ${fatalError}`] : []),
           ...execution.failures.map((failure) => `  [ERROR] ${failure.name}: ${failure.error}`),
           ...failedRouteResults.map((result) => `  [BLOCKED] ${result.name}`),
