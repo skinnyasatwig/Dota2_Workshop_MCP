@@ -33,6 +33,7 @@ import {
   EngineNavigationExecution,
   EngineNavigationMode,
   EngineNavigationRoute,
+  ensureEngineNavigationMapReady,
   engineNavigationRepairSuggestions,
   executeEngineNavigationChecks,
   validateEngineNavigationRoutes,
@@ -42,9 +43,9 @@ import { attachDebugSdk } from "../dota/debugsdk.js";
 import { restartGame, shutdownGame } from "../dota/game-session.js";
 import { defaultVconPort, getVConsole } from "../dota/vconsole.js";
 import { isProcessRunning } from "../dota/process.js";
-import { diagnoseDota } from "../dota/diagnose.js";
+import { closeTransientStallDialog, diagnoseDota } from "../dota/diagnose.js";
 import { captureWindowPng } from "../dota/capture.js";
-import { prepareAttachedEngineWindow } from "../dota/engine-window.js";
+import { prepareAttachedEngineWindow, waitForEngineWindow } from "../dota/engine-window.js";
 import {
   explainEngineReadiness,
   observeEngineReadiness,
@@ -661,8 +662,10 @@ export function registerMapTools(server: McpServer) {
       title: "Test map routes with Dota's real navigation",
       description:
         "Compile and launch a map exactly once, or attach to a user-started Dota tools session, then test specification " +
-        "paths with Valve's real GridNav API and return route/segment/path-length results. Sessions launched by the tool " +
-        "are closed automatically; attached sessions are left running. Dry-run is the default; pass dryRun=false for the engine test.",
+        "paths with Valve's real GridNav API and return route/segment/path-length results. The guarded startup waits for " +
+        "the render window, handles the exact watchdog stall dialog, and explicitly loads the requested map when needed. " +
+        "Sessions launched by the tool are closed automatically; attached sessions are left running. Dry-run is the " +
+        "default; pass dryRun=false for the engine test.",
       inputSchema: {
         projectRoot: z.string().optional(),
         map: z.string(),
@@ -716,8 +719,23 @@ export function registerMapTools(server: McpServer) {
           .boolean()
           .optional()
           .describe(
-            "Restore and focus an attached Dota window before GridNav checks (default true; prevents hidden-window VConsole stalls).",
+            "Wait for, restore, and focus Dota's render window before GridNav checks (default true).",
           ),
+        loadMapIfNeeded: z
+          .boolean()
+          .optional()
+          .describe("Explicitly load the requested custom map if no fresh DebugSDK response arrives (default true)."),
+        mapLoadGraceMs: z
+          .number()
+          .int()
+          .min(0)
+          .max(30000)
+          .optional()
+          .describe("Wait this long for an already-started map load before sending the explicit load command (default 5000)."),
+        dismissTransientStalls: z
+          .boolean()
+          .optional()
+          .describe("Close only Source 2's exact watchdog 'Stall Detected' window during startup (default true)."),
         launchStrategy: z
           .enum(["auto", "steam", "direct"])
           .optional()
@@ -751,6 +769,9 @@ export function registerMapTools(server: McpServer) {
         replaceRunningDota,
         attachToRunningDota,
         focusDotaWindow,
+        loadMapIfNeeded,
+        mapLoadGraceMs,
+        dismissTransientStalls,
         launchStrategy,
         renderer,
         vconPort,
@@ -796,7 +817,9 @@ export function registerMapTools(server: McpServer) {
         const isDryRun = dryRun !== false;
         const port = vconPort ?? defaultVconPort();
         const attachMode = attachToRunningDota === true;
-        const shouldFocusAttachedWindow = attachMode && focusDotaWindow !== false;
+        const shouldFocusDotaWindow = focusDotaWindow !== false;
+        const shouldLoadMap = loadMapIfNeeded !== false;
+        const shouldDismissTransientStalls = dismissTransientStalls !== false;
 
         if (isDryRun) {
           return json(
@@ -813,7 +836,10 @@ export function registerMapTools(server: McpServer) {
               dotaWasRunning,
               replaceRunningDota: replaceRunningDota === true,
               attachToRunningDota: attachMode,
-              focusDotaWindow: shouldFocusAttachedWindow,
+              focusDotaWindow: shouldFocusDotaWindow,
+              loadMapIfNeeded: shouldLoadMap,
+              mapLoadGraceMs: mapLoadGraceMs ?? 5000,
+              dismissTransientStalls: shouldDismissTransientStalls,
               launchCount: attachMode ? 0 : 1,
               launchStrategy: launchStrategy ?? "auto",
               renderer: renderer ?? "default",
@@ -854,9 +880,9 @@ export function registerMapTools(server: McpServer) {
         }
 
         const attached = shouldAttach ? await attachDebugSdk(project, false) : undefined;
-        if (attachMode && attached && attached.bootstrapAction !== "already-present") {
+        if (attachMode && attached && attached.bootstrapAction !== "already-present" && !shouldLoadMap) {
           return error(
-            "The DebugSDK was attached, but the running Dota session cannot load a newly inserted bootstrap. Restart Dota normally, load the map again, then retry attach mode.",
+            "The DebugSDK was attached, but loadMapIfNeeded=false prevents reloading the running map to activate it.",
           );
         }
         const vc = getVConsole(port);
@@ -871,6 +897,8 @@ export function registerMapTools(server: McpServer) {
         let preShutdownDiagnosis: Awaited<ReturnType<typeof diagnoseDota>> | undefined;
         let shutdown: Awaited<ReturnType<typeof shutdownGame>> | undefined;
         let windowPreparation: Awaited<ReturnType<typeof prepareAttachedEngineWindow>> | undefined;
+        let startupDiagnosis: Awaited<ReturnType<typeof diagnoseDota>> | undefined;
+        const transientStallDismissals: Awaited<ReturnType<typeof closeTransientStallDialog>>[] = [];
 
         try {
           if (!attachMode) {
@@ -886,19 +914,43 @@ export function registerMapTools(server: McpServer) {
             );
             launched = true;
           }
-          if (attachMode) {
-            windowPreparation = await prepareAttachedEngineWindow(shouldFocusAttachedWindow);
-            if (!windowPreparation.ok) {
-              throw new Error(`Could not prepare the attached Dota window: ${windowPreparation.error}`);
+          if (!vc.isConnected()) await vc.connectWithRetry(60_000, 1000);
+          if (shouldDismissTransientStalls) {
+            startupDiagnosis = await diagnoseDota();
+            for (const blocker of startupDiagnosis.blockers.filter((window) => window.role === "stall").slice(0, 3)) {
+              transientStallDismissals.push(await closeTransientStallDialog(blocker));
+            }
+            if (transientStallDismissals.length) {
+              await new Promise((resolve) => setTimeout(resolve, 250));
+              startupDiagnosis = await diagnoseDota();
+            }
+            if (startupDiagnosis.blocked) {
+              const blocker = startupDiagnosis.blockers[0];
+              throw new Error(
+                `Dota startup is blocked by ${blocker?.role ?? "a dialog"}: ` +
+                  `${blocker?.title || blocker?.className || "unknown window"}.`,
+              );
             }
           }
-          if (!vc.isConnected()) await vc.connectWithRetry(60_000, 1000);
+          windowPreparation = await waitForEngineWindow(shouldFocusDotaWindow, 30_000, 500);
+          if (!windowPreparation.ok) {
+            throw new Error(`Could not prepare the Dota window: ${windowPreparation.error}`);
+          }
           vc.clearRing();
-          const ready = await waitForEngineNavigationReady(
-            vc,
-            readyGameState ?? 3,
-            readyTimeoutMs ?? 120_000,
-          );
+          const ready = shouldLoadMap
+            ? await ensureEngineNavigationMapReady(
+                vc,
+                project.addonName,
+                map,
+                readyGameState ?? 3,
+                readyTimeoutMs ?? 120_000,
+                mapLoadGraceMs ?? 5000,
+              )
+            : await waitForEngineNavigationReady(
+                vc,
+                readyGameState ?? 3,
+                readyTimeoutMs ?? 120_000,
+              );
           readiness = ready;
           if (!ready.ready) {
             fatalError = `Map did not reach Dota game state ${readyGameState ?? 3} before the timeout.`;
@@ -968,6 +1020,8 @@ export function registerMapTools(server: McpServer) {
             : { skipped: true },
           launch: launchResult,
           windowPreparation,
+          startupDiagnosis,
+          transientStallDismissals,
           readyLine,
           readiness,
           results: execution.results,
@@ -987,7 +1041,13 @@ export function registerMapTools(server: McpServer) {
           `${execution.results.length}/${chosenRoutes.length} route responses; ${failedRouteResults.length} failed route(s), ${failedChecks} failed check(s).`,
           `Console errors: ${consoleErrors.length}; ${attachMode ? "attached Dota session preserved" : `automatic shutdown: ${shutdown?.stopped ? "complete" : "FAILED"}`}.`,
           ...(windowPreparation
-            ? [`Attached window: ${windowPreparation.ok ? "restored and focused" : "PREPARATION FAILED"}.`]
+            ? [`Dota window: ${windowPreparation.ok ? `ready after ${windowPreparation.attempts ?? 1} attempt(s)` : "PREPARATION FAILED"}.`]
+            : []),
+          ...(readiness && "mapLaunchCommandSent" in readiness
+            ? [`Explicit map load: ${readiness.mapLaunchCommandSent ? "sent" : "not needed"}.`]
+            : []),
+          ...(transientStallDismissals.length
+            ? [`Transient watchdog stalls closed: ${transientStallDismissals.filter((result) => result.closed).length}/${transientStallDismissals.length}.`]
             : []),
           ...(fatalError ? [`Fatal: ${fatalError}`] : []),
           ...execution.failures.map((failure) => `  [ERROR] ${failure.name}: ${failure.error}`),

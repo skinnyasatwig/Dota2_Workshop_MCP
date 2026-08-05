@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { classifyWindow, pickSafeButton, type RawWindow } from "../src/dota/diagnose.js";
+import { classifyWindow, closeTransientStallDialog, pickSafeButton, type RawWindow } from "../src/dota/diagnose.js";
 
 // Real window data captured from a stuck Source 2 tools session (the user's gemtd_1p assert).
 function w(p: Partial<RawWindow>): RawWindow {
@@ -54,4 +54,25 @@ test("pickSafeButton prefers 'Ignore All Asserts' and never a dangerous button",
   assert.equal(pickSafeButton(["&Break in Debugger", "Broadcast &Minidump", "Auto &Select Debugger"]), null);
   // Generic OK dialog.
   assert.equal(pickSafeButton(["OK"]), "OK");
+});
+
+test("transient stall dismissal targets only the exact watchdog window", async () => {
+  const seen: string[] = [];
+  const close = (hwnd: string) => {
+    seen.push(hwnd);
+    return Promise.resolve({ closed: true, hwnd });
+  };
+  const result = await closeTransientStallDialog(
+    { hwnd: "788220", role: "stall", className: "WatchdogThreadWndClass", title: "Stall Detected" },
+    close,
+  );
+  assert.equal(result.closed, true);
+  assert.deepEqual(seen, ["788220"]);
+
+  const refused = await closeTransientStallDialog(
+    { hwnd: "123", role: "crash", className: "#32770", title: "Fatal Error" },
+    close,
+  );
+  assert.equal(refused.closed, false);
+  assert.equal(seen.length, 1);
 });

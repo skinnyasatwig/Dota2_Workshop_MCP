@@ -51,6 +51,19 @@ export interface EngineNavigationExecution {
   failures: { name: string; error: string; consoleLine?: string }[];
 }
 
+export interface EngineNavigationReadiness {
+  ready: boolean;
+  line?: string;
+  lastPong?: string;
+  pongCount: number;
+}
+
+export interface EngineNavigationMapReadiness extends EngineNavigationReadiness {
+  mapLaunchCommandSent: boolean;
+  launchCommand?: string;
+  initialReadiness?: EngineNavigationReadiness;
+}
+
 export interface EngineNavigationRepairSuggestion {
   routeName: string;
   originalPoint: EngineNavigationPoint;
@@ -214,7 +227,7 @@ export async function waitForEngineNavigationReady(
   vc: VConsoleClient,
   minimumGameState = 3,
   timeoutMs = 120_000,
-): Promise<{ ready: boolean; line?: string; lastPong?: string; pongCount: number }> {
+): Promise<EngineNavigationReadiness> {
   const deadline = Date.now() + timeoutMs;
   let lastPong: string | undefined;
   let pongCount = 0;
@@ -242,6 +255,56 @@ export async function waitForEngineNavigationReady(
     if (Date.now() < deadline) await sleep(250);
   }
   return { ready: false, lastPong, pongCount };
+}
+
+type ReadinessWaiter = (
+  vc: VConsoleClient,
+  minimumGameState: number,
+  timeoutMs: number,
+) => Promise<EngineNavigationReadiness>;
+
+/**
+ * Give a command-line map launch a short chance to finish, then explicitly
+ * load the requested custom map if no fresh DebugSDK readiness response
+ * arrives. This closes the common Steam-tools dashboard gap without blindly
+ * restarting Dota or trusting replayed VConsole history.
+ */
+export async function ensureEngineNavigationMapReady(
+  vc: VConsoleClient,
+  addon: string,
+  map: string,
+  minimumGameState = 3,
+  timeoutMs = 120_000,
+  initialWaitMs = 5000,
+  waiter: ReadinessWaiter = waitForEngineNavigationReady,
+): Promise<EngineNavigationMapReadiness> {
+  const safeName = /^[a-z][a-z0-9_]+$/;
+  if (!safeName.test(addon) || !safeName.test(map)) {
+    throw new Error("Addon and map names must be safe lowercase console tokens.");
+  }
+
+  const startedAt = Date.now();
+  const grace = Math.min(Math.max(0, initialWaitMs), Math.max(0, timeoutMs - 1000));
+  const initialReadiness = grace > 0
+    ? await waiter(vc, minimumGameState, grace)
+    : { ready: false, pongCount: 0 };
+  if (initialReadiness.ready) {
+    return { ...initialReadiness, mapLaunchCommandSent: false, initialReadiness };
+  }
+
+  const launchCommand = `dota_launch_custom_game ${addon} ${map}`;
+  vc.send(launchCommand);
+  const elapsed = Date.now() - startedAt;
+  const remaining = Math.max(1, timeoutMs - elapsed);
+  const afterLaunch = await waiter(vc, minimumGameState, remaining);
+  return {
+    ...afterLaunch,
+    lastPong: afterLaunch.lastPong ?? initialReadiness.lastPong,
+    pongCount: initialReadiness.pongCount + afterLaunch.pongCount,
+    mapLaunchCommandSent: true,
+    launchCommand,
+    initialReadiness,
+  };
 }
 
 /** Execute route checks sequentially so each console response is correlated. */

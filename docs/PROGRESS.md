@@ -58,14 +58,18 @@ Last updated: 2026-08-05
 22. `6487003` - bounded explicit Steam launches when `-applaunch` is not forwarded and added non-owning attach
     mode to readiness and GridNav tools. A user-started, VConsole-enabled Workshop Tools session can now be checked
     without compiling underneath it, relaunching Dota, or closing the user's session.
-23. This milestone - added bounded engine-backed nearest-reachable waypoint suggestions to DebugSDK 1.2.0 and
+23. `8922af3` - added bounded engine-backed nearest-reachable waypoint suggestions to DebugSDK 1.2.0 and
     `map_engine_nav_test`, deduplicated adjacent segment failures into actionable repairs, corrected the 3v3 map's
     four mirrored blocked waypoints from the parent specification, rebuilt it, and proved all 64 GridNav checks pass.
+24. This milestone - closed the launch-to-map gap. The guarded navigation runner now waits through the early
+    VConsole-without-window race, safely closes only Source 2's exact watchdog stall window, focuses the render window,
+    explicitly loads the requested custom map when a fresh DebugSDK response does not arrive, runs GridNav, and shuts
+    Dota down. One autonomous Steam run demonstrated the entire sequence with no human UI interaction.
 
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 220 passed, 0 failed, and 2 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 225 passed, 0 failed, and 2 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 199 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
@@ -112,9 +116,10 @@ The attached runner now has a complete repair-and-retest proof without leaving D
   isolated terrain regions.
 - The rebuilt map returned all four managed routes and all 64 endpoint/segment checks. Every point was traversable,
   every segment and endpoint had a valid Valve path, and the test observed zero new console errors.
-- Workshop Tools accepted the Steam launch but initially remained on the dashboard. After the explicit
-  `dota_launch_custom_game` command, the DebugSDK handshake arrived immediately and the attached route test passed.
-  Dota then accepted a graceful quit command. Automating that launch-to-map handshake is the next engine milestone.
+- The follow-up autonomous run compiled the acceptance map, launched Workshop Tools through Steam, waited through
+  11 bounded early window checks, detected that the command-line map load had not completed, issued one explicit
+  `dota_launch_custom_game` command, received DebugSDK 1.2.0 at game state 4, passed all 64 checks with zero console
+  errors, and shut Dota down gracefully. No UI click or human intervention was required.
 
 ## Historical engine acceptance notes
 

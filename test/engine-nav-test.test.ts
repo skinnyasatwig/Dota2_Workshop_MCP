@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildEngineNavigationCommand,
+  ensureEngineNavigationMapReady,
   engineNavigationRepairSuggestions,
   engineNavigationRoutesFromManagedPaths,
   executeEngineNavigationChecks,
@@ -234,4 +235,45 @@ test("readiness reports the last observed DebugSDK state", async () => {
   assert.equal(ready.ready, true);
   assert.equal(ready.pongCount, 2);
   assert.match(ready.lastPong ?? "", /state=3/);
+});
+
+test("map readiness explicitly loads the custom game after a bounded empty grace period", async () => {
+  const sent: string[] = [];
+  const waits = [
+    { ready: false, lastPong: undefined, pongCount: 0 },
+    { ready: true, line: "[MCP] PONG state=4", lastPong: "[MCP] PONG state=4", pongCount: 1 },
+  ];
+  const fake = { send: (command: string) => sent.push(command) } as unknown as VConsoleClient;
+  const result = await ensureEngineNavigationMapReady(
+    fake,
+    "dota_three_vs_three",
+    "three_vs_three_blockout",
+    3,
+    120_000,
+    5000,
+    async () => waits.shift()!,
+  );
+
+  assert.equal(result.ready, true);
+  assert.equal(result.mapLaunchCommandSent, true);
+  assert.deepEqual(sent, ["dota_launch_custom_game dota_three_vs_three three_vs_three_blockout"]);
+  assert.equal(result.pongCount, 1);
+});
+
+test("map readiness does not reload a map that answers during the grace period", async () => {
+  const sent: string[] = [];
+  const fake = { send: (command: string) => sent.push(command) } as unknown as VConsoleClient;
+  const result = await ensureEngineNavigationMapReady(
+    fake,
+    "dota_three_vs_three",
+    "three_vs_three_blockout",
+    3,
+    120_000,
+    5000,
+    async () => ({ ready: true, line: "ready", lastPong: "ready", pongCount: 1 }),
+  );
+
+  assert.equal(result.ready, true);
+  assert.equal(result.mapLaunchCommandSent, false);
+  assert.deepEqual(sent, []);
 });

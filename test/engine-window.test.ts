@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { prepareAttachedEngineWindow } from "../src/dota/engine-window.js";
+import { prepareAttachedEngineWindow, waitForEngineWindow } from "../src/dota/engine-window.js";
 import type { Win32Spec } from "../src/dota/win32.js";
 
 test("attached engine window preparation restores and focuses Dota", async () => {
@@ -34,4 +34,41 @@ test("attached engine window preparation reports focus failures", async () => {
 
   assert.equal(result.ok, false);
   assert.equal(result.error, "no Dota window");
+});
+
+test("engine window wait absorbs the VConsole-before-window startup race", async () => {
+  let calls = 0;
+  const result = await waitForEngineWindow(
+    true,
+    1500,
+    500,
+    async () => {
+      calls++;
+      return calls < 3 ? { ok: false, error: "no Dota window" } : { ok: true, foreground: true };
+    },
+    async () => {},
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.attempts, 3);
+  assert.equal(calls, 3);
+});
+
+test("engine window wait remains bounded when no render window appears", async () => {
+  let calls = 0;
+  const result = await waitForEngineWindow(
+    true,
+    1000,
+    250,
+    async () => {
+      calls++;
+      return { ok: false, error: "still starting" };
+    },
+    async () => {},
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.attempts, 4);
+  assert.equal(result.error, "still starting");
+  assert.equal(calls, 4);
 });

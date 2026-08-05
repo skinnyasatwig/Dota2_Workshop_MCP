@@ -408,6 +408,9 @@ playable `.vpk` — a pipeline verified end to end.
   `GridNav:CanFindPath`, `GridNav:FindPathLength`, and `GridNav:IsTraversable`, then reassembles each logical route.
   A blocked point also receives a bounded nearest-reachable suggestion when Dota can find one; adjacent segment
   reports for the same point are collapsed into one actionable repair rather than repeated warnings.
+  The guarded launch waits for Dota's real render window, handles the exact watchdog stall popup, and sends one
+  explicit custom-map load command when the command-line launch remains on the dashboard. Tool-owned sessions are
+  still shut down automatically in success and failure cases.
 
 If engine startup is uncertain, run `map_engine_readiness_probe` before `map_engine_nav_test`; unlike the
 navigation test, the readiness probe sends no gameplay command and returns a screenshot plus structured

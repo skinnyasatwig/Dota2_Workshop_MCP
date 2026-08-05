@@ -5,7 +5,7 @@
 // reads the assert text, and flags the blocker; dota_dismiss_dialog clicks a safe button to unblock.
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { diagnoseDota, captureDialogPng, clickDialogButton, pickSafeButton } from "../dota/diagnose.js";
+import { closeTransientStallDialog, diagnoseDota, captureDialogPng, clickDialogButton, pickSafeButton } from "../dota/diagnose.js";
 import { json, error, guard, ToolResult, ContentItem } from "../util/result.js";
 
 export function registerDiagnoseTools(server: McpServer) {
@@ -79,9 +79,22 @@ export function registerDiagnoseTools(server: McpServer) {
       }
 
       const results: Array<{ hwnd: string; role: string; title: string; clicked?: string; error?: string }> = [];
+      let closedWatchdog = false;
       for (const t of targets) {
         const label = button ?? pickSafeButton(t.buttons);
         if (!label) {
+          if (!button && t.role === "stall") {
+            const closed = await closeTransientStallDialog(t);
+            results.push({
+              hwnd: t.hwnd,
+              role: t.role,
+              title: t.title,
+              clicked: closed.closed ? "Close watchdog stall window" : undefined,
+              error: closed.error,
+            });
+            closedWatchdog ||= closed.closed;
+            continue;
+          }
           results.push({ hwnd: t.hwnd, role: t.role, title: t.title, error: `No safe button found. Available: ${t.buttons.map((x) => x.replace(/&/g, "")).join(" | ") || "(none)"}. Pass one explicitly via 'button'.` });
           continue;
         }
@@ -90,6 +103,7 @@ export function registerDiagnoseTools(server: McpServer) {
       }
 
       // Re-check so the caller knows whether the game actually unblocked.
+      if (closedWatchdog) await new Promise((resolve) => setTimeout(resolve, 250));
       const after = await diagnoseDota();
       const lines = results.map((r) => (r.clicked ? `✓ [${r.role}] "${r.title}" → clicked "${r.clicked}"` : `✗ [${r.role}] "${r.title}" → ${r.error}`));
       lines.push("");
