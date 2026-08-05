@@ -222,6 +222,66 @@ test("exact PHYS hull vertices replace the enclosing bounds projection", async (
   assert.equal(physicalObstacleContainsPoint(obstacle, [8, 8], 10), false);
 });
 
+test("sphere and capsule PHYS primitives use tight conservative curved projections", async () => {
+  const sphere = entity("prop_static", "round_sphere", {
+    solid: "6",
+    model: "models/props/sphere.vmdl",
+  });
+  sphere.origin = "0 0 0";
+  sphere.scales = "2 1 1";
+  const capsule = entity("prop_static", "round_capsule", {
+    solid: "6",
+    model: "models/props/capsule.vmdl",
+  });
+  capsule.origin = "100 0 0";
+
+  const obstacles = await resolveMapCollisionObstacles(
+    [sphere, capsule],
+    "test.vpk",
+    async (_vpk, model) => ({
+      model,
+      status: "physical-bounds",
+      bounds: model.includes("sphere")
+        ? [{
+            min: [-10, -10, -10],
+            max: [10, 10, 10],
+            geometry: "sphere-bounds",
+            primitive: {
+              kind: "sphere",
+              centers: [[0, 0, 0]],
+              radiusVectors: [[10, 0, 0], [0, 10, 0], [0, 0, 10]],
+            },
+          }]
+        : [{
+            min: [-25, -5, -5],
+            max: [25, 5, 5],
+            geometry: "capsule-bounds",
+            primitive: {
+              kind: "capsule",
+              centers: [[-20, 0, 0], [20, 0, 0]],
+              radiusVectors: [[5, 0, 0], [0, 5, 0], [0, 0, 5]],
+            },
+          }],
+      source: "vrf-phys",
+      fromCache: false,
+      detail: "decoded round primitive",
+    }),
+  );
+
+  assert.equal(obstacles[0].physicalFootprints?.[0].projection, "curved-primitive");
+  assert.equal(obstacles[0].physicalFootprints?.[0].points.length, 32);
+  assert.equal(physicalObstacleContainsPoint(obstacles[0], [19, 0], 0), true);
+  assert.equal(physicalObstacleContainsPoint(obstacles[0], [0, 9], 0), true);
+  assert.equal(physicalObstacleContainsPoint(obstacles[0], [15, 8], 0), false);
+  assert.ok(Math.abs(obstacles[0].physicalFootprints![0].minZ + 10) < 1e-9);
+  assert.ok(Math.abs(obstacles[0].physicalFootprints![0].maxZ - 10) < 1e-9);
+
+  assert.equal(obstacles[1].physicalFootprints?.[0].projection, "curved-primitive");
+  assert.equal(physicalObstacleContainsPoint(obstacles[1], [124, 0], 0), true);
+  assert.equal(physicalObstacleContainsPoint(obstacles[1], [100, 4], 0), true);
+  assert.equal(physicalObstacleContainsPoint(obstacles[1], [100, 6], 0), false);
+});
+
 test("loose compiled addon models take precedence over the base VPK", async () => {
   const root = await mkdtemp(join(tmpdir(), "d2-addon-model-"));
   const compiled = join(root, "models", "props", "test.vmdl_c");

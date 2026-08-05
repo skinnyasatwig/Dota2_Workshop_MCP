@@ -65,15 +65,20 @@ Last updated: 2026-08-05
     VConsole-without-window race, safely closes only Source 2's exact watchdog stall window, focuses the render window,
     explicitly loads the requested custom map when a fresh DebugSDK response does not arrive, runs GridNav, and shuts
     Dota down. One autonomous Steam run demonstrated the entire sequence with no human UI interaction.
-25. This milestone - added a repository-owned, disposable real-GridNav fixture with a known-open route and a
+25. `10acf5e` - added a repository-owned, disposable real-GridNav fixture with a known-open route and a
     deliberately disconnected route. DebugSDK 1.3.0 now suggests repairs when endpoints are individually walkable
     but isolated from each other. The opt-in runner compiles, launches, asserts the exact engine-proven repair,
     reports console errors, shuts Dota down, and removes both temporary addon trees.
+26. This milestone - retained decoded sphere/capsule PHYS primitive geometry through per-part bind poses and cache
+    version 4, then projected it through entity transforms with 32 tangent half-planes. Preview and reachability now
+    use a tight conservative curved outline instead of the primitive's much larger transformed box, while malformed
+    metadata still falls back safely. An installed-VRF proof recovered all 14 capsules from Valve's current
+    Juggernaut model.
 
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 228 passed, 0 failed, and 2 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 230 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 199 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
@@ -86,7 +91,9 @@ Last updated: 2026-08-05
   infrastructure, depends on no private 3v3 file, stores no copied Valve VMAP, and leaves no temporary addon trees.
 - Installed ValveResourceFormat 19.2 recovered the physical hull bounds of
   `models/props_gameplay/cap_point001.vmdl_c` directly from `pak01_dir.vpk`; a second lookup reused the fingerprinted
-  cache. The same real-resource test recovers validated exact convex-hull vertices into cache version 3.
+  cache. The same real-resource test recovers validated exact convex-hull vertices into cache version 4.
+  A second installed-resource proof recovered 14 of 14 capsule primitives from the current Juggernaut model,
+  preserving each posed center pair and three radius basis vectors for tighter world projection.
   Empty-PHYS walls, barrels, trees, gates, and props remain explicitly unresolved rather than borrowing their render
   or hitbox bounds.
 - VRF's public checked Juggernaut physics fixture produced 15 of 15 exact convex hulls after its 15 published bind

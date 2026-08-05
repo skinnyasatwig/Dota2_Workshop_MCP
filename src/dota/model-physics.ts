@@ -17,12 +17,22 @@ export type ModelPhysicsGeometry =
   | "capsule-bounds"
   | "bounds";
 
+export interface ModelPhysicsPrimitive {
+  kind: "sphere" | "capsule";
+  /** Primitive centers after the PHYS part bind pose is applied. */
+  centers: Vector3[];
+  /** Model-space displacement vectors for radius along local X, Y, and Z. */
+  radiusVectors: [Vector3, Vector3, Vector3];
+}
+
 export interface ModelPhysicsBounds {
   min: Vector3;
   max: Vector3;
   /** Model-space vertices for a convex hull or a conservative convex envelope of a PHYS mesh. */
   vertices?: Vector3[];
   geometry?: ModelPhysicsGeometry;
+  /** Decoded round primitive retained for a tighter conservative world projection. */
+  primitive?: ModelPhysicsPrimitive;
 }
 
 export interface ModelPhysicsInspection {
@@ -43,11 +53,11 @@ interface CachedInspection {
 }
 
 interface PhysicsCacheFile {
-  version: 3;
+  version: 4;
   entries: Record<string, CachedInspection>;
 }
 
-const cacheFile = join(vrfDir(), "model-physics-cache-v3.json");
+const cacheFile = join(vrfDir(), "model-physics-cache-v4.json");
 let cache: PhysicsCacheFile | undefined;
 let cacheWrite = Promise.resolve();
 const pending = new Map<string, Promise<ModelPhysicsInspection>>();
@@ -214,6 +224,15 @@ function transformPose(point: readonly [number, number, number], pose?: PhysicsP
   ];
 }
 
+function transformPoseDirection(direction: readonly [number, number, number], pose?: PhysicsPose): Vector3 {
+  if (!pose) return [...direction];
+  return [
+    direction[0] * pose[0] + direction[1] * pose[1] + direction[2] * pose[2],
+    direction[0] * pose[4] + direction[1] * pose[5] + direction[2] * pose[6],
+    direction[0] * pose[8] + direction[1] * pose[9] + direction[2] * pose[10],
+  ];
+}
+
 function boundsFromPoints(points: readonly Vector3[]): ModelPhysicsBounds | undefined {
   if (!points.length || points.some((point) => point.some((coordinate) => !Number.isFinite(coordinate)))) {
     return undefined;
@@ -257,6 +276,41 @@ function posedShape(
   };
 }
 
+function posedRoundPrimitive(
+  localCenters: readonly Vector3[],
+  radius: number,
+  pose: PhysicsPose | undefined,
+  kind: ModelPhysicsPrimitive["kind"],
+  geometry: "sphere-bounds" | "capsule-bounds",
+): ModelPhysicsBounds | undefined {
+  const centers = localCenters.map((center) => transformPose(center, pose));
+  const radiusVectors: [Vector3, Vector3, Vector3] = [
+    transformPoseDirection([radius, 0, 0], pose),
+    transformPoseDirection([0, radius, 0], pose),
+    transformPoseDirection([0, 0, radius], pose),
+  ];
+  if (
+    !centers.length ||
+    centers.some((center) => center.some((coordinate) => !Number.isFinite(coordinate))) ||
+    radiusVectors.some((vector) => vector.some((coordinate) => !Number.isFinite(coordinate)))
+  ) return undefined;
+  const support = (axis: number): number => Math.hypot(
+    radiusVectors[0][axis],
+    radiusVectors[1][axis],
+    radiusVectors[2][axis],
+  );
+  const min = [0, 1, 2].map((axis) =>
+    Math.min(...centers.map((center) => center[axis])) - support(axis)) as Vector3;
+  const max = [0, 1, 2].map((axis) =>
+    Math.max(...centers.map((center) => center[axis])) + support(axis)) as Vector3;
+  return {
+    min,
+    max,
+    geometry,
+    primitive: { kind, centers, radiusVectors },
+  };
+}
+
 function vectorProperty(block: string, property: string): Vector3 | undefined {
   const match = new RegExp(`\\b${property}\\s*=\\s*\\[\\s*([^\\]]+)\\]`).exec(block);
   return match ? vector(match[1]) : undefined;
@@ -275,7 +329,7 @@ function addUniqueShape(
 ): void {
   if (!shape) return;
   const key = `${shape.geometry ?? "bounds"}|${shape.min.join(",")}|${shape.max.join(",")}|` +
-    `${JSON.stringify(shape.vertices ?? [])}`;
+    `${JSON.stringify(shape.vertices ?? [])}|${JSON.stringify(shape.primitive ?? null)}`;
   if (seen.has(key)) return;
   seen.add(key);
   output.push(shape);
@@ -329,30 +383,22 @@ export function parseVrfPhysicsBounds(text: string): ModelPhysicsBounds[] {
       const center = vectorProperty(sphere, "m_vCenter");
       const radius = numberProperty(sphere, "m_flRadius");
       if (!center || radius === undefined || radius <= 0) continue;
-      const localBounds: ModelPhysicsBounds = {
-        min: center.map((coordinate) => coordinate - radius) as Vector3,
-        max: center.map((coordinate) => coordinate + radius) as Vector3,
-      };
-      addUniqueShape(bounds, seen, posedShape(localBounds, pose, "sphere-bounds"));
+      addUniqueShape(
+        bounds,
+        seen,
+        posedRoundPrimitive([center], radius, pose, "sphere", "sphere-bounds"),
+      );
     }
 
     for (const capsule of assignedObjectBlocks(shapeSource, "m_Capsule")) {
       const centers = parseFloat3TextArray(capsule, "m_vCenter", 2, 2);
       const radius = numberProperty(capsule, "m_flRadius");
       if (!centers || centers.length !== 2 || radius === undefined || radius <= 0) continue;
-      const localBounds: ModelPhysicsBounds = {
-        min: [
-          Math.min(centers[0][0], centers[1][0]) - radius,
-          Math.min(centers[0][1], centers[1][1]) - radius,
-          Math.min(centers[0][2], centers[1][2]) - radius,
-        ],
-        max: [
-          Math.max(centers[0][0], centers[1][0]) + radius,
-          Math.max(centers[0][1], centers[1][1]) + radius,
-          Math.max(centers[0][2], centers[1][2]) + radius,
-        ],
-      };
-      addUniqueShape(bounds, seen, posedShape(localBounds, pose, "capsule-bounds"));
+      addUniqueShape(
+        bounds,
+        seen,
+        posedRoundPrimitive(centers, radius, pose, "capsule", "capsule-bounds"),
+      );
     }
   }
 
@@ -382,9 +428,9 @@ async function loadCache(): Promise<PhysicsCacheFile> {
   if (cache) return cache;
   try {
     const parsed = JSON.parse(await readFile(cacheFile, "utf8")) as PhysicsCacheFile;
-    cache = parsed.version === 3 && parsed.entries ? parsed : { version: 3, entries: {} };
+    cache = parsed.version === 4 && parsed.entries ? parsed : { version: 4, entries: {} };
   } catch {
-    cache = { version: 3, entries: {} };
+    cache = { version: 4, entries: {} };
   }
   return cache;
 }
@@ -460,6 +506,7 @@ async function inspectVrfResource(
     }
     const exactHullCount = bounds.filter((entry) => entry.geometry === "convex-hull").length;
     const meshHullCount = bounds.filter((entry) => entry.geometry === "mesh-vertex-hull").length;
+    const curvedPrimitiveCount = bounds.filter((entry) => entry.primitive !== undefined).length;
     const stored: CachedInspection = bounds.length
       ? {
           model,
@@ -470,7 +517,8 @@ async function inspectVrfResource(
             `${bounds.length} conservative physical hull bound(s) recovered from the ` +
             `${options.sourceLabel} model PHYS block` +
             `${exactHullCount ? `; ${exactHullCount} include exact convex-hull vertices` : ""}` +
-            `${meshHullCount ? `; ${meshHullCount} include mesh-vertex envelopes` : ""}.`,
+            `${meshHullCount ? `; ${meshHullCount} include mesh-vertex envelopes` : ""}` +
+            `${curvedPrimitiveCount ? `; ${curvedPrimitiveCount} retain round primitive geometry` : ""}.`,
         }
       : {
           model,

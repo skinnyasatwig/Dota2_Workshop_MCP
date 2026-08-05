@@ -329,7 +329,8 @@ export function registerMapTools(server: McpServer) {
             `${report.unreachableCellCount} unreachable cells.`,
           `Collision inventory: ${report.physicalBoundsCollisionObstacleCount} PHYS-bound prop(s), ` +
             `${report.exactHullProjectionCount} exact hull, ${report.meshVertexHullProjectionCount} mesh-envelope, ` +
-            `and ${report.boundsProjectionCount} bounds-only projection(s), ` +
+            `${report.curvedPrimitiveProjectionCount} curved-primitive, and ` +
+            `${report.boundsProjectionCount} bounds-only projection(s), ` +
             `${report.approximatedCollisionObstacleCount} known-class approximation(s), ` +
             `${report.unknownBoundsCollisionObstacleCount} solid prop(s) with unknown model bounds; ` +
             `${report.modelCollisionBlockedCellCount} terrain cell(s) conservatively blocked by PHYS bounds.`,
@@ -1536,6 +1537,7 @@ export function registerMapTools(server: McpServer) {
             physicalBoundsCollisionObstacleCount: number;
             exactHullProjectionCount: number;
             meshVertexHullProjectionCount: number;
+            curvedPrimitiveProjectionCount: number;
             boundsProjectionCount: number;
             approximatedCollisionObstacleCount: number;
             unknownBoundsCollisionObstacleCount: number;
@@ -1602,6 +1604,7 @@ export function registerMapTools(server: McpServer) {
           physicalBoundsCollisionObstacleCount: reachability.physicalBoundsCollisionObstacleCount,
           exactHullProjectionCount: reachability.exactHullProjectionCount,
           meshVertexHullProjectionCount: reachability.meshVertexHullProjectionCount,
+          curvedPrimitiveProjectionCount: reachability.curvedPrimitiveProjectionCount,
           boundsProjectionCount: reachability.boundsProjectionCount,
           approximatedCollisionObstacleCount: reachability.approximatedCollisionObstacleCount,
           unknownBoundsCollisionObstacleCount: reachability.unknownBoundsCollisionObstacleCount,

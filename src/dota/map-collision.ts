@@ -6,6 +6,7 @@ import {
   inspectVpkModelPhysics,
   ModelPhysicsBounds,
   ModelPhysicsInspection,
+  ModelPhysicsPrimitive,
   normalizeCompiledModelPath,
 } from "./model-physics.js";
 
@@ -16,12 +17,12 @@ export type MapCollisionConfidence =
   | "unknown-model-bounds";
 
 export interface MapCollisionFootprint {
-  /** Convex XY projection of exact hull vertices when available, otherwise its conservative bounds. */
+  /** Convex XY projection from exact hulls, curved primitive supports, or a conservative fallback. */
   points: [number, number][];
   minZ: number;
   maxZ: number;
   localBounds: ModelPhysicsBounds;
-  projection: "exact-hull" | "mesh-vertex-hull" | "bounds";
+  projection: "exact-hull" | "mesh-vertex-hull" | "curved-primitive" | "bounds";
 }
 
 export interface MapCollisionObstacle {
@@ -209,6 +210,110 @@ function transformSourcePoint(
   ];
 }
 
+function transformSourceDirection(
+  matrix: SourceAngleMatrix,
+  direction: readonly [number, number, number],
+): [number, number, number] {
+  return [
+    matrix[0][0] * direction[0] + matrix[0][1] * direction[1] + matrix[0][2] * direction[2],
+    matrix[1][0] * direction[0] + matrix[1][1] * direction[1] + matrix[1][2] * direction[2],
+    matrix[2][0] * direction[0] + matrix[2][1] * direction[1] + matrix[2][2] * direction[2],
+  ];
+}
+
+function clipToHalfPlane(
+  polygon: readonly [number, number][],
+  normal: readonly [number, number],
+  support: number,
+): [number, number][] {
+  if (!polygon.length) return [];
+  const output: [number, number][] = [];
+  const signed = (point: readonly [number, number]) =>
+    point[0] * normal[0] + point[1] * normal[1] - support;
+  for (let index = 0; index < polygon.length; index++) {
+    const current = polygon[index];
+    const previous = polygon[(index + polygon.length - 1) % polygon.length];
+    const currentDistance = signed(current);
+    const previousDistance = signed(previous);
+    const currentInside = currentDistance <= 1e-8;
+    const previousInside = previousDistance <= 1e-8;
+    if (currentInside !== previousInside) {
+      const denominator = previousDistance - currentDistance;
+      if (Math.abs(denominator) > 1e-12) {
+        const amount = previousDistance / denominator;
+        output.push([
+          previous[0] + (current[0] - previous[0]) * amount,
+          previous[1] + (current[1] - previous[1]) * amount,
+        ]);
+      }
+    }
+    if (currentInside) output.push([...current]);
+  }
+  return output;
+}
+
+/** Build a 32-tangent outer polygon from the exact support function of a transformed sphere/capsule. */
+function curvedPrimitiveFootprint(
+  primitive: ModelPhysicsPrimitive,
+  localBounds: ModelPhysicsBounds,
+  matrix: SourceAngleMatrix,
+  scales: readonly [number, number, number],
+  origin: readonly [number, number, number],
+): MapCollisionFootprint | undefined {
+  if (
+    (primitive.kind === "sphere" && primitive.centers.length !== 1) ||
+    (primitive.kind === "capsule" && primitive.centers.length !== 2) ||
+    primitive.radiusVectors.length !== 3
+  ) return undefined;
+  const scaled = (point: readonly [number, number, number]): [number, number, number] => [
+    point[0] * scales[0],
+    point[1] * scales[1],
+    point[2] * scales[2],
+  ];
+  const centers = primitive.centers.map((center) =>
+    transformSourcePoint(matrix, scaled(center), origin));
+  const radiusVectors = primitive.radiusVectors.map((vector) =>
+    transformSourceDirection(matrix, scaled(vector)));
+  if (
+    centers.some((point) => point.some((coordinate) => !Number.isFinite(coordinate))) ||
+    radiusVectors.some((point) => point.some((coordinate) => !Number.isFinite(coordinate)))
+  ) return undefined;
+
+  const xyRadiusBound = radiusVectors.reduce(
+    (sum, vector) => sum + Math.hypot(vector[0], vector[1]),
+    0,
+  );
+  const extent = Math.max(
+    1,
+    ...centers.flatMap((center) => [Math.abs(center[0]), Math.abs(center[1])]),
+  ) + xyRadiusBound + 1;
+  let points: [number, number][] = [
+    [-extent, -extent],
+    [extent, -extent],
+    [extent, extent],
+    [-extent, extent],
+  ];
+  const tangentCount = 32;
+  for (let index = 0; index < tangentCount; index++) {
+    const angle = (index / tangentCount) * Math.PI * 2;
+    const normal: [number, number] = [Math.cos(angle), Math.sin(angle)];
+    const centerSupport = Math.max(...centers.map((center) =>
+      center[0] * normal[0] + center[1] * normal[1]));
+    const radiusSupport = Math.hypot(...radiusVectors.map((vector) =>
+      vector[0] * normal[0] + vector[1] * normal[1]));
+    points = clipToHalfPlane(points, normal, centerSupport + radiusSupport);
+    if (points.length < 3) return undefined;
+  }
+  const zRadius = Math.hypot(...radiusVectors.map((vector) => vector[2]));
+  return {
+    points,
+    minZ: Math.min(...centers.map((center) => center[2])) - zRadius,
+    maxZ: Math.max(...centers.map((center) => center[2])) + zRadius,
+    localBounds,
+    projection: "curved-primitive",
+  };
+}
+
 function convexHull2d(points: readonly [number, number][]): [number, number][] {
   const epsilon = 1e-9;
   const sorted = [...points]
@@ -253,6 +358,10 @@ function transformedFootprints(
   if (!angles || !scales || scales.some((scale) => Math.abs(scale) <= 1e-9)) return undefined;
   const matrix = sourceAngleMatrix(angles);
   const footprints = bounds.map((localBounds) => {
+    if (localBounds.primitive) {
+      const curved = curvedPrimitiveFootprint(localBounds.primitive, localBounds, matrix, scales, origin);
+      if (curved) return curved;
+    }
     const xs = [localBounds.min[0] * scales[0], localBounds.max[0] * scales[0]];
     const ys = [localBounds.min[1] * scales[1], localBounds.max[1] * scales[1]];
     const zs = [localBounds.min[2] * scales[2], localBounds.max[2] * scales[2]];

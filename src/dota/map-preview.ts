@@ -237,7 +237,9 @@ function drawPreview(
               ? [57, 232, 255]
               : footprint.projection === "mesh-vertex-hull"
                 ? [82, 189, 214]
-                : [61, 146, 176];
+                : footprint.projection === "curved-primitive"
+                  ? [91, 220, 173]
+                  : [61, 146, 176];
             line(from[0], from[1], to[0], to[1], color, 0.95, 2);
           }
         }
@@ -402,7 +404,7 @@ function drawPreview(
       minimapBounds: "magenta rectangle",
       volumes: "orange camp, purple no-ward, cyan trigger, pink player blocker outlines",
       visionBlockers: "purple linked lines",
-      collisionObstacles: "bright cyan exact PHYS hulls; medium cyan mesh envelopes; muted cyan PHYS bounds; dark green/orange class approximations; white X means model bounds unknown",
+      collisionObstacles: "bright cyan exact PHYS hulls; medium cyan mesh envelopes; green-cyan conservative curved primitives; muted cyan PHYS bounds; dark green/orange class approximations; white X means model bounds unknown",
     },
   };
   return { png: encodeRgbaPng(width, height, rgba), stats, reachability };

@@ -161,6 +161,45 @@ test("bind poses carry mesh, sphere, and capsule PHYS shapes into model space", 
   ]);
   assert.deepEqual(shapes[0].vertices?.[0], [8, 18, 28]);
   assert.deepEqual(shapes[1].vertices?.[0], [9, 19, 30]);
+  assert.deepEqual(shapes[2].primitive, {
+    kind: "sphere",
+    centers: [[12, 20, 30]],
+    radiusVectors: [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+  });
+  assert.deepEqual(shapes[3].primitive, {
+    kind: "capsule",
+    centers: [[8, 20, 30], [8, 20, 34]],
+    radiusVectors: [[0.5, 0, 0], [0, 0.5, 0], [0, 0, 0.5]],
+  });
+});
+
+test("round PHYS primitives retain non-uniform bind-pose radius vectors", () => {
+  const shapes = parseVrfPhysicsBounds(`
+    --- Data for block "PHYS" ---
+    {
+      m_bindPose = [ [
+        2, 0, 0, 10,
+        0, 3, 0, 20,
+        0, 0, 4, 30,
+      ] ]
+      m_parts = [ { m_rnShape = {
+        m_spheres = [ { m_Sphere = {
+          m_vCenter = [ 1, 2, 3 ]
+          m_flRadius = 2
+        } } ]
+      } } ]
+    }
+  `);
+  assert.deepEqual(shapes, [{
+    min: [8, 20, 34],
+    max: [16, 32, 50],
+    geometry: "sphere-bounds",
+    primitive: {
+      kind: "sphere",
+      centers: [[12, 26, 42]],
+      radiusVectors: [[4, 0, 0], [0, 6, 0], [0, 0, 8]],
+    },
+  }]);
 });
 
 test("compiled model paths are normalized without accepting arbitrary resources", () => {
@@ -192,4 +231,18 @@ test("VRF recovers and caches a known base-game model PHYS hull", {
   assert.ok(first.bounds.some((bounds) => bounds.geometry === "convex-hull"));
   assert.equal(second.status, "physical-bounds");
   assert.equal(second.fromCache, true);
+});
+
+test("VRF retains curved primitives from a known base-game model", {
+  skip: !process.env.DOTA2_TEST_VPK,
+}, async () => {
+  const inspection = await inspectVpkModelPhysics(
+    process.env.DOTA2_TEST_VPK!,
+    "models/heroes/juggernaut/juggernaut.vmdl",
+  );
+  assert.equal(inspection.status, "physical-bounds");
+  const capsules = inspection.bounds.filter((bounds) => bounds.primitive?.kind === "capsule");
+  assert.ok(capsules.length >= 1);
+  assert.ok(capsules.every((bounds) => bounds.primitive?.centers.length === 2));
+  assert.ok(capsules.every((bounds) => bounds.primitive?.radiusVectors.length === 3));
 });

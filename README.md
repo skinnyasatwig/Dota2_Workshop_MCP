@@ -228,7 +228,8 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
 - **`map_preview`** — render a diagnostic top-down **image straight from the data**, no game launch.
   In addition to shaded terrain and water it overlays contours, cliff cells, ramp cells, current arrows,
   entities, complete waypoint paths, tower ranges, camps, objectives, minimap bounds, checked trigger/blocker volumes, missing terrain
-  recipes, cyan bounds recovered from real model `PHYS` blocks, explicit Valve tree/obstruction broad phases,
+  recipes, color-coded outlines recovered from real model `PHYS` blocks (including conservative curved
+  sphere/capsule outlines), explicit Valve tree/obstruction broad phases,
   collision-enabled props whose physical bounds remain unknown,
   and regions unreachable from player/creep spawns. Every overlay family can be hidden.
 - **`map_reachability`** — analyze the whole tile grid offline and report missing terrain recipes,
@@ -236,10 +237,13 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
   waypoint segments that cross blocked cells. It recognizes generated ramps and checked player-blocking
   volume footprints, treats Dota river water as walkable, and resolves collision-enabled props through
   ValveResourceFormat, preferring loose compiled models and the active addon's `pak01_dir.vpk` before the base Dota
-  archive. Only conservative bounds from a real non-empty model `PHYS` block are cached, transformed,
-  previewed, and allowed to block covered cells; render/hitbox bounds are never substituted. It also warns when a
+  archive. Only collision recovered from a real non-empty model `PHYS` block is cached, transformed, previewed,
+  and allowed to block covered cells; render/hitbox bounds are never substituted. Convex hull vertices project
+  exactly, mesh vertices form conservative convex envelopes, and decoded sphere/capsule primitives use 32 tangent
+  half-planes to make a tight outer outline that remains safely larger than the true curve under bind poses,
+  pitch/yaw/roll, and non-uniform entity scale. It also warns when a
   waypoint approaches `ent_dota_tree` or `point_simple_obstruction`, using a deliberately small 64-unit broad phase
-  because Valve does not publish those exact hulls in FGD. Exact hull surfaces, pitched/rolled transforms, dynamic
+  because Valve does not publish those exact hulls in FGD. Concave mesh details, dynamic collision, team-selective
   collision, and Valve's final navmesh remain engine-test responsibilities. Set `resolveModelCollision:false` for a
   faster terrain-only pass.
 - **`map_engine_nav_test`** — close the offline-to-engine gap with one bounded Dota launch. It compiles
