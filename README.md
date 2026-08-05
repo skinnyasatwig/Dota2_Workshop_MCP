@@ -186,6 +186,9 @@ self-testing (no pixel guessing).
   and safely screenshot — returns a single pass/fail report. A project can save these settings in
   `.dota-workshop/selftest.json`; explicit tool arguments override the recipe.
 
+Real navigation checks use the SDK's compact `mcp_nav` command. Requests carry unique IDs and long paths are chunked,
+so stale VConsole history and Source 2's short console-command limit cannot corrupt a new result.
+
 The SDK also exposes `mcp_spawn`, `mcp_gold`, `mcp_level`, `mcp_item`, `mcp_event` (fire a custom UI event), `mcp_hud`
 (clean screenshots) and `mcp_pause` — all callable via `dota_send_console_command` too.
 
@@ -240,8 +243,9 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
   collision, and Valve's final navmesh remain engine-test responsibilities. Set `resolveModelCollision:false` for a
   faster terrain-only pass.
 - **`map_engine_nav_test`** — close the offline-to-engine gap with one bounded Dota launch. It compiles
-  first, reads routes from the unified map specification (or explicit input), asks Valve's real `GridNav`
-  for endpoint and segment reachability/path lengths, returns structured failures, and automatically
+  or can attach to a preserved normally launched tools session. It reads routes from the unified map specification
+  (or explicit input), asks Valve's real `GridNav` for endpoint and segment reachability/path lengths through compact
+  request-correlated chunks, returns structured failures, and automatically
   shuts Dota down even when a check fails. It is a dry run by default and refuses to replace an existing
   Dota session unless that permission is explicit. Its default `auto` launcher gives Steam a bounded chance
   to start the game, then uses the installed executable only when Steam created no Dota process. An explicit
@@ -400,8 +404,8 @@ playable `.vpk` — a pipeline verified end to end.
   targets such as `!activator`, wildcard targets, and existing class-name destinations are not misreported.
 - **`map_engine_nav_test`** — optional engine preflight for facts the text pipeline cannot prove.
   Call it once with `dryRun:true` to review route/check counts, then with `dryRun:false` when Dota is
-  closed. The tool compiles, launches the requested map exactly once, runs `GridNav:CanFindPath`,
-  `GridNav:FindPathLength`, and `GridNav:IsTraversable` over managed paths, and automatically exits.
+  closed, or attach to a normally launched Workshop Tools session. The tool runs correlated, console-safe chunks of
+  `GridNav:CanFindPath`, `GridNav:FindPathLength`, and `GridNav:IsTraversable`, then reassembles each logical route.
 
 If engine startup is uncertain, run `map_engine_readiness_probe` before `map_engine_nav_test`; unlike the
 navigation test, the readiness probe sends no gameplay command and returns a screenshot plus structured

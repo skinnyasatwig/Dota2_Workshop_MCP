@@ -28,7 +28,8 @@ test("full automation fixture crosses specification, components, terrain, and en
   assert.equal(routes.length, 2);
   for (const route of routes) {
     const command = buildEngineNavigationCommand(route, "both");
-    assert.match(command, /GridNav:CanFindPath/);
+    assert.match(command, /^mcp_nav nav /);
+    assert.ok(command.length < 480);
     assert.match(command, new RegExp(route.name));
   }
 });

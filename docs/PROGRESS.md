@@ -119,5 +119,14 @@ own NVAPI. The global profile lost its one override and the Dota profile lost it
 readiness run still produced the same `NVAPI_ACCESS_DENIED` startup modal. A distinct explicit-Steam run produced no
 Dota process and no modal: the already-running Steam client did not forward `-applaunch`. Engine retries stopped there.
 The MCP now fails that Steam condition after 20 seconds and supports attaching to a map launched normally through
-the Workshop Tools UI. Attach-mode dry runs for readiness and all four managed GridNav routes passed; the real attached
-check awaits one normal user-started tools session.
+the Workshop Tools UI. On 2026-08-05, that attached path completed both real engine stages:
+
+- Readiness restored the hidden Dota window, received a fresh correlated DebugSDK response, and preserved the session.
+- DebugSDK 1.1.3 moved GridNav logic behind a compact `mcp_nav` command, keeping every request below Source 2's console
+  command limit. Request IDs prevent replayed VConsole history from satisfying a new check, and long routes are split
+  into bounded overlapping chunks before their results are reassembled.
+- The four managed 3v3 routes returned all 64 requested endpoint/segment checks with zero protocol failures and zero
+  new console errors.
+- Engine acceptance correctly failed on map data: segment 1 and segment 2 of every route are blocked because the
+  mirrored waypoint at `(±4224, ±2816, 256)` is not traversable. The other 52 segment checks and all four endpoint
+  checks passed. This is now an actionable map-generation issue rather than an automation gap.

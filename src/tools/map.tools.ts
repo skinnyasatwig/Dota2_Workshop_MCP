@@ -43,6 +43,7 @@ import { defaultVconPort, getVConsole } from "../dota/vconsole.js";
 import { isProcessRunning } from "../dota/process.js";
 import { diagnoseDota } from "../dota/diagnose.js";
 import { captureWindowPng } from "../dota/capture.js";
+import { prepareAttachedEngineWindow } from "../dota/engine-window.js";
 import {
   explainEngineReadiness,
   observeEngineReadiness,
@@ -388,6 +389,12 @@ export function registerMapTools(server: McpServer) {
           .describe(
             "Use an already-running, VConsole-enabled Dota tools session instead of launching or closing Dota (default false).",
           ),
+        focusDotaWindow: z
+          .boolean()
+          .optional()
+          .describe(
+            "Restore and focus an attached Dota window before probing (default true; prevents hidden-window VConsole stalls).",
+          ),
         launchStrategy: z
           .enum(["auto", "steam", "direct"])
           .optional()
@@ -417,6 +424,7 @@ export function registerMapTools(server: McpServer) {
         shutdownTimeoutMs,
         replaceRunningDota,
         attachToRunningDota,
+        focusDotaWindow,
         launchStrategy,
         renderer,
         vconPort,
@@ -437,6 +445,7 @@ export function registerMapTools(server: McpServer) {
         const isDryRun = dryRun !== false;
         const dotaWasRunning = await isProcessRunning("dota2.exe");
         const attachMode = attachToRunningDota === true;
+        const shouldFocusAttachedWindow = attachMode && focusDotaWindow !== false;
 
         if (isDryRun) {
           return json(
@@ -452,6 +461,7 @@ export function registerMapTools(server: McpServer) {
               dotaWasRunning,
               replaceRunningDota: replaceRunningDota === true,
               attachToRunningDota: attachMode,
+              focusDotaWindow: shouldFocusAttachedWindow,
               launchCount: attachMode ? 0 : 1,
               launchStrategy: launchStrategy ?? "auto",
               renderer: renderer ?? "default",
@@ -512,6 +522,7 @@ export function registerMapTools(server: McpServer) {
         let consoleSignals: string[] = [];
         let fatalError: string | undefined;
         let shutdown: Awaited<ReturnType<typeof shutdownGame>> | undefined;
+        let windowPreparation: Awaited<ReturnType<typeof prepareAttachedEngineWindow>> | undefined;
 
         try {
           if (!attachMode) {
@@ -527,6 +538,12 @@ export function registerMapTools(server: McpServer) {
               renderer === "default" ? undefined : renderer,
             );
             launched = true;
+          }
+          if (attachMode) {
+            windowPreparation = await prepareAttachedEngineWindow(shouldFocusAttachedWindow);
+            if (!windowPreparation.ok) {
+              throw new Error(`Could not prepare the attached Dota window: ${windowPreparation.error}`);
+            }
           }
           if (!vc.isConnected()) await vc.connectWithRetry(60_000, 1000);
           vc.clearRing();
@@ -595,6 +612,7 @@ export function registerMapTools(server: McpServer) {
             ? { copiedTo: attached.copiedTo, bootstrapAction: attached.bootstrapAction }
             : { skipped: true },
           launch: launchResult,
+          windowPreparation,
           observation,
           explanation,
           consoleSignals,
@@ -618,6 +636,9 @@ export function registerMapTools(server: McpServer) {
           "State timeline:",
           ...timeline,
           `Blocking dialog: ${blocked ? "YES" : "no"}; screenshot: ${screenshotBuffer ? `captured (${screenshot?.mode})` : shouldCapture ? "failed" : "skipped"}.`,
+          ...(windowPreparation
+            ? [`Attached window: ${windowPreparation.ok ? "restored and focused" : "PREPARATION FAILED"}.`]
+            : []),
           attachMode ? "Attached Dota session: preserved." : `Automatic shutdown: ${shutdown?.stopped ? "complete" : "FAILED"}.`,
           ...(fatalError ? [`Fatal: ${fatalError}`] : []),
           ...(diagnosis?.summary ? ["Window diagnosis:", diagnosis.summary] : []),
@@ -690,6 +711,12 @@ export function registerMapTools(server: McpServer) {
           .describe(
             "Use an already-running, VConsole-enabled Dota tools session instead of launching or closing Dota (default false).",
           ),
+        focusDotaWindow: z
+          .boolean()
+          .optional()
+          .describe(
+            "Restore and focus an attached Dota window before GridNav checks (default true; prevents hidden-window VConsole stalls).",
+          ),
         launchStrategy: z
           .enum(["auto", "steam", "direct"])
           .optional()
@@ -722,6 +749,7 @@ export function registerMapTools(server: McpServer) {
         shutdownTimeoutMs,
         replaceRunningDota,
         attachToRunningDota,
+        focusDotaWindow,
         launchStrategy,
         renderer,
         vconPort,
@@ -767,6 +795,7 @@ export function registerMapTools(server: McpServer) {
         const isDryRun = dryRun !== false;
         const port = vconPort ?? defaultVconPort();
         const attachMode = attachToRunningDota === true;
+        const shouldFocusAttachedWindow = attachMode && focusDotaWindow !== false;
 
         if (isDryRun) {
           return json(
@@ -783,6 +812,7 @@ export function registerMapTools(server: McpServer) {
               dotaWasRunning,
               replaceRunningDota: replaceRunningDota === true,
               attachToRunningDota: attachMode,
+              focusDotaWindow: shouldFocusAttachedWindow,
               launchCount: attachMode ? 0 : 1,
               launchStrategy: launchStrategy ?? "auto",
               renderer: renderer ?? "default",
@@ -839,6 +869,7 @@ export function registerMapTools(server: McpServer) {
         let consoleTail: string[] = [];
         let preShutdownDiagnosis: Awaited<ReturnType<typeof diagnoseDota>> | undefined;
         let shutdown: Awaited<ReturnType<typeof shutdownGame>> | undefined;
+        let windowPreparation: Awaited<ReturnType<typeof prepareAttachedEngineWindow>> | undefined;
 
         try {
           if (!attachMode) {
@@ -854,6 +885,12 @@ export function registerMapTools(server: McpServer) {
             );
             launched = true;
           }
+          if (attachMode) {
+            windowPreparation = await prepareAttachedEngineWindow(shouldFocusAttachedWindow);
+            if (!windowPreparation.ok) {
+              throw new Error(`Could not prepare the attached Dota window: ${windowPreparation.error}`);
+            }
+          }
           if (!vc.isConnected()) await vc.connectWithRetry(60_000, 1000);
           vc.clearRing();
           const ready = await waitForEngineNavigationReady(
@@ -866,6 +903,10 @@ export function registerMapTools(server: McpServer) {
             fatalError = `Map did not reach Dota game state ${readyGameState ?? 3} before the timeout.`;
           } else {
             readyLine = ready.line;
+            // VConsole can replay old process output immediately after connecting.
+            // Correlated readiness is now proven, so keep only errors produced by
+            // the navigation queries themselves.
+            vc.clearRing();
             execution = await executeEngineNavigationChecks(
               vc,
               chosenRoutes,
@@ -924,6 +965,7 @@ export function registerMapTools(server: McpServer) {
             ? { copiedTo: attached.copiedTo, bootstrapAction: attached.bootstrapAction }
             : { skipped: true },
           launch: launchResult,
+          windowPreparation,
           readyLine,
           readiness,
           results: execution.results,
@@ -941,6 +983,9 @@ export function registerMapTools(server: McpServer) {
           `${map} ENGINE NAV: ${failed ? "FAILED" : "PASSED"}`,
           `${execution.results.length}/${chosenRoutes.length} route responses; ${failedRouteResults.length} failed route(s), ${failedChecks} failed check(s).`,
           `Console errors: ${consoleErrors.length}; ${attachMode ? "attached Dota session preserved" : `automatic shutdown: ${shutdown?.stopped ? "complete" : "FAILED"}`}.`,
+          ...(windowPreparation
+            ? [`Attached window: ${windowPreparation.ok ? "restored and focused" : "PREPARATION FAILED"}.`]
+            : []),
           ...(fatalError ? [`Fatal: ${fatalError}`] : []),
           ...execution.failures.map((failure) => `  [ERROR] ${failure.name}: ${failure.error}`),
           ...failedRouteResults.map((result) => `  [BLOCKED] ${result.name}`),

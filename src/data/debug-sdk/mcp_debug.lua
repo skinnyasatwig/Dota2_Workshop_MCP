@@ -15,11 +15,16 @@
   your addon by hand — re-attach to update.
 ]]
 
-local SDK_VERSION = "1.0.0"
+local SDK_VERSION = "1.1.3"
 
 ----------------------------------------------------------------------
 -- Tiny JSON encoder (no dependencies; handles the shapes we emit).
 ----------------------------------------------------------------------
+local JSON_ARRAY_MT = {}
+local function jsonArray(values)
+  return setmetatable(values or {}, JSON_ARRAY_MT)
+end
+
 local function jsonEncode(v, seen)
   seen = seen or {}
   local t = type(v)
@@ -40,12 +45,14 @@ local function jsonEncode(v, seen)
     seen[v] = true
     -- array?
     local n, isArray = 0, true
+    local forcedArray = getmetatable(v) == JSON_ARRAY_MT
     for k, _ in pairs(v) do
       n = n + 1
       if type(k) ~= "number" then isArray = false end
     end
+    if n == 0 and not forcedArray then isArray = false end
     local parts = {}
-    if isArray and n > 0 then
+    if isArray then
       for i = 1, #v do parts[#parts + 1] = jsonEncode(v[i], seen) end
       seen[v] = nil
       return "[" .. table.concat(parts, ",") .. "]"
@@ -129,8 +136,15 @@ end
 ----------------------------------------------------------------------
 -- Command implementations.
 ----------------------------------------------------------------------
-local function cmd_ping()
-  out("PONG", "v=" .. SDK_VERSION, "t=" .. string.format("%.2f", GameRules:GetGameTime()), "state=" .. tostring(GameRules:State_Get()))
+local function cmd_ping(_, requestId)
+  local version = "v=" .. SDK_VERSION
+  local gameTime = "t=" .. string.format("%.2f", GameRules:GetGameTime())
+  local state = "state=" .. tostring(GameRules:State_Get())
+  if requestId then
+    out("PONG", version, gameTime, state, "request=" .. tostring(requestId))
+  else
+    out("PONG", version, gameTime, state)
+  end
 end
 
 local function cmd_state()
@@ -175,6 +189,84 @@ local function cmd_eval(args)
   local ok, res = pcall(fn)
   if not ok then out("EVAL_ERR", tostring(res)); return end
   out("EVAL_OK", jsonEncode(res))
+end
+
+-- Compact real-engine path query. Keeping the GridNav program inside the SDK
+-- avoids Source 2's short console-command limit; callers send only coordinates.
+-- Usage: mcp_nav <request-id> <route-name> <endpoints|segments|both> x,y,z:x,y,z
+local function cmd_nav(_, requestId, routeName, mode, encodedPoints)
+  requestId = tostring(requestId or "unknown")
+  if not routeName or not mode or not encodedPoints then
+    out("NAV_ERR", requestId, "usage: mcp_nav <request-id> <route-name> <endpoints|segments|both> x,y,z:x,y,z")
+    return
+  end
+  if mode ~= "endpoints" and mode ~= "segments" and mode ~= "both" then
+    out("NAV_ERR", requestId, "invalid mode '" .. tostring(mode) .. "'")
+    return
+  end
+
+  local points = {}
+  for encodedPoint in string.gmatch(encodedPoints, "[^:]+") do
+    local sx, sy, sz = string.match(encodedPoint, "^([^,]+),([^,]+),([^,]+)$")
+    local x, y, z = tonumber(sx), tonumber(sy), tonumber(sz)
+    if not x or not y or not z then
+      out("NAV_ERR", requestId, "invalid point '" .. tostring(encodedPoint) .. "'")
+      return
+    end
+    points[#points + 1] = Vector(x, y, z)
+  end
+  if #points < 2 then
+    out("NAV_ERR", requestId, "at least two points are required")
+    return
+  end
+
+  local ok, result = pcall(function()
+    local function check(a, b, index)
+      local canFindPath = GridNav:CanFindPath(a, b)
+      local pathLength = GridNav:FindPathLength(a, b)
+      local startTraversable = GridNav:IsTraversable(a)
+      local endTraversable = GridNav:IsTraversable(b)
+      return {
+        index = index,
+        from = { a.x, a.y, a.z },
+        to = { b.x, b.y, b.z },
+        startTraversable = startTraversable,
+        endTraversable = endTraversable,
+        canFindPath = canFindPath,
+        pathLength = pathLength,
+        passed = canFindPath and startTraversable and endTraversable and pathLength >= 0,
+      }
+    end
+
+    local endpoint = nil
+    local segments = jsonArray()
+    local passed = true
+    if mode ~= "segments" then
+      endpoint = check(points[1], points[#points], nil)
+      if not endpoint.passed then passed = false end
+    end
+    if mode ~= "endpoints" then
+      for i = 1, #points - 1 do
+        local row = check(points[i], points[i + 1], i)
+        segments[#segments + 1] = row
+        if not row.passed then passed = false end
+      end
+    end
+    return {
+      name = routeName,
+      mode = mode,
+      pointCount = #points,
+      endpoint = endpoint,
+      segments = segments,
+      passed = passed,
+    }
+  end)
+
+  if not ok then
+    out("NAV_ERR", requestId, tostring(result))
+    return
+  end
+  out("NAV_OK", requestId, jsonEncode(result))
 end
 
 local function cmd_assert(args)
@@ -262,15 +354,16 @@ end
 local function reg(name, fn, help)
   -- Wrap so a thrown error never kills the console command.
   local ok = pcall(function()
-    Convars:RegisterCommand(name, function(...) local a = { ... }; local ok2, e = pcall(fn, a, a[2], a[3], a[4]); if not ok2 then out(name .. "_ERR", tostring(e)) end end, help or name, 0)
+    Convars:RegisterCommand(name, function(...) local a = { ... }; local ok2, e = pcall(fn, a, a[2], a[3], a[4], a[5]); if not ok2 then out(name .. "_ERR", tostring(e)) end end, help or name, 0)
   end)
   return ok
 end
 
-reg("mcp_ping", function() cmd_ping() end, "MCP: health check")
+reg("mcp_ping", cmd_ping, "MCP: health check (optional request id is echoed)")
 reg("mcp_state", function() cmd_state() end, "MCP: dump high-level game state as JSON")
 reg("mcp_dump", cmd_dump, "MCP: dump a section (state|heroes|units|nettables) as JSON")
 reg("mcp_eval", cmd_eval, "MCP: eval Lua and print the JSON-encoded result")
+reg("mcp_nav", cmd_nav, "MCP: run a compact, correlated GridNav route query")
 reg("mcp_assert", cmd_assert, "MCP: evaluate a boolean Lua expression; prints PASS/FAIL")
 reg("mcp_spawn", cmd_spawn, "MCP: spawn units near a hero (mcp_spawn <unit> [count] [team])")
 reg("mcp_gold", cmd_gold, "MCP: grant gold (mcp_gold <amount> [pid])")
@@ -280,6 +373,6 @@ reg("mcp_event", cmd_event, "MCP: fire a custom game event to clients (mcp_event
 reg("mcp_hud", cmd_hud, "MCP: toggle HUD visibility (mcp_hud <0|1>) for clean shots")
 reg("mcp_pause", cmd_pause, "MCP: pause/unpause (mcp_pause <0|1>)")
 
-out("DebugSDK", "loaded", "v=" .. SDK_VERSION, "(commands: mcp_ping mcp_state mcp_dump mcp_eval mcp_assert mcp_spawn mcp_gold mcp_level mcp_item mcp_event mcp_hud mcp_pause)")
+out("DebugSDK", "loaded", "v=" .. SDK_VERSION, "(commands: mcp_ping mcp_state mcp_dump mcp_eval mcp_nav mcp_assert mcp_spawn mcp_gold mcp_level mcp_item mcp_event mcp_hud mcp_pause)")
 
 return { version = SDK_VERSION }

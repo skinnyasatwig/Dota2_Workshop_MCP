@@ -84,76 +84,66 @@ export function engineNavigationRoutesFromManagedPaths(
   );
 }
 
-function luaNumber(value: number): string {
+const MAX_NAV_COMMAND_LENGTH = 480;
+const NAV_CHUNK_POINTS = 8;
+let navigationExecutionSequence = 0;
+let navigationReadinessSequence = 0;
+
+function consoleNumber(value: number): string {
   if (!Number.isFinite(value)) throw new Error(`Cannot encode non-finite Lua number: ${value}`);
   return Object.is(value, -0) ? "0" : String(value);
 }
 
-function luaLongString(value: string): string {
-  let equals = "";
-  while (value.includes(`]${equals}]`)) equals += "=";
-  return `[${equals}[${value}]${equals}]`;
-}
-
-function quoteConsoleLua(code: string): string {
-  return `"${code.replace(/\\/g, "\\\\").replace(/\r?\n/g, " ").replace(/"/g, "'")}"`;
-}
-
-/** Build one bounded mcp_eval command for a logical route. */
+/** Build one compact, correlated GridNav command that stays below Source 2's console limit. */
 export function buildEngineNavigationCommand(
   route: EngineNavigationRoute,
   mode: EngineNavigationMode = "both",
+  requestId = "nav",
 ): string {
   const [validated] = validateEngineNavigationRoutes([route]);
-  const points = validated.points
-    .map((point) => `Vector(${point.map(luaNumber).join(",")})`)
-    .join(",");
-  const includeEndpoint = mode === "endpoints" || mode === "both";
-  const includeSegments = mode === "segments" || mode === "both";
-  const code = [
-    "(function()",
-    `local pts={${points}}`,
-    "local function check(a,b,i)",
-    "local can=GridNav:CanFindPath(a,b)",
-    "local len=GridNav:FindPathLength(a,b)",
-    "local sa=GridNav:IsTraversable(a)",
-    "local sb=GridNav:IsTraversable(b)",
-    "return {index=i,from={a.x,a.y,a.z},to={b.x,b.y,b.z},startTraversable=sa,endTraversable=sb,canFindPath=can,pathLength=len,passed=(can and sa and sb and len>=0)}",
-    "end",
-    "local endpoint=check(pts[1],pts[#pts],nil)",
-    "local segments={}",
-    "local passed=true",
-    includeEndpoint ? "if not endpoint.passed then passed=false end" : "",
-    includeSegments
-      ? "for i=1,#pts-1 do local row=check(pts[i],pts[i+1],i);segments[#segments+1]=row;if not row.passed then passed=false end end"
-      : "",
-    `return {name=${luaLongString(validated.name)},mode=${luaLongString(mode)},pointCount=#pts,endpoint=endpoint,segments=segments,passed=passed}`,
-    "end)()",
-  ]
-    .filter(Boolean)
-    .join(" ");
-  const command = `mcp_eval ${quoteConsoleLua(code)}`;
-  if (command.length > 24_000) {
-    throw new Error(`Engine navigation command for "${route.name}" is too large; split the route.`);
+  if (!/^[A-Za-z0-9_.:-]+$/.test(requestId)) {
+    throw new Error(`Engine navigation request id "${requestId}" contains unsafe console characters.`);
+  }
+  const points = validated.points.map((point) => point.map(consoleNumber).join(",")).join(":");
+  const command = `mcp_nav ${requestId} ${validated.name} ${mode} "${points}"`;
+  if (command.length > MAX_NAV_COMMAND_LENGTH) {
+    throw new Error(
+      `Engine navigation command for "${route.name}" is ${command.length} characters; split it below ${MAX_NAV_COMMAND_LENGTH}.`,
+    );
   }
   return command;
 }
 
-export function parseEngineNavigationLine(line: string): EngineNavigationRouteResult {
-  const marker = "[MCP] EVAL_OK ";
-  const index = line.indexOf(marker);
-  if (index < 0) throw new Error(`DebugSDK did not return EVAL_OK: ${line}`);
+export function parseEngineNavigationResponse(
+  line: string,
+): { requestId: string; result: EngineNavigationRouteResult } {
+  const marker = "[MCP] NAV_OK ";
+  const markerIndex = line.indexOf(marker);
+  if (markerIndex < 0) throw new Error(`DebugSDK did not return NAV_OK: ${line}`);
+  const payload = line.slice(markerIndex + marker.length);
+  const separator = payload.indexOf(" ");
+  if (separator < 1) throw new Error(`DebugSDK NAV_OK response omitted its request id: ${line}`);
+  const requestId = payload.slice(0, separator);
   let parsed: unknown;
   try {
-    parsed = JSON.parse(line.slice(index + marker.length).trim());
+    parsed = JSON.parse(payload.slice(separator + 1).trim());
   } catch (error) {
     throw new Error(`DebugSDK returned invalid navigation JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  // Lua tables omit keys whose value is nil. Segment-only responses therefore
+  // omit `endpoint`; normalize that wire representation to the public null.
+  if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) && !("endpoint" in parsed)) {
+    parsed = { ...parsed, endpoint: null };
   }
   const result = resultSchema.safeParse(parsed);
   if (!result.success) {
     throw new Error(`DebugSDK navigation result had the wrong shape: ${result.error.issues.map((issue) => issue.message).join("; ")}`);
   }
-  return result.data;
+  return { requestId, result: result.data };
+}
+
+export function parseEngineNavigationLine(line: string): EngineNavigationRouteResult {
+  return parseEngineNavigationResponse(line).result;
 }
 
 /** Wait until the DebugSDK is loaded and the requested map game-state is active. */
@@ -167,9 +157,11 @@ export async function waitForEngineNavigationReady(
   let pongCount = 0;
   while (Date.now() < deadline) {
     const remaining = deadline - Date.now();
+    const requestId = `navready_${Date.now().toString(36)}_${(navigationReadinessSequence++).toString(36)}`;
     const wait = vc.waitForLine(
       (line) => {
         if (!line.text.includes("[MCP] PONG")) return false;
+        if (!line.text.includes(`request=${requestId}`)) return false;
         lastPong = line.text;
         pongCount++;
         const match = /\bstate=(\d+)\b/.exec(line.text);
@@ -178,7 +170,7 @@ export async function waitForEngineNavigationReady(
       Math.min(1500, remaining),
     );
     try {
-      vc.send("mcp_ping");
+      vc.send(`mcp_ping ${requestId}`);
     } catch {
       // A later poll may succeed while the map is still loading.
     }
@@ -199,37 +191,115 @@ export async function executeEngineNavigationChecks(
   const validated = validateEngineNavigationRoutes(routes);
   const results: EngineNavigationRouteResult[] = [];
   const failures: EngineNavigationExecution["failures"] = [];
-  for (const route of validated) {
-    const response = vc.waitForLine(
-      (line) => line.text.includes("[MCP] EVAL_OK ") || line.text.includes("[MCP] EVAL_ERR "),
-      timeoutMs,
-    );
-    try {
-      vc.send(buildEngineNavigationCommand(route, mode));
-    } catch (error) {
-      failures.push({ name: route.name, error: error instanceof Error ? error.message : String(error) });
-      continue;
+  const executionId = `n${Date.now().toString(36)}${(navigationExecutionSequence++).toString(36)}`;
+  const responseTimeoutMs = Math.min(timeoutMs, 5_000);
+
+  for (let routeIndex = 0; routeIndex < validated.length; routeIndex++) {
+    const route = validated[routeIndex];
+    const requests: {
+      id: string;
+      mode: "endpoints" | "segments";
+      points: EngineNavigationPoint[];
+      segmentOffset: number;
+    }[] = [];
+    let requestIndex = 0;
+    if (mode !== "segments") {
+      requests.push({
+        id: `${executionId}_${routeIndex}_${requestIndex++}`,
+        mode: "endpoints",
+        points: [route.points[0], route.points[route.points.length - 1]],
+        segmentOffset: 0,
+      });
     }
-    const line = await response;
-    if (!line) {
-      failures.push({ name: route.name, error: `No DebugSDK response within ${timeoutMs}ms.` });
-      continue;
-    }
-    if (line.text.includes("[MCP] EVAL_ERR ")) {
-      failures.push({ name: route.name, error: "DebugSDK Lua evaluation failed.", consoleLine: line.text });
-      continue;
-    }
-    try {
-      const result = parseEngineNavigationLine(line.text);
-      if (result.name !== route.name) {
-        throw new Error(`Expected route "${route.name}" but DebugSDK returned "${result.name}".`);
+    if (mode !== "endpoints") {
+      for (let start = 0; start < route.points.length - 1; start += NAV_CHUNK_POINTS - 1) {
+        requests.push({
+          id: `${executionId}_${routeIndex}_${requestIndex++}`,
+          mode: "segments",
+          points: route.points.slice(start, Math.min(route.points.length, start + NAV_CHUNK_POINTS)),
+          segmentOffset: start,
+        });
       }
-      results.push(result);
-    } catch (error) {
-      failures.push({
+    }
+
+    const failureCountBeforeRoute = failures.length;
+    let endpoint: EngineNavigationRouteResult["endpoint"] = null;
+    const segments: EngineNavigationRouteResult["segments"] = [];
+
+    for (const request of requests) {
+      const okMarker = `[MCP] NAV_OK ${request.id} `;
+      const errorMarker = `[MCP] NAV_ERR ${request.id} `;
+      const response = vc.waitForLine(
+        (line) => line.text.includes(okMarker) || line.text.includes(errorMarker),
+        responseTimeoutMs,
+      );
+      try {
+        vc.send(
+          buildEngineNavigationCommand(
+            { name: route.name, points: request.points },
+            request.mode,
+            request.id,
+          ),
+        );
+      } catch (error) {
+        failures.push({ name: route.name, error: error instanceof Error ? error.message : String(error) });
+        break;
+      }
+
+      const line = await response;
+      if (!line) {
+        failures.push({
+          name: route.name,
+          error: `No correlated DebugSDK response for ${request.id} within ${responseTimeoutMs}ms.`,
+        });
+        break;
+      }
+      if (line.text.includes(errorMarker)) {
+        failures.push({ name: route.name, error: "DebugSDK GridNav query failed.", consoleLine: line.text });
+        break;
+      }
+
+      try {
+        const parsed = parseEngineNavigationResponse(line.text);
+        if (parsed.requestId !== request.id) {
+          throw new Error(`Expected request "${request.id}" but DebugSDK returned "${parsed.requestId}".`);
+        }
+        if (parsed.result.name !== route.name) {
+          throw new Error(`Expected route "${route.name}" but DebugSDK returned "${parsed.result.name}".`);
+        }
+        if (request.mode === "endpoints") {
+          if (!parsed.result.endpoint) throw new Error("DebugSDK omitted the endpoint result.");
+          endpoint = parsed.result.endpoint;
+        } else {
+          if (parsed.result.segments.length !== request.points.length - 1) {
+            throw new Error("DebugSDK returned the wrong number of segment results.");
+          }
+          segments.push(
+            ...parsed.result.segments.map((segment, localIndex) => ({
+              ...segment,
+              index: request.segmentOffset + (segment.index ?? localIndex + 1),
+            })),
+          );
+        }
+      } catch (error) {
+        failures.push({
+          name: route.name,
+          error: error instanceof Error ? error.message : String(error),
+          consoleLine: line.text,
+        });
+        break;
+      }
+    }
+
+    if (failures.length === failureCountBeforeRoute) {
+      const passed = (endpoint?.passed ?? true) && segments.every((segment) => segment.passed);
+      results.push({
         name: route.name,
-        error: error instanceof Error ? error.message : String(error),
-        consoleLine: line.text,
+        mode,
+        pointCount: route.points.length,
+        endpoint,
+        segments,
+        passed,
       });
     }
   }

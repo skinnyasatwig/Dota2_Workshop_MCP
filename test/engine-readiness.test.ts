@@ -25,19 +25,32 @@ test("DebugSDK pongs expose game state and optional game time", () => {
 });
 
 test("readiness observation records state transitions and stops at the target", async () => {
-  const lines = [
-    { channel: 0, text: "[MCP] PONG v=1.0.0 t=0 state=1", at: 1 },
-    { channel: 0, text: "[MCP] PONG v=1.0.0 t=1 state=1", at: 2 },
-    { channel: 0, text: "[MCP] PONG v=1.0.0 t=2 state=2", at: 3 },
-    { channel: 0, text: "[MCP] PONG v=1.0.0 t=3 state=3", at: 4 },
-  ];
+  const states = [1, 1, 2, 3];
+  let pending:
+    | {
+        testLine: (line: { channel: number; text: string; at: number }) => boolean;
+        resolve: (line: { channel: number; text: string; at: number } | undefined) => void;
+      }
+    | undefined;
   const fake = {
     send(command: string) {
-      assert.equal(command, "mcp_ping");
+      assert.match(command, /^mcp_ping ready_/);
+      const requestId = command.split(" ")[1];
+      const state = states.shift();
+      const line = {
+        channel: 0,
+        text: `[MCP] PONG v=1.1.1 t=0 state=${state} request=${requestId}`,
+        at: Date.now(),
+      };
+      queueMicrotask(() => {
+        const current = pending;
+        if (current) current.resolve(current.testLine(line) ? line : undefined);
+      });
     },
-    async waitForLine(testLine: (line: (typeof lines)[number]) => boolean) {
-      const line = lines.shift();
-      return line && testLine(line) ? line : undefined;
+    waitForLine(testLine: (line: { channel: number; text: string; at: number }) => boolean) {
+      return new Promise<{ channel: number; text: string; at: number } | undefined>((resolve) => {
+        pending = { testLine, resolve };
+      });
     },
   } as unknown as VConsoleClient;
 

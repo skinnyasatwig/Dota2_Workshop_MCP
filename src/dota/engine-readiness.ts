@@ -22,6 +22,7 @@ export interface EngineReadinessObservation {
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+let readinessSequence = 0;
 
 /** Parse the stable, machine-readable line emitted by the bundled DebugSDK. */
 export function parseEngineReadinessPong(line: string): EngineReadinessPong | undefined {
@@ -86,6 +87,7 @@ export async function observeEngineReadiness(
 
   while (Date.now() < deadline) {
     const remaining = deadline - Date.now();
+    const requestId = `ready_${Date.now().toString(36)}_${(readinessSequence++).toString(36)}`;
     let latest: EngineReadinessPong | undefined;
     const response = vc.waitForLine(
       (line) => {
@@ -96,6 +98,7 @@ export async function observeEngineReadiness(
         }
         const parsed = parseEngineReadinessPong(line.text);
         if (!parsed) return false;
+        if (!line.text.includes(`request=${requestId}`)) return false;
         latest = parsed;
         pongCount++;
         lastPong = parsed.line;
@@ -108,7 +111,7 @@ export async function observeEngineReadiness(
       Math.min(pollMs, remaining),
     );
     try {
-      vc.send("mcp_ping");
+      vc.send(`mcp_ping ${requestId}`);
     } catch {
       // A later poll may succeed while Dota or the addon is still loading.
     }
