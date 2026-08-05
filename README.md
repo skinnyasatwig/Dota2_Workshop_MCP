@@ -405,7 +405,10 @@ playable `.vpk` — a pipeline verified end to end.
   `base.fgd` and `dota.fgd`. Unknown custom metadata remains informational by default; pass
   `strictEntityProperties:true` to turn unknown classes/properties into warnings. Declared dropdown choices and
   numeric bounds are enforced; a named destination that cannot be resolved is reported as a warning. Dynamic
-  targets such as `!activator`, wildcard targets, and existing class-name destinations are not misreported.
+  targets such as `!activator`, wildcard targets, and existing class-name destinations are not misreported. The same
+  preflight verifies both `dota_minimap_boundary` corners, overview KeyValues, source and compiled material/texture
+  assets, PNG dimensions, and the `rotate=0` world-to-image transform. Nonzero image rotation is reported for human
+  verification instead of being guessed.
 - **`map_engine_nav_test`** — optional engine preflight for facts the text pipeline cannot prove.
   Call it once with `dryRun:true` to review route/check counts, then with `dryRun:false` when Dota is
   closed, or attach to a normally launched Workshop Tools session. The tool runs correlated, console-safe chunks of

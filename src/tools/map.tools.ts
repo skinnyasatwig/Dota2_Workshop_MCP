@@ -27,6 +27,7 @@ import { runMapTransaction } from "../dota/map-transaction.js";
 import { analyzeMapReachability } from "../dota/map-reachability.js";
 import { resolveMapCollisionObstacles } from "../dota/map-collision.js";
 import { reconcileMapVolumes } from "../dota/map-volume.js";
+import { inspectMapOverview, MapOverviewReport } from "../dota/map-overview.js";
 import {
   buildEngineNavigationCommand,
   engineNavigationRoutesFromManagedPaths,
@@ -1413,7 +1414,8 @@ export function registerMapTools(server: McpServer) {
         "Static preflight for autonomous map work (does not launch Dota): checks source/registration/compiled presence " +
         "and whether the compiled VPK is older than its VMAP source, " +
         "extracts entities, finds duplicate targetnames and broken path_corner/path_track links, and verifies required " +
-        "targetname/classname pairs used by game scripts. When a project contract declares managedTerrain or " +
+        "targetname/classname pairs used by game scripts. It also checks minimap boundary entities, overview metadata, " +
+        "source/compiled material and texture assets, image dimensions, and the world-to-minimap transform. When a project contract declares managedTerrain or " +
         "managedVolumes, validation also reports tile-grid or checked-volume drift without writing it. Whole-map " +
         "offline reachability checks detect terrain holes, " +
         "trapped spawns, blocked entrances/path segments, and inaccessible objectives or camps. Known entity keyvalues " +
@@ -1509,6 +1511,7 @@ export function registerMapTools(server: McpServer) {
 
       let entities: ReturnType<typeof parseMapEntities> = [];
       let entityDefinitionValidation: FgdValidationReport | undefined;
+      let overviewReport: MapOverviewReport | undefined;
       let terrainDrift:
         | {
             changedHeightVertices: number;
@@ -1552,6 +1555,20 @@ export function registerMapTools(server: McpServer) {
       if (source) {
         const mapText = await vmapToText(dota.dmxconvertExe, p.contentVmap);
         entities = parseMapEntities(mapText);
+        overviewReport = await inspectMapOverview({
+          mapName: map,
+          mapText,
+          gameDir: project.gameDir,
+          contentDir: project.contentDir,
+          requireCompiledAssets: requireCompiled === true,
+        });
+        for (const finding of overviewReport.findings) {
+          findings.push({
+            severity: finding.severity,
+            code: finding.code,
+            message: finding.detail,
+          });
+        }
         entityDefinitionValidation = validateEntitiesAgainstFgd(
           entities,
           await loadOfficialDotaFgdCatalog(dota.dotaGameDir),
@@ -1808,6 +1825,7 @@ export function registerMapTools(server: McpServer) {
           contract: resolvedContract?.path ?? null,
           requirementCount: requirements.length,
           entityDefinitions: entityDefinitionValidation ?? null,
+          overview: overviewReport ?? null,
           terrainDrift: terrainDrift ?? null,
           volumeDrift: volumeDrift ?? null,
           reachability: reachabilitySummary ?? null,

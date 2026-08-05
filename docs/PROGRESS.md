@@ -74,15 +74,19 @@ Last updated: 2026-08-05
     use a tight conservative curved outline instead of the primitive's much larger transformed box, while malformed
     metadata still falls back safely. An installed-VRF proof recovered all 14 capsules from Valve's current
     Juggernaut model.
-27. This milestone - added checked sloped convex gameplay volumes using paired coplanar bottom/top corner heights.
+27. `96b3952` - added checked sloped convex gameplay volumes using paired coplanar bottom/top corner heights.
     Validation rejects mismatched, crossing, twisted, oversized, concave, or otherwise unsafe solids; reusable
     component mirroring keeps heights paired with their footprint; preview arrows point uphill; Valve's converter
     preserved the geometry; and the isolated compiler fixture produced a real VPK without launching Dota or Hammer.
+28. This milestone - added offline minimap consistency checks to `map_validate`. The validator now correlates exactly
+    two `dota_minimap_boundary` corners with overview KeyValues, safe source material/PNG paths, compiled material and
+    hashed texture outputs, PNG dimensions, and the unrotated pixel-to-world transform. The real 3v3 overview passes:
+    its 1024x1024 image at scale 16 projects exactly to the declared -8192 through +8192 world bounds.
 
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 233 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 238 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 199 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
@@ -103,6 +107,8 @@ Last updated: 2026-08-05
 - VRF's public checked Juggernaut physics fixture produced 15 of 15 exact convex hulls after its 15 published bind
   poses were applied; no third-party fixture was copied into this repository.
 - Real Dota 3v3 contract: 86 managed entities, 4 managed paths, 97 terrain operations, and zero desired-state drift.
+- Real Dota 3v3 minimap: both boundary entities, overview metadata, 1024x1024 PNG, source/compiled material and
+  hashed texture, and the scale-16 world transform validate with zero findings.
 - Offline 3v3 terrain: zero holes; only two known isolated regions (a tiny shelf and a deliberate off-map strip).
 - Installed official definitions expose 187 enum properties with 1,171 choices, 16 explicitly ranged properties,
   and 297 named-destination fields. All 157 acceptance-map entities are recognized with zero invalid types,
