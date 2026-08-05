@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildEngineNavigationCommand,
+  engineNavigationRepairSuggestions,
   engineNavigationRoutesFromManagedPaths,
   executeEngineNavigationChecks,
   parseEngineNavigationLine,
@@ -154,6 +155,51 @@ test("navigation execution chunks routes below the console limit and correlates 
   );
   assert.ok(sent.length > 1);
   assert.ok(sent.every((command) => command.length < 480));
+});
+
+test("blocked route endpoints collapse into one nearest-reachable repair suggestion", () => {
+  const failedPoint: [number, number, number] = [0, 768, 128];
+  const suggestedPoint: [number, number, number] = [64, 704, 128];
+  const suggestion = { point: suggestedPoint, gridOffset: [1, -1], distance: 90.51 };
+  const result = parseEngineNavigationLine(
+    `[MCP] NAV_OK repair_1 ${JSON.stringify({
+      name: "north_lane",
+      mode: "segments",
+      pointCount: 3,
+      endpoint: null,
+      segments: [
+        {
+          index: 1,
+          from: [-512, 768, 128],
+          to: failedPoint,
+          startTraversable: true,
+          endTraversable: false,
+          canFindPath: false,
+          pathLength: -1,
+          passed: false,
+          nearestEnd: suggestion,
+        },
+        {
+          index: 2,
+          from: failedPoint,
+          to: [512, 768, 128],
+          startTraversable: false,
+          endTraversable: true,
+          canFindPath: false,
+          pathLength: -1,
+          passed: false,
+          nearestStart: suggestion,
+        },
+      ],
+      passed: false,
+    })}`,
+  );
+
+  const repairs = engineNavigationRepairSuggestions([result]);
+  assert.equal(repairs.length, 1);
+  assert.deepEqual(repairs[0].originalPoint, failedPoint);
+  assert.deepEqual(repairs[0].suggestedPoint, suggestedPoint);
+  assert.deepEqual(repairs[0].references, ["segment 1 end", "segment 2 start"]);
 });
 
 test("readiness reports the last observed DebugSDK state", async () => {

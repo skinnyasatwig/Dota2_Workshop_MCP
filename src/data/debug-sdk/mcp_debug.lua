@@ -15,7 +15,7 @@
   your addon by hand — re-attach to update.
 ]]
 
-local SDK_VERSION = "1.1.3"
+local SDK_VERSION = "1.2.0"
 
 ----------------------------------------------------------------------
 -- Tiny JSON encoder (no dependencies; handles the shapes we emit).
@@ -221,6 +221,37 @@ local function cmd_nav(_, requestId, routeName, mode, encodedPoints)
   end
 
   local ok, result = pcall(function()
+    local function nearestReachable(point, anchor)
+      local gridX = GridNav:WorldToGridPosX(point.x)
+      local gridY = GridNav:WorldToGridPosY(point.y)
+      for radius = 1, 8 do
+        local best = nil
+        for dx = -radius, radius do
+          for dy = -radius, radius do
+            if math.abs(dx) == radius or math.abs(dy) == radius then
+              local candidate = Vector(
+                GridNav:GridPosToWorldCenterX(gridX + dx),
+                GridNav:GridPosToWorldCenterY(gridY + dy),
+                point.z
+              )
+              if GridNav:IsTraversable(candidate) and GridNav:CanFindPath(candidate, anchor) then
+                local distance = math.sqrt((candidate.x - point.x) ^ 2 + (candidate.y - point.y) ^ 2)
+                if not best or distance < best.distance then
+                  best = {
+                    point = { candidate.x, candidate.y, candidate.z },
+                    gridOffset = { dx, dy },
+                    distance = distance,
+                  }
+                end
+              end
+            end
+          end
+        end
+        if best then return best end
+      end
+      return nil
+    end
+
     local function check(a, b, index)
       local canFindPath = GridNav:CanFindPath(a, b)
       local pathLength = GridNav:FindPathLength(a, b)
@@ -235,6 +266,8 @@ local function cmd_nav(_, requestId, routeName, mode, encodedPoints)
         canFindPath = canFindPath,
         pathLength = pathLength,
         passed = canFindPath and startTraversable and endTraversable and pathLength >= 0,
+        nearestStart = not startTraversable and nearestReachable(a, b) or nil,
+        nearestEnd = not endTraversable and nearestReachable(b, a) or nil,
       }
     end
 

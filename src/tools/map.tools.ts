@@ -33,6 +33,7 @@ import {
   EngineNavigationExecution,
   EngineNavigationMode,
   EngineNavigationRoute,
+  engineNavigationRepairSuggestions,
   executeEngineNavigationChecks,
   validateEngineNavigationRoutes,
   waitForEngineNavigationReady,
@@ -937,6 +938,7 @@ export function registerMapTools(server: McpServer) {
         }
 
         const failedRouteResults = execution.results.filter((result) => !result.passed);
+        const repairSuggestions = engineNavigationRepairSuggestions(execution.results);
         const failedChecks = execution.results.reduce(
           (sum, result) =>
             sum +
@@ -972,6 +974,7 @@ export function registerMapTools(server: McpServer) {
           executionFailures: execution.failures,
           failedRouteCount: failedRouteResults.length,
           failedChecks,
+          repairSuggestions,
           consoleErrors,
           consoleTail,
           preShutdownDiagnosis,
@@ -989,6 +992,11 @@ export function registerMapTools(server: McpServer) {
           ...(fatalError ? [`Fatal: ${fatalError}`] : []),
           ...execution.failures.map((failure) => `  [ERROR] ${failure.name}: ${failure.error}`),
           ...failedRouteResults.map((result) => `  [BLOCKED] ${result.name}`),
+          ...repairSuggestions.map(
+            (suggestion) =>
+              `  [SUGGEST] ${suggestion.routeName} ${suggestion.originalPoint.join(",")} -> ` +
+              `${suggestion.suggestedPoint.join(",")} (${Math.round(suggestion.distance)} units; ${suggestion.references.join(", ")})`,
+          ),
           ...(shutdown ? [`Shutdown: ${shutdown.detail}`] : []),
         ].join("\n");
         return { ...json(data, output), isError: failed };

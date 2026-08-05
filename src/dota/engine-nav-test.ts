@@ -11,6 +11,13 @@ export interface EngineNavigationRoute {
 }
 
 const pointSchema = z.tuple([z.number(), z.number(), z.number()]);
+const repairSuggestionSchema = z
+  .object({
+    point: pointSchema,
+    gridOffset: z.tuple([z.number().int(), z.number().int()]),
+    distance: z.number().nonnegative(),
+  })
+  .strict();
 const checkSchema = z
   .object({
     index: z.number().int().positive().optional(),
@@ -21,6 +28,8 @@ const checkSchema = z
     canFindPath: z.boolean(),
     pathLength: z.number(),
     passed: z.boolean(),
+    nearestStart: repairSuggestionSchema.optional(),
+    nearestEnd: repairSuggestionSchema.optional(),
   })
   .strict();
 
@@ -40,6 +49,15 @@ export type EngineNavigationRouteResult = z.infer<typeof resultSchema>;
 export interface EngineNavigationExecution {
   results: EngineNavigationRouteResult[];
   failures: { name: string; error: string; consoleLine?: string }[];
+}
+
+export interface EngineNavigationRepairSuggestion {
+  routeName: string;
+  originalPoint: EngineNavigationPoint;
+  suggestedPoint: EngineNavigationPoint;
+  gridOffset: [number, number];
+  distance: number;
+  references: string[];
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -144,6 +162,51 @@ export function parseEngineNavigationResponse(
 
 export function parseEngineNavigationLine(line: string): EngineNavigationRouteResult {
   return parseEngineNavigationResponse(line).result;
+}
+
+/** Collapse duplicate start/end failures into one nearest-reachable suggestion per route point. */
+export function engineNavigationRepairSuggestions(
+  results: readonly EngineNavigationRouteResult[],
+): EngineNavigationRepairSuggestion[] {
+  const suggestions = new Map<string, EngineNavigationRepairSuggestion>();
+  const add = (
+    routeName: string,
+    originalPoint: EngineNavigationPoint,
+    suggestion: z.infer<typeof repairSuggestionSchema> | undefined,
+    reference: string,
+  ) => {
+    if (!suggestion) return;
+    const key = `${routeName}:${originalPoint.join(",")}`;
+    const current = suggestions.get(key);
+    if (!current || suggestion.distance < current.distance) {
+      suggestions.set(key, {
+        routeName,
+        originalPoint: [...originalPoint],
+        suggestedPoint: [...suggestion.point],
+        gridOffset: [...suggestion.gridOffset],
+        distance: suggestion.distance,
+        references: current ? [...new Set([...current.references, reference])] : [reference],
+      });
+    } else if (!current.references.includes(reference)) {
+      current.references.push(reference);
+    }
+  };
+
+  for (const result of results) {
+    const checks = [
+      ...(result.endpoint ? [{ check: result.endpoint, reference: "endpoint" }] : []),
+      ...result.segments.map((check, index) => ({
+        check,
+        reference: `segment ${check.index ?? index + 1}`,
+      })),
+    ];
+    for (const { check, reference } of checks) {
+      if (!check.startTraversable) add(result.name, check.from, check.nearestStart, `${reference} start`);
+      if (!check.endTraversable) add(result.name, check.to, check.nearestEnd, `${reference} end`);
+    }
+  }
+
+  return [...suggestions.values()];
 }
 
 /** Wait until the DebugSDK is loaded and the requested map game-state is active. */

@@ -406,6 +406,8 @@ playable `.vpk` — a pipeline verified end to end.
   Call it once with `dryRun:true` to review route/check counts, then with `dryRun:false` when Dota is
   closed, or attach to a normally launched Workshop Tools session. The tool runs correlated, console-safe chunks of
   `GridNav:CanFindPath`, `GridNav:FindPathLength`, and `GridNav:IsTraversable`, then reassembles each logical route.
+  A blocked point also receives a bounded nearest-reachable suggestion when Dota can find one; adjacent segment
+  reports for the same point are collapsed into one actionable repair rather than repeated warnings.
 
 If engine startup is uncertain, run `map_engine_readiness_probe` before `map_engine_nav_test`; unlike the
 navigation test, the readiness probe sends no gameplay command and returns a screenshot plus structured

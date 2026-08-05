@@ -55,14 +55,17 @@ Last updated: 2026-08-05
 21. `4a64271` - added an evidence-gated Valve recipe refresh workflow. The MCP now reports exact source comparisons,
     affected recipe families, a reviewable candidate baseline, and explicit blockers; a safe CLI runner automates build,
     tests, MCP smoke, and the isolated compiler fixture but cannot edit or auto-bless the trusted baseline.
-22. This milestone - bounded explicit Steam launches when `-applaunch` is not forwarded and added non-owning attach
+22. `6487003` - bounded explicit Steam launches when `-applaunch` is not forwarded and added non-owning attach
     mode to readiness and GridNav tools. A user-started, VConsole-enabled Workshop Tools session can now be checked
     without compiling underneath it, relaunching Dota, or closing the user's session.
+23. This milestone - added bounded engine-backed nearest-reachable waypoint suggestions to DebugSDK 1.2.0 and
+    `map_engine_nav_test`, deduplicated adjacent segment failures into actionable repairs, corrected the 3v3 map's
+    four mirrored blocked waypoints from the parent specification, rebuilt it, and proved all 64 GridNav checks pass.
 
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 215 passed, 0 failed, and 2 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 220 passed, 0 failed, and 2 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 199 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
@@ -86,7 +89,7 @@ Last updated: 2026-08-05
   and 297 named-destination fields. All 157 acceptance-map entities are recognized with zero invalid types,
   choices, ranges, or unresolved named destinations.
 - Valve prefab references: 13 of 13 found in the installed Workshop Tools.
-- Acceptance map compiled successfully to `three_vs_three_blockout.vpk` on 2026-08-04.
+- Acceptance map compiled successfully to `three_vs_three_blockout.vpk` on 2026-08-05.
 - The acceptance VMAP now contains two checked 32-sided boss no-ward prisms generated from one reusable component;
   both are contract-idempotent, visible in the diagnostic preview, and included in the fresh compiled VPK.
 - Final offline acceptance: compiled map present, zero validation errors, 3,623 walkable cells,
@@ -95,7 +98,25 @@ Last updated: 2026-08-05
 - Final diagnostic preview: 473 cliff cells, 127 ramp cells, 564 water cells, 86 managed entity overlays,
   60 path segments, 10 tower ranges, 18 camps, 16 objectives, 3 currents, and one minimap boundary.
 
-## Engine acceptance result
+## Current engine acceptance result
+
+The attached runner now has a complete repair-and-retest proof without leaving Dota open:
+
+- DebugSDK 1.2.0 scans a bounded eight-cell ring around a blocked route point and reports the nearest traversable
+  point that can reach the adjacent route anchor. The host combines duplicate start/end reports from neighboring
+  segments into one repair suggestion per blocked point.
+- The first 3v3 scan found one blocked mirrored waypoint on each route. A bounded symmetric comparison selected
+  `(±4128, ±2784, 256)`, a roughly 101-unit correction that preserves the intended route arc.
+- Contract sync changed exactly four waypoint entities and four terrain cells, retained a transactional recovery
+  backup, and produced zero structural findings. Offline validation still reports zero holes and only the two known
+  isolated terrain regions.
+- The rebuilt map returned all four managed routes and all 64 endpoint/segment checks. Every point was traversable,
+  every segment and endpoint had a valid Valve path, and the test observed zero new console errors.
+- Workshop Tools accepted the Steam launch but initially remained on the dashboard. After the explicit
+  `dota_launch_custom_game` command, the DebugSDK handshake arrived immediately and the attached route test passed.
+  Dota then accepted a graceful quit command. Automating that launch-to-map handshake is the next engine milestone.
+
+## Historical engine acceptance notes
 
 The guarded runner was exercised without leaving Dota open:
 
