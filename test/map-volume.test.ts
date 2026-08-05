@@ -60,6 +60,28 @@ test("checked volume recipes reject unsafe geometry and reserved overrides", () 
   assert.equal(MAP_VOLUME_RECIPES.playerClip.properties.Solidity, "2");
 });
 
+test("sloped convex volumes reject mismatched or twisted height rings", () => {
+  const points = [[-256, -128], [256, -128], [256, 128], [-256, 128]] as [number, number][];
+  assert.throws(
+    () => parseManagedMapVolumes([{
+      targetname: "mismatched_slope",
+      recipe: "playerClip",
+      center: [0, 0, 0],
+      polygon: { points, bottom: [-128, -128, 0], top: [128, 128, 256, 256] },
+    }]),
+    /one local height for every polygon point/,
+  );
+  assert.throws(
+    () => parseManagedMapVolumes([{
+      targetname: "twisted_slope",
+      recipe: "playerClip",
+      center: [0, 0, 0],
+      polygon: { points, bottom: [-128, -128, 0, 0], top: [128, 128, 256, 128] },
+    }]),
+    /must be coplanar/,
+  );
+});
+
 test("a Valve-topology box volume carries its checked entity and material", () => {
   const block = buildBoxVolumeBlock(camp, 2, 3);
   assert.match(block, /"CMapMesh"/);
@@ -94,6 +116,39 @@ test("a convex polygon becomes a closed Valve-topology prism", () => {
   assert.match(block, /"vertexData"[\s\S]*?"size" "int" "14"/);
   assert.match(block, /"faceVertexData"[\s\S]*?"size" "int" "42"/);
   assert.match(block, /"faceData"[\s\S]*?"size" "int" "9"/);
+});
+
+test("coplanar corner heights become a closed sloped Valve volume", () => {
+  const sloped = {
+    targetname: "ramp_player_clip",
+    recipe: "playerClip" as const,
+    center: [0, 0, 256] as [number, number, number],
+    polygon: {
+      points: [[-256, -128], [256, -128], [256, 128], [-256, 128]] as [number, number][],
+      bottom: [-128, -128, 0, 0],
+      top: [128, 128, 256, 256],
+    },
+  };
+  const block = buildPolygonVolumeBlock(sloped, 2, 3);
+  const parsed = parseMapVolumes(EMPTY_MAP.replace("\"children\" \"element_array\" [ ]", `\"children\" \"element_array\" [ ${block} ]`));
+  assert.deepEqual(parsed[0]?.footprint, sloped.polygon.points);
+  assert.deepEqual(parsed[0]?.sloped, {
+    bottom: sloped.polygon.bottom,
+    top: sloped.polygon.top,
+  });
+  assert.deepEqual(parsed[0]?.size, [512, 256, 384]);
+  assert.match(block, /"normal:0"[\s\S]*?"-?0 -?0\.447214 0\.894427"/);
+
+  const first = reconcileMapVolumes(EMPTY_MAP, [sloped]);
+  assert.deepEqual(reconcileMapVolumes(first.text, [sloped]).unchanged, [sloped.targetname]);
+  const raised = {
+    ...sloped,
+    polygon: {
+      ...sloped.polygon,
+      top: sloped.polygon.top.map((height) => height + 64),
+    },
+  };
+  assert.deepEqual(reconcileMapVolumes(first.text, [raised]).updated, [sloped.targetname]);
 });
 
 test("circumscribed regular footprints preserve the requested minimum radius", () => {

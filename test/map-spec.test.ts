@@ -301,6 +301,32 @@ test("component placements namespace and transform entities, paths, references, 
   ]);
 });
 
+test("mirrored component volumes keep sloped corner heights paired with their footprint", () => {
+  const specification = parseMapSpecification({
+    components: {
+      ramp_guard: {
+        managedVolumes: [{
+          targetname: "slope",
+          recipe: "playerClip",
+          center: [0, 0, 128],
+          polygon: {
+            points: [[-200, -100], [200, -100], [100, 200], [-200, 100]],
+            bottom: [-64, 64, 32, -64],
+            top: [64, 192, 160, 64],
+          },
+        }],
+      },
+    },
+    placements: [{ component: "ramp_guard", name: "east", mirrorAxis: "x" }],
+  });
+  const polygon = specification.managedVolumes?.[0].polygon;
+  assert.deepEqual(polygon, {
+    points: [[-200, -100], [100, -200], [200, 100], [-200, 100]],
+    bottom: [-64, 32, 64, -64],
+    top: [64, 160, 192, 64],
+  });
+});
+
 test("component definitions reject unsafe or unresolved reuse", () => {
   assert.throws(
     () =>

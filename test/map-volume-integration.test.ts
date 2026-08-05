@@ -51,6 +51,16 @@ test(
           center: [1536, 512, 256],
           size: [128, 1024, 512],
         },
+        {
+          targetname: "fixture_sloped_trigger",
+          recipe: "trigger",
+          center: [2048, 512, 256],
+          polygon: {
+            points: [[-256, -128], [256, -128], [256, 128], [-256, 128]],
+            bottom: [-128, -128, 0, 0],
+            top: [128, 128, 256, 256],
+          },
+        },
       ]);
       const binary = join(directory, "volume-fixture.vmap");
       await textToVmap(converter, generated.text, binary);
@@ -65,9 +75,14 @@ test(
           { targetname: "fixture_camp_bounds", recipe: "camp", blocking: false },
           { targetname: "fixture_no_wards", recipe: "noWards", blocking: false },
           { targetname: "fixture_player_clip", recipe: "playerClip", blocking: true },
+          { targetname: "fixture_sloped_trigger", recipe: "trigger", blocking: false },
         ],
       );
       assert.equal(roundTripped.find((volume) => volume.targetname === "fixture_no_wards")?.footprint.length, 12);
+      assert.deepEqual(roundTripped.find((volume) => volume.targetname === "fixture_sloped_trigger")?.sloped, {
+        bottom: [-128, -128, 0, 0],
+        top: [128, 128, 256, 256],
+      });
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

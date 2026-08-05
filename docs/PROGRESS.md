@@ -69,25 +69,29 @@ Last updated: 2026-08-05
     deliberately disconnected route. DebugSDK 1.3.0 now suggests repairs when endpoints are individually walkable
     but isolated from each other. The opt-in runner compiles, launches, asserts the exact engine-proven repair,
     reports console errors, shuts Dota down, and removes both temporary addon trees.
-26. This milestone - retained decoded sphere/capsule PHYS primitive geometry through per-part bind poses and cache
+26. `6a8e7ca` - retained decoded sphere/capsule PHYS primitive geometry through per-part bind poses and cache
     version 4, then projected it through entity transforms with 32 tangent half-planes. Preview and reachability now
     use a tight conservative curved outline instead of the primitive's much larger transformed box, while malformed
     metadata still falls back safely. An installed-VRF proof recovered all 14 capsules from Valve's current
     Juggernaut model.
+27. This milestone - added checked sloped convex gameplay volumes using paired coplanar bottom/top corner heights.
+    Validation rejects mismatched, crossing, twisted, oversized, concave, or otherwise unsafe solids; reusable
+    component mirroring keeps heights paired with their footprint; preview arrows point uphill; Valve's converter
+    preserved the geometry; and the isolated compiler fixture produced a real VPK without launching Dota or Hammer.
 
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 230 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 233 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 199 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
 - The guided refresh runner completed all four safe checks in 33 seconds without opening Dota or Hammer. Because the
   installed fingerprint still matches, it correctly emitted `no-refresh-needed` and refused baseline recording.
-- Valve's installed `dmxconvert.exe` successfully round-trips generated camp, polygonal no-ward, and player-clip
-  volumes from text to binary VMAP and back during the integration suite.
-- `npm run test:compiler-fixture` successfully round-tripped and compiled the repository-owned acceptance payload
-  into a real VPK after its explicit navigation obstruction was added. The generated map uses Valve's installed blank template only as required hidden
+- Valve's installed `dmxconvert.exe` successfully round-trips generated camp, polygonal no-ward, player-clip, and
+  sloped trigger volumes from text to binary VMAP and back during the integration suite, preserving exact corner heights.
+- `npm run test:compiler-fixture` successfully round-tripped and compiled the repository-owned acceptance payload,
+  including its sloped trigger and explicit navigation obstruction, into a real VPK. The generated map uses Valve's installed blank template only as required hidden
   infrastructure, depends on no private 3v3 file, stores no copied Valve VMAP, and leaves no temporary addon trees.
 - Installed ValveResourceFormat 19.2 recovered the physical hull bounds of
   `models/props_gameplay/cap_point001.vmdl_c` directly from `pak01_dir.vpk`; a second lookup reused the fingerprinted

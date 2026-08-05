@@ -24,10 +24,17 @@ const managedMapVolumeCommonInputSchema = z.object({
   properties: z.record(scalar).optional(),
 });
 
-const polygonPrismInputSchema = z.object({
-  points: z.array(point2).min(3).max(64),
-  height: z.number().finite().positive().max(32768),
-}).strict();
+const polygonPrismInputSchema = z.union([
+  z.object({
+    points: z.array(point2).min(3).max(64),
+    height: z.number().finite().positive().max(32768),
+  }).strict(),
+  z.object({
+    points: z.array(point2).min(3).max(64),
+    bottom: z.array(z.number().finite()).min(3).max(64),
+    top: z.array(z.number().finite()).min(3).max(64),
+  }).strict(),
+]);
 
 export const managedMapVolumeInputSchema = z.union([
   managedMapVolumeCommonInputSchema.extend({ size: point3 }).strict(),
@@ -50,6 +57,43 @@ export const managedMapVolumeInputSchema = z.union([
         code: z.ZodIssueCode.custom,
         path: ["polygon", "points"],
         message: polygonError,
+      });
+    }
+    if ("top" in volume.polygon && volume.polygon.top !== undefined && volume.polygon.bottom !== undefined) {
+      const sloped = volume.polygon;
+      for (const side of ["bottom", "top"] as const) {
+        if (sloped[side].length !== sloped.points.length) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["polygon", side],
+            message: "must contain one local height for every polygon point",
+          });
+        }
+        if (sloped[side].some((height) => Math.abs(height) > 16384)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["polygon", side],
+            message: "local heights must stay within +/-16384 world units",
+          });
+        }
+        const planeError = coplanarRingError(sloped.points, sloped[side]);
+        if (planeError) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["polygon", side],
+            message: planeError,
+          });
+        }
+      }
+      sloped.points.forEach((_point, index) => {
+        const thickness = sloped.top[index] - sloped.bottom[index];
+        if (!(thickness > 0) || thickness > 32768) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["polygon", "top", index],
+            message: "must be above the matching bottom height by at most 32768 world units",
+          });
+        }
       });
     }
   }
@@ -75,7 +119,12 @@ interface ManagedMapVolumeCommon {
 
 export type ManagedMapVolume = ManagedMapVolumeCommon & (
   | { size: [number, number, number]; polygon?: never }
-  | { size?: never; polygon: { points: [number, number][]; height: number } }
+  | {
+      size?: never;
+      polygon:
+        | { points: [number, number][]; height: number; bottom?: never; top?: never }
+        | { points: [number, number][]; height?: never; bottom: number[]; top: number[] };
+    }
 );
 
 export interface MapVolumeRecipeDefinition {
@@ -183,6 +232,39 @@ function convexPolygonError(points: readonly [number, number][]): string | undef
   return undefined;
 }
 
+function coplanarRingError(
+  points: readonly [number, number][],
+  heights: readonly number[],
+): string | undefined {
+  if (points.length !== heights.length || points.length < 3) return "must define a complete plane";
+  const [a, b, c] = [0, 1, 2].map((index) => [
+    points[index][0],
+    points[index][1],
+    heights[index],
+  ] as [number, number, number]);
+  const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+  const normal = [
+    ab[1] * ac[2] - ab[2] * ac[1],
+    ab[2] * ac[0] - ab[0] * ac[2],
+    ab[0] * ac[1] - ab[1] * ac[0],
+  ];
+  const length = Math.hypot(...normal);
+  if (length <= 1e-8 || Math.abs(normal[2]) <= 1e-8) return "must define a non-vertical plane";
+  const tolerance = 1e-4 * Math.max(1, length);
+  for (let index = 3; index < points.length; index++) {
+    const delta = [
+      points[index][0] - a[0],
+      points[index][1] - a[1],
+      heights[index] - a[2],
+    ];
+    if (Math.abs(normal[0] * delta[0] + normal[1] * delta[1] + normal[2] * delta[2]) > tolerance) {
+      return "must be coplanar (twisted top or bottom faces are unsafe)";
+    }
+  }
+  return undefined;
+}
+
 function normalizedPolygon(points: readonly [number, number][]): [number, number][] {
   const copied = points.map(([x, y]) => [x, y] as [number, number]);
   return signedPolygonArea(copied) < 0 ? copied.reverse() : copied;
@@ -222,21 +304,35 @@ export function parseManagedMapVolumes(
       .join("; ");
     throw new Error(`${details}: ${path}`);
   }
-  return result.data.map((volume) => ({
-    ...volume,
-    center: [...volume.center],
-    ...("size" in volume
-      ? { size: [...volume.size] as [number, number, number] }
+  return result.data.map((volume) => {
+    if ("size" in volume) {
+      return {
+        ...volume,
+        center: [...volume.center],
+        size: [...volume.size] as [number, number, number],
+        properties: volume.properties
+          ? Object.fromEntries(Object.entries(volume.properties).map(([key, property]) => [key, String(property)]))
+          : undefined,
+      };
+    }
+    const reverse = signedPolygonArea(volume.polygon.points) < 0;
+    const points = normalizedPolygon(volume.polygon.points);
+    const polygon = "height" in volume.polygon
+      ? { points, height: volume.polygon.height }
       : {
-          polygon: {
-            points: normalizedPolygon(volume.polygon.points),
-            height: volume.polygon.height,
-          },
-        }),
-    properties: volume.properties
-      ? Object.fromEntries(Object.entries(volume.properties).map(([key, property]) => [key, String(property)]))
-      : undefined,
-  })) as ManagedMapVolume[];
+          points,
+          bottom: reverse ? [...volume.polygon.bottom].reverse() : [...volume.polygon.bottom],
+          top: reverse ? [...volume.polygon.top].reverse() : [...volume.polygon.top],
+        };
+    return {
+      ...volume,
+      center: [...volume.center],
+      polygon,
+      properties: volume.properties
+        ? Object.fromEntries(Object.entries(volume.properties).map(([key, property]) => [key, String(property)]))
+        : undefined,
+    };
+  }) as ManagedMapVolume[];
 }
 
 function numberText(value: number): string {
@@ -273,31 +369,67 @@ interface PrismMeshData {
   textureAxisV: string[];
 }
 
-function footprintAndHeight(volume: ManagedMapVolume): {
+interface VolumeGeometry {
   points: [number, number][];
-  height: number;
-} {
-  if (volume.size !== undefined) {
-    const [width, depth, height] = volume.size;
-    return {
-      points: [
-        [-width / 2, -depth / 2],
-        [width / 2, -depth / 2],
-        [width / 2, depth / 2],
-        [-width / 2, depth / 2],
-      ],
-      height,
-    };
-  }
-  return { points: normalizedPolygon(volume.polygon.points), height: volume.polygon.height };
+  bottom: number[];
+  top: number[];
 }
 
-function buildPrismMesh(points: readonly [number, number][], height: number): PrismMeshData {
+function volumeGeometry(volume: ManagedMapVolume): VolumeGeometry {
+  if (volume.size !== undefined) {
+    const [width, depth, height] = volume.size;
+    const points: [number, number][] = [
+      [-width / 2, -depth / 2],
+      [width / 2, -depth / 2],
+      [width / 2, depth / 2],
+      [-width / 2, depth / 2],
+    ];
+    return {
+      points,
+      bottom: points.map(() => -height / 2),
+      top: points.map(() => height / 2),
+    };
+  }
+  const points = normalizedPolygon(volume.polygon.points);
+  if (volume.polygon.height !== undefined) {
+    return {
+      points,
+      bottom: points.map(() => -volume.polygon.height! / 2),
+      top: points.map(() => volume.polygon.height! / 2),
+    };
+  }
+  return { points, bottom: [...volume.polygon.bottom], top: [...volume.polygon.top] };
+}
+
+function normalizedVector(vector: readonly number[]): [number, number, number] {
+  const length = Math.hypot(...vector);
+  if (length <= 1e-8) throw new Error("Cannot normalize a zero-length volume face vector.");
+  return [vector[0] / length, vector[1] / length, vector[2] / length];
+}
+
+function faceNormal(
+  points: readonly [number, number][],
+  heights: readonly number[],
+  upward: boolean,
+): [number, number, number] {
+  const [a, b, c] = [0, 1, 2].map((index) => [points[index][0], points[index][1], heights[index]]);
+  const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+  const normal = normalizedVector([
+    ab[1] * ac[2] - ab[2] * ac[1],
+    ab[2] * ac[0] - ab[0] * ac[2],
+    ab[0] * ac[1] - ab[1] * ac[0],
+  ]);
+  const direction = upward === (normal[2] > 0) ? 1 : -1;
+  return normal.map((value) => value * direction) as [number, number, number];
+}
+
+function buildPrismMesh(geometry: VolumeGeometry): PrismMeshData {
+  const { points, bottom, top } = geometry;
   const count = points.length;
-  const halfHeight = height / 2;
   const vertices = [
-    ...points.map(([x, y]) => vectorText([x, y, halfHeight])),
-    ...points.map(([x, y]) => vectorText([x, y, -halfHeight])),
+    ...points.map(([x, y], index) => vectorText([x, y, top[index]])),
+    ...points.map(([x, y], index) => vectorText([x, y, bottom[index]])),
   ];
   const starts: number[] = [];
   const ends: number[] = [];
@@ -346,8 +478,24 @@ function buildPrismMesh(points: readonly [number, number][], height: number): Pr
       edgeFaceIndices[edge] = faceIndex;
     }
   }
-  const faceNormals: [number, number, number][] = [[0, 0, 1], [0, 0, -1]];
-  const faceTangents: [number, number, number, number][] = [[1, 0, 0, -1], [1, 0, 0, 1]];
+  const topTangent = normalizedVector([
+    points[1][0] - points[0][0],
+    points[1][1] - points[0][1],
+    top[1] - top[0],
+  ]);
+  const bottomTangent = normalizedVector([
+    points[1][0] - points[0][0],
+    points[1][1] - points[0][1],
+    bottom[1] - bottom[0],
+  ]);
+  const faceNormals: [number, number, number][] = [
+    faceNormal(points, top, true),
+    faceNormal(points, bottom, false),
+  ];
+  const faceTangents: [number, number, number, number][] = [
+    [...topTangent, -1],
+    [...bottomTangent, 1],
+  ];
   for (let index = 0; index < count; index++) {
     const [x, y] = points[index];
     const [nextX, nextY] = points[(index + 1) % count];
@@ -360,8 +508,16 @@ function buildPrismMesh(points: readonly [number, number][], height: number): Pr
   const normals = edgeFaceIndices.map((face) => vectorText(faceNormals[face]));
   const tangents = edgeFaceIndices.map((face) => vectorText(faceTangents[face]));
   const textureAxisU = faceTangents.map(([x, y, z]) => vectorText([x, y, z, 32]));
-  const textureAxisV = faceTangents.map((_tangent, face) =>
-    face < 2 ? "0 -1 0 32" : "0 0 -1 0");
+  const textureAxisV = faceTangents.map(([tx, ty, tz], face) => {
+    if (face >= 2) return "0 0 -1 0";
+    const [nx, ny, nz] = faceNormals[face];
+    const axis = normalizedVector([
+      ty * nz - tz * ny,
+      tz * nx - tx * nz,
+      tx * ny - ty * nx,
+    ]);
+    return vectorText([...axis, 32]);
+  });
   return {
     vertices,
     vertexEdgeIndices: Array.from({ length: vertices.length }, (_unused, vertex) =>
@@ -425,8 +581,8 @@ export function buildMapVolumeBlock(
 ): string {
   const parsed = parseManagedMapVolumes([volume])![0];
   const recipe = MAP_VOLUME_RECIPES[parsed.recipe];
-  const geometry = footprintAndHeight(parsed);
-  const mesh = buildPrismMesh(geometry.points, geometry.height);
+  const geometry = volumeGeometry(parsed);
+  const mesh = buildPrismMesh(geometry);
   const mergedProperties = {
     ...recipe.properties,
     ...(parsed.properties ?? {}),
@@ -585,8 +741,7 @@ function closeEnough(a: number, b: number): boolean {
 }
 
 function expectedVolumeVertices(volume: ManagedMapVolume): [number, number, number][] {
-  const geometry = footprintAndHeight(volume);
-  return buildPrismMesh(geometry.points, geometry.height).vertices
+  return buildPrismMesh(volumeGeometry(volume)).vertices
     .map((vertex) => parseVector(vertex))
     .filter((vertex): vertex is [number, number, number] => !!vertex);
 }
@@ -606,20 +761,37 @@ function sameVertexSet(
   return true;
 }
 
-function prismFootprint(vertices: readonly [number, number, number][]): [number, number][] | undefined {
-  const minZ = Math.min(...vertices.map((vertex) => vertex[2]));
-  const maxZ = Math.max(...vertices.map((vertex) => vertex[2]));
-  if (closeEnough(minZ, maxZ)) return undefined;
-  const top = vertices.filter((vertex) => closeEnough(vertex[2], maxZ));
-  const bottom = vertices.filter((vertex) => closeEnough(vertex[2], minZ));
-  if (top.length < 3 || top.length !== bottom.length || top.length * 2 !== vertices.length) return undefined;
-  if (!top.every(([x, y]) => bottom.some(([bottomX, bottomY]) =>
-    closeEnough(x, bottomX) && closeEnough(y, bottomY)))) return undefined;
-  const centerX = top.reduce((sum, vertex) => sum + vertex[0], 0) / top.length;
-  const centerY = top.reduce((sum, vertex) => sum + vertex[1], 0) / top.length;
-  return normalizedPolygon(top
-    .map(([x, y]) => [x, y] as [number, number])
-    .sort((a, b) => Math.atan2(a[1] - centerY, a[0] - centerX) - Math.atan2(b[1] - centerY, b[0] - centerX)));
+function parsedPrismGeometry(vertices: readonly [number, number, number][]): VolumeGeometry | undefined {
+  const pairs: { point: [number, number]; bottom: number; top: number }[] = [];
+  for (const [x, y, z] of vertices) {
+    const existing = pairs.find((pair) => closeEnough(pair.point[0], x) && closeEnough(pair.point[1], y));
+    if (!existing) {
+      pairs.push({ point: [x, y], bottom: z, top: z });
+      continue;
+    }
+    if (!closeEnough(existing.bottom, existing.top)) return undefined;
+    existing.bottom = Math.min(existing.bottom, z);
+    existing.top = Math.max(existing.top, z);
+  }
+  if (pairs.length < 3 || pairs.length * 2 !== vertices.length) return undefined;
+  if (pairs.some((pair) => !Number.isFinite(pair.bottom) || !(pair.top > pair.bottom))) return undefined;
+  const centerX = pairs.reduce((sum, pair) => sum + pair.point[0], 0) / pairs.length;
+  const centerY = pairs.reduce((sum, pair) => sum + pair.point[1], 0) / pairs.length;
+  pairs.sort((a, b) =>
+    Math.atan2(a.point[1] - centerY, a.point[0] - centerX) -
+    Math.atan2(b.point[1] - centerY, b.point[0] - centerX));
+  if (signedPolygonArea(pairs.map((pair) => pair.point)) < 0) pairs.reverse();
+  const geometry = {
+    points: pairs.map((pair) => pair.point),
+    bottom: pairs.map((pair) => pair.bottom),
+    top: pairs.map((pair) => pair.top),
+  };
+  if (
+    convexPolygonError(geometry.points) ||
+    coplanarRingError(geometry.points, geometry.bottom) ||
+    coplanarRingError(geometry.points, geometry.top)
+  ) return undefined;
+  return geometry;
 }
 
 function volumeBlockMatches(block: string, desired: ManagedMapVolume): boolean {
@@ -653,6 +825,8 @@ export interface ParsedMapVolume {
   size: [number, number, number];
   /** Convex local-space footprint in counter-clockwise order. */
   footprint: [number, number][];
+  /** Present when either the local top or bottom face is sloped. */
+  sloped?: { bottom: number[]; top: number[] };
   yaw: number;
   material: string;
   blocking: boolean;
@@ -677,7 +851,7 @@ function inferredRecipe(
   return undefined;
 }
 
-/** Read checked or Valve-authored convex prism tool volumes from VMAP text. */
+/** Read checked or Valve-authored convex vertical-sided tool volumes from VMAP text. */
 export function parseMapVolumes(text: string): ParsedMapVolume[] {
   const parsed: ParsedMapVolume[] = [];
   for (const range of entityBlockRanges(text)) {
@@ -689,8 +863,8 @@ export function parseMapVolumes(text: string): ParsedMapVolume[] {
     const targetname = range.entity.targetname ?? `unnamed_volume_${range.start}`;
     const recipe = inferredRecipe(range.entity.classname, material, targetname);
     if (!recipe) continue;
-    const footprint = prismFootprint(vertices);
-    if (!footprint) continue;
+    const geometry = parsedPrismGeometry(vertices);
+    if (!geometry) continue;
     const mins = [0, 1, 2].map((axis) => Math.min(...vertices.map((vertex) => vertex[axis])));
     const maxs = [0, 1, 2].map((axis) => Math.max(...vertices.map((vertex) => vertex[axis])));
     parsed.push({
@@ -699,7 +873,13 @@ export function parseMapVolumes(text: string): ParsedMapVolume[] {
       recipe,
       center,
       size: [maxs[0] - mins[0], maxs[1] - mins[1], maxs[2] - mins[2]],
-      footprint,
+      footprint: geometry.points,
+      ...(
+        geometry.top.some((height, index) => !closeEnough(height, geometry.top[0]) ||
+          !closeEnough(geometry.bottom[index], geometry.bottom[0]))
+          ? { sloped: { bottom: geometry.bottom, top: geometry.top } }
+          : {}
+      ),
       yaw: angles[1],
       material,
       blocking: recipe === "playerClip",

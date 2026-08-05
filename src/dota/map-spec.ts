@@ -462,14 +462,15 @@ function expandComponent(
     );
     const mirrorCount = Number(placement.mirrorAxis?.includes("x") ?? false) +
       Number(placement.mirrorAxis?.includes("y") ?? false);
-    const polygon = volume.polygon && mirrorCount % 2 === 1
-      ? {
-          ...volume.polygon,
-          // transformAngles reflects the entity's local X direction. Reflecting
-          // local Y as well preserves the full asymmetric footprint in world space.
-          points: volume.polygon.points.map(([x, y]) => [x, -y] as [number, number]).reverse(),
-        }
-      : volume.polygon;
+    let polygon = volume.polygon;
+    if (polygon && mirrorCount % 2 === 1) {
+      const points = polygon.points.map(([x, y]) => [x, -y] as [number, number]).reverse();
+      // transformAngles reflects the entity's local X direction. Reflecting
+      // local Y as well preserves the full asymmetric footprint in world space.
+      polygon = polygon.top !== undefined && polygon.bottom !== undefined
+        ? { points, bottom: [...polygon.bottom].reverse(), top: [...polygon.top].reverse() }
+        : { points, height: polygon.height! };
+    }
     const transformed = {
       targetname: localName(placement.name, volume.targetname),
       center: [

@@ -50,18 +50,30 @@ export function buildRepositoryCompileFixtureText(baseText: string): string {
   ];
   for (const entity of entities) text = insertEntity(text, buildEntityBlock(entity, nodeId++));
 
-  return reconcileMapVolumes(text, [{
-    targetname: "fixture_polygon_no_wards",
-    recipe: "noWards",
-    center: [0, 0, 256],
-    polygon: {
-      points: Array.from({ length: 12 }, (_unused, index) => {
-        const angle = (index / 12) * Math.PI * 2;
-        return [Math.cos(angle) * 384, Math.sin(angle) * 384] as [number, number];
-      }),
-      height: 512,
+  return reconcileMapVolumes(text, [
+    {
+      targetname: "fixture_polygon_no_wards",
+      recipe: "noWards",
+      center: [0, 0, 256],
+      polygon: {
+        points: Array.from({ length: 12 }, (_unused, index) => {
+          const angle = (index / 12) * Math.PI * 2;
+          return [Math.cos(angle) * 384, Math.sin(angle) * 384] as [number, number];
+        }),
+        height: 512,
+      },
     },
-  }]).text;
+    {
+      targetname: "fixture_sloped_trigger",
+      recipe: "trigger",
+      center: [2048, 2048, 256],
+      polygon: {
+        points: [[-256, -128], [256, -128], [256, 128], [-256, 128]],
+        bottom: [-128, -128, 0, 0],
+        top: [128, 128, 256, 256],
+      },
+    },
+  ]).text;
 }
 
 export function inspectRepositoryCompileFixture(text: string): {

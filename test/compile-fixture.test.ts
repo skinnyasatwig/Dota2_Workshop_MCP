@@ -30,9 +30,17 @@ test("repository compile fixture is self-contained and structurally inspectable"
       "fixture_radiant_start",
       "fixture_route_1",
       "fixture_route_2",
+      "fixture_sloped_trigger",
     ],
   );
-  assert.equal(fixture.volumes.length, 1);
-  assert.equal(fixture.volumes[0].footprint.length, 12);
-  assert.equal(fixture.volumes[0].recipe, "noWards");
+  assert.equal(fixture.volumes.length, 2);
+  const round = fixture.volumes.find((volume) => volume.targetname === "fixture_polygon_no_wards");
+  assert.equal(round?.footprint.length, 12);
+  assert.equal(round?.recipe, "noWards");
+  const sloped = fixture.volumes.find((volume) => volume.targetname === "fixture_sloped_trigger");
+  assert.equal(sloped?.recipe, "trigger");
+  assert.deepEqual(sloped?.sloped, {
+    bottom: [-128, -128, 0, 0],
+    top: [128, 128, 256, 256],
+  });
 });

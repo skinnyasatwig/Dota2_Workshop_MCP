@@ -49,6 +49,7 @@ export interface MapPreviewStats {
     currents: number;
     minimapBounds: number;
     volumes: number;
+    slopedVolumes: number;
     blockingVolumes: number;
     visionBlockers: number;
     collisionObstacles: number;
@@ -220,6 +221,20 @@ function drawPreview(
         const to = pixels[(index + 1) % pixels.length];
         line(from[0], from[1], to[0], to[1], color, 0.9, volume.blocking ? 2 : 1);
       }
+      if (volume.sloped) {
+        const centerHeights = volume.sloped.top.map((height, index) =>
+          (height + volume.sloped!.bottom[index]) / 2);
+        const low = centerHeights.indexOf(Math.min(...centerHeights));
+        const high = centerHeights.indexOf(Math.max(...centerHeights));
+        if (low !== high) {
+          const from = pixels[low];
+          const to = pixels[high];
+          line(from[0], from[1], to[0], to[1], [245, 239, 196], 0.9, 1);
+          const angle = Math.atan2(to[1] - from[1], to[0] - from[0]);
+          line(to[0], to[1], to[0] - Math.cos(angle - 0.55) * 4, to[1] - Math.sin(angle - 0.55) * 4, [245, 239, 196]);
+          line(to[0], to[1], to[0] - Math.cos(angle + 0.55) * 4, to[1] - Math.sin(angle + 0.55) * 4, [245, 239, 196]);
+        }
+      }
     }
   }
 
@@ -386,6 +401,7 @@ function drawPreview(
       currents: currentCount,
       minimapBounds,
       volumes: volumes.length,
+      slopedVolumes: volumes.filter((volume) => !!volume.sloped).length,
       blockingVolumes: volumes.filter((volume) => volume.blocking).length,
       visionBlockers: visionBlockerSegments,
       collisionObstacles: reachability.collisionObstacleCount,
@@ -402,7 +418,7 @@ function drawPreview(
       objectives: "yellow/purple markers",
       currents: "cyan arrows",
       minimapBounds: "magenta rectangle",
-      volumes: "orange camp, purple no-ward, cyan trigger, pink player blocker outlines",
+      volumes: "orange camp, purple no-ward, cyan trigger, pink player blocker outlines; pale arrows point uphill on sloped volumes",
       visionBlockers: "purple linked lines",
       collisionObstacles: "bright cyan exact PHYS hulls; medium cyan mesh envelopes; green-cyan conservative curved primitives; muted cyan PHYS bounds; dark green/orange class approximations; white X means model bounds unknown",
     },

@@ -61,6 +61,10 @@ test("diagnostic preview renders gameplay and navigation overlays", () => {
       center: [768, 896, 256],
       size: [512, 128, 512],
       footprint: [[-256, -64], [256, -64], [256, 64], [-256, 64]],
+      sloped: {
+        bottom: [-128, -128, 0, 0],
+        top: [128, 128, 256, 256],
+      },
       yaw: 0,
       material: "materials/tools/toolsplayerclip.vmat",
       blocking: true,
@@ -92,6 +96,7 @@ test("diagnostic preview renders gameplay and navigation overlays", () => {
   assert.equal(rendered.stats.overlays.currents, 1);
   assert.equal(rendered.stats.overlays.minimapBounds, 1);
   assert.equal(rendered.stats.overlays.volumes, 2);
+  assert.equal(rendered.stats.overlays.slopedVolumes, 1);
   assert.equal(rendered.stats.overlays.blockingVolumes, 1);
   assert.equal(rendered.stats.overlays.visionBlockers, 1);
   assert.equal(rendered.stats.overlays.collisionObstacles, 2);

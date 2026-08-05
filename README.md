@@ -446,15 +446,19 @@ contract explicitly uses `fill`. A terrain shape can also use
 `{"kind":"managedPath","name":"path_name","width":2}` to derive its tile-space stroke from an
 existing managed world-space path, keeping roads synchronized with route edits.
 
-`managedVolumes` adds named convex prisms in world coordinates. A volume chooses either `size: [x,y,z]` for a box or
-`polygon: { points: [[x,y],...], height }` for a three- to 64-sided local footprint; `center` and optional `yaw` place
-that shape in the map. Polygon points must be unique, strictly convex, non-collinear, and non-self-intersecting. Each
+`managedVolumes` adds named convex gameplay solids in world coordinates. A volume chooses `size: [x,y,z]` for a box,
+`polygon: { points: [[x,y],...], height }` for a flat three- to 64-sided prism, or
+`polygon: { points: [[x,y],...], bottom: [z,...], top: [z,...] }` for a sloped one. Sloped volumes provide one local
+bottom and top height per footprint point; both rings must be coplanar, and every top corner must remain above its
+matching bottom corner. `center` and optional `yaw` place the shape in the map. Polygon points must be unique, strictly
+convex, non-collinear, and non-self-intersecting. Each
 volume uses one checked Valve-derived recipe: `camp`, `trigger`, `heroTrigger`, `dotaTrigger`, `bossAttackable`,
 `noWards`, or `playerClip`. The recipe controls the entity class and tool material; contracts cannot override reserved
 class, transform, or brush fields. Preview, drift validation, reusable component mirroring, and offline `playerClip`
-reachability all follow the true polygon footprint rather than its bounding box. Generated polygons are exercised by
-both Valve's `dmxconvert` round trip and an opt-in isolated `resourcecompiler` integration test. Arbitrary solid classes,
-concave footprints, sloped faces, and curved geometry are deliberately rejected.
+reachability all follow the true polygon footprint rather than its bounding box, and preview arrows show the uphill
+direction of sloped volumes. Flat and sloped polygons are exercised by both Valve's `dmxconvert` round trip and an
+opt-in isolated `resourcecompiler` integration test. Arbitrary solid classes, concave footprints, twisted/non-coplanar
+faces, and curved geometry are deliberately rejected.
 
 Map registration supports both legacy KeyValues 1 and the KV3 `addoninfo.txt` produced by current
 Workshop Tools. Source-controlled layouts under `game/dota_addons/<addon>` and
@@ -463,8 +467,8 @@ the real link operation refuses to overwrite conflicting folders.
 
 Then launch it: `addon_launch_custom_game map="<name>"`.
 
-> Limitation: the MCP can safely generate checked box and convex-prism gameplay volumes, but general-purpose
-> **polygon-mesh geometry** is still authored in **Hammer**. It does not sculpt concave/sloped/curved solids, bridges,
+> Limitation: the MCP can safely generate checked box plus flat or sloped convex gameplay volumes, but general-purpose
+> **polygon-mesh world geometry** is still authored in **Hammer**. It does not sculpt concave/curved solids, bridges,
 > terrain props, or decorative cliff brushwork.
 
 ## Notes & limitations
