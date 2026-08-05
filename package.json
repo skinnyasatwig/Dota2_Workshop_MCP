@@ -20,6 +20,7 @@
     "dev": "tsx src/index.ts",
     "test": "node --import tsx --test test/*.test.ts",
     "test:compiler-fixture": "node scripts/test-compiler-fixture.mjs",
+    "test:engine-nav-fixture": "node --import tsx scripts/test-engine-nav-fixture.mjs",
     "recipe:refresh-report": "node --import tsx scripts/recipe-refresh-report.ts",
     "smoke": "node scripts/smoke.mjs",
     "prepare": "npm run build"

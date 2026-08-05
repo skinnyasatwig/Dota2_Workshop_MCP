@@ -61,15 +61,19 @@ Last updated: 2026-08-05
 23. `8922af3` - added bounded engine-backed nearest-reachable waypoint suggestions to DebugSDK 1.2.0 and
     `map_engine_nav_test`, deduplicated adjacent segment failures into actionable repairs, corrected the 3v3 map's
     four mirrored blocked waypoints from the parent specification, rebuilt it, and proved all 64 GridNav checks pass.
-24. This milestone - closed the launch-to-map gap. The guarded navigation runner now waits through the early
+24. `775d39e` - closed the launch-to-map gap. The guarded navigation runner now waits through the early
     VConsole-without-window race, safely closes only Source 2's exact watchdog stall window, focuses the render window,
     explicitly loads the requested custom map when a fresh DebugSDK response does not arrive, runs GridNav, and shuts
     Dota down. One autonomous Steam run demonstrated the entire sequence with no human UI interaction.
+25. This milestone - added a repository-owned, disposable real-GridNav fixture with a known-open route and a
+    deliberately disconnected route. DebugSDK 1.3.0 now suggests repairs when endpoints are individually walkable
+    but isolated from each other. The opt-in runner compiles, launches, asserts the exact engine-proven repair,
+    reports console errors, shuts Dota down, and removes both temporary addon trees.
 
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 225 passed, 0 failed, and 2 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 228 passed, 0 failed, and 2 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 199 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
@@ -78,7 +82,7 @@ Last updated: 2026-08-05
 - Valve's installed `dmxconvert.exe` successfully round-trips generated camp, polygonal no-ward, and player-clip
   volumes from text to binary VMAP and back during the integration suite.
 - `npm run test:compiler-fixture` successfully round-tripped and compiled the repository-owned acceptance payload
-  into a real VPK twice. The generated map uses Valve's installed blank template only as required hidden
+  into a real VPK after its explicit navigation obstruction was added. The generated map uses Valve's installed blank template only as required hidden
   infrastructure, depends on no private 3v3 file, stores no copied Valve VMAP, and leaves no temporary addon trees.
 - Installed ValveResourceFormat 19.2 recovered the physical hull bounds of
   `models/props_gameplay/cap_point001.vmdl_c` directly from `pak01_dir.vpk`; a second lookup reused the fingerprinted
@@ -106,9 +110,9 @@ Last updated: 2026-08-05
 
 The attached runner now has a complete repair-and-retest proof without leaving Dota open:
 
-- DebugSDK 1.2.0 scans a bounded eight-cell ring around a blocked route point and reports the nearest traversable
-  point that can reach the adjacent route anchor. The host combines duplicate start/end reports from neighboring
-  segments into one repair suggestion per blocked point.
+- DebugSDK 1.3.0 scans a bounded eight-cell ring around blocked or disconnected route endpoints and reports the
+  nearest traversable point that can reach the adjacent route anchor. The host combines duplicate endpoint/segment
+  reports into one repair suggestion per affected point.
 - The first 3v3 scan found one blocked mirrored waypoint on each route. A bounded symmetric comparison selected
   `(±4128, ±2784, 256)`, a roughly 101-unit correction that preserves the intended route arc.
 - Contract sync changed exactly four waypoint entities and four terrain cells, retained a transactional recovery
@@ -120,6 +124,11 @@ The attached runner now has a complete repair-and-retest proof without leaving D
   11 bounded early window checks, detected that the command-line map load had not completed, issued one explicit
   `dota_launch_custom_game` command, received DebugSDK 1.2.0 at game state 4, passed all 64 checks with zero console
   errors, and shut Dota down gracefully. No UI click or human intervention was required.
+- The repository-owned engine fixture then compiled and launched as a unique disposable addon. Its open route
+  passed with a 768-unit path; its `point_simple_obstruction` route was correctly disconnected; and DebugSDK 1.3.0
+  suggested `(-32, 480, 128)` with grid offset `(-1, +1)`. A second normal (non-probe) run returned the exact same
+  result, proving the checked repair is stable. Both runs reported zero console errors, shut Dota down, and removed
+  both temporary addon trees.
 
 ## Historical engine acceptance notes
 

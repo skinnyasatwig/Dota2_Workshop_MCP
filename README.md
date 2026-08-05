@@ -408,9 +408,17 @@ playable `.vpk` — a pipeline verified end to end.
   `GridNav:CanFindPath`, `GridNav:FindPathLength`, and `GridNav:IsTraversable`, then reassembles each logical route.
   A blocked point also receives a bounded nearest-reachable suggestion when Dota can find one; adjacent segment
   reports for the same point are collapsed into one actionable repair rather than repeated warnings.
+  DebugSDK 1.3.0 also repairs the subtler case where both endpoints are individually traversable but a wall,
+  obstruction, or isolated region prevents any path between them.
   The guarded launch waits for Dota's real render window, handles the exact watchdog stall popup, and sends one
   explicit custom-map load command when the command-line launch remains on the dashboard. Tool-owned sessions are
   still shut down automatically in success and failure cases.
+
+For a project-independent real-engine acceptance check, run `npm run test:engine-nav-fixture` while Dota is
+closed. The opt-in runner creates a uniquely named disposable addon from Valve's locally installed blank-map
+structure, compiles it, launches one guarded Steam session, and asserts both a known-open route and a deliberately
+disconnected route with an exact engine-proven repair suggestion. It always closes its own Dota session and removes
+both temporary addon trees. Nothing from Valve's blank VMAP is copied into this repository.
 
 If engine startup is uncertain, run `map_engine_readiness_probe` before `map_engine_nav_test`; unlike the
 navigation test, the readiness probe sends no gameplay command and returns a screenshot plus structured

@@ -25,6 +25,7 @@ test("repository compile fixture is self-contained and structurally inspectable"
     [
       "fixture_base_blocker",
       "fixture_dire_start",
+      "fixture_nav_obstruction",
       "fixture_polygon_no_wards",
       "fixture_radiant_start",
       "fixture_route_1",

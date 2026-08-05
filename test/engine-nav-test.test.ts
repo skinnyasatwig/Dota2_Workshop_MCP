@@ -203,6 +203,37 @@ test("blocked route endpoints collapse into one nearest-reachable repair suggest
   assert.deepEqual(repairs[0].references, ["segment 1 end", "segment 2 start"]);
 });
 
+test("traversable but disconnected endpoints still produce repair suggestions", () => {
+  const failedPoint: [number, number, number] = [0, 384, 128];
+  const suggestedPoint: [number, number, number] = [32, 352, 128];
+  const result = parseEngineNavigationLine(
+    `[MCP] NAV_OK disconnected_1 ${JSON.stringify({
+      name: "sealed_gate",
+      mode: "segments",
+      pointCount: 2,
+      endpoint: null,
+      segments: [{
+        index: 1,
+        from: failedPoint,
+        to: [384, 384, 128],
+        startTraversable: true,
+        endTraversable: true,
+        canFindPath: false,
+        pathLength: -1,
+        passed: false,
+        nearestStart: { point: suggestedPoint, gridOffset: [1, -1], distance: 45.25 },
+      }],
+      passed: false,
+    })}`,
+  );
+
+  const repairs = engineNavigationRepairSuggestions([result]);
+  assert.equal(repairs.length, 1);
+  assert.deepEqual(repairs[0].originalPoint, failedPoint);
+  assert.deepEqual(repairs[0].suggestedPoint, suggestedPoint);
+  assert.deepEqual(repairs[0].references, ["segment 1 disconnected start"]);
+});
+
 test("readiness reports the last observed DebugSDK state", async () => {
   const states = [1, 3];
   let pending:

@@ -42,6 +42,11 @@ export function buildRepositoryCompileFixtureText(baseText: string): string {
       origin: "0 384 128",
       properties: { targetname: "fixture_base_blocker", teamnumber: "2" },
     },
+    {
+      classname: "point_simple_obstruction",
+      origin: "0 384 128",
+      properties: { targetname: "fixture_nav_obstruction" },
+    },
   ];
   for (const entity of entities) text = insertEntity(text, buildEntityBlock(entity, nodeId++));
 

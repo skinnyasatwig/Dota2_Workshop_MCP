@@ -214,8 +214,16 @@ export function engineNavigationRepairSuggestions(
       })),
     ];
     for (const { check, reference } of checks) {
-      if (!check.startTraversable) add(result.name, check.from, check.nearestStart, `${reference} start`);
-      if (!check.endTraversable) add(result.name, check.to, check.nearestEnd, `${reference} end`);
+      if (!check.startTraversable) {
+        add(result.name, check.from, check.nearestStart, `${reference} start`);
+      } else if (!check.canFindPath) {
+        add(result.name, check.from, check.nearestStart, `${reference} disconnected start`);
+      }
+      if (!check.endTraversable) {
+        add(result.name, check.to, check.nearestEnd, `${reference} end`);
+      } else if (!check.canFindPath) {
+        add(result.name, check.to, check.nearestEnd, `${reference} disconnected end`);
+      }
     }
   }
 

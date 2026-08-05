@@ -15,7 +15,7 @@
   your addon by hand — re-attach to update.
 ]]
 
-local SDK_VERSION = "1.2.0"
+local SDK_VERSION = "1.3.0"
 
 ----------------------------------------------------------------------
 -- Tiny JSON encoder (no dependencies; handles the shapes we emit).
@@ -266,8 +266,11 @@ local function cmd_nav(_, requestId, routeName, mode, encodedPoints)
         canFindPath = canFindPath,
         pathLength = pathLength,
         passed = canFindPath and startTraversable and endTraversable and pathLength >= 0,
-        nearestStart = not startTraversable and nearestReachable(a, b) or nil,
-        nearestEnd = not endTraversable and nearestReachable(b, a) or nil,
+        -- A point can be individually traversable while isolated by an
+        -- obstruction. Search around disconnected endpoints too, so callers
+        -- receive a useful repair for sealed gates and cut-off regions.
+        nearestStart = (not startTraversable or not canFindPath) and nearestReachable(a, b) or nil,
+        nearestEnd = (not endTraversable or not canFindPath) and nearestReachable(b, a) or nil,
       }
     end
 
