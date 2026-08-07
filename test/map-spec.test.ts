@@ -25,7 +25,7 @@ test("the documented map specification example stays valid", async () => {
   assert.equal(specification.map, "example_arena");
   assert.equal(specification.managedPaths?.length, 2);
   assert.equal(specification.managedTerrain?.length, 3);
-  assert.equal(specification.managedSolids?.length, 2);
+  assert.equal(specification.managedSolids?.length, 4);
 });
 
 test("parseMapSpecification exposes the contract terrain and path vocabulary", () => {
@@ -190,6 +190,31 @@ test("component placements namespace and mirror asymmetric concave solids", () =
       properties: { OnUser1: "east_tower,Disable,,0,-1" },
     },
   ]);
+});
+
+test("mirrored sloped concave solids keep height rings paired with their outline", () => {
+  const specification = parseMapSpecification({
+    components: {
+      sloped_wall: {
+        managedSolids: [{
+          targetname: "wall",
+          center: [0, 0, 128],
+          material: "materials/dev/reflectivity_30.vmat",
+          extrusion: {
+            points: [[-200, -100], [200, -100], [200, 0], [0, 0], [0, 200], [-200, 200]],
+            bottom: [-192, -64, -64, -128, -256, -256],
+            top: [64, 192, 192, 128, 0, 0],
+          },
+        }],
+      },
+    },
+    placements: [{ component: "sloped_wall", name: "east", mirrorAxis: "x" }],
+  });
+  assert.deepEqual(specification.managedSolids?.[0].extrusion, {
+    points: [[-200, -200], [0, -200], [0, 0], [200, 0], [200, 100], [-200, 100]],
+    bottom: [-256, -256, -128, -64, -64, -192],
+    top: [0, 0, 128, 192, 192, 64],
+  });
 });
 
 test("named regions can be reused and mirrored around a chosen tile point", () => {

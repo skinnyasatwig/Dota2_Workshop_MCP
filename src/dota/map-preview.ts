@@ -50,6 +50,7 @@ export interface MapPreviewStats {
     currents: number;
     minimapBounds: number;
     solids: number;
+    slopedSolids: number;
     volumes: number;
     slopedVolumes: number;
     blockingVolumes: number;
@@ -251,6 +252,20 @@ function drawPreview(
         const to = pixels[(index + 1) % pixels.length];
         line(from[0], from[1], to[0], to[1], [238, 220, 145], 0.95, 2);
       }
+      if (solid.sloped) {
+        const centerHeights = solid.sloped.top.map((height, index) =>
+          (height + solid.sloped!.bottom[index]) / 2);
+        const low = centerHeights.indexOf(Math.min(...centerHeights));
+        const high = centerHeights.indexOf(Math.max(...centerHeights));
+        if (low !== high) {
+          const from = pixels[low];
+          const to = pixels[high];
+          line(from[0], from[1], to[0], to[1], [255, 246, 205], 0.95, 1);
+          const angle = Math.atan2(to[1] - from[1], to[0] - from[0]);
+          line(to[0], to[1], to[0] - Math.cos(angle - 0.55) * 4, to[1] - Math.sin(angle - 0.55) * 4, [255, 246, 205]);
+          line(to[0], to[1], to[0] - Math.cos(angle + 0.55) * 4, to[1] - Math.sin(angle + 0.55) * 4, [255, 246, 205]);
+        }
+      }
     }
   }
 
@@ -417,6 +432,7 @@ function drawPreview(
       currents: currentCount,
       minimapBounds,
       solids: solids.length,
+      slopedSolids: solids.filter((solid) => !!solid.sloped).length,
       volumes: volumes.length,
       slopedVolumes: volumes.filter((volume) => !!volume.sloped).length,
       blockingVolumes: volumes.filter((volume) => volume.blocking).length + solids.length,

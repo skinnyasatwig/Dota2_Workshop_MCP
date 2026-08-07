@@ -77,7 +77,10 @@ test("diagnostic preview renders gameplay and navigation overlays", () => {
     yaw: 0,
     material: "materials/dev/reflectivity_30.vmat",
     footprint: [[-96, -96], [96, -96], [96, -32], [-32, -32], [-32, 96], [-96, 96]],
-    height: 512,
+    sloped: {
+      bottom: [-256, -128, -128, -192, -320, -320],
+      top: [0, 128, 128, 64, -64, -64],
+    },
     blocking: true,
   }];
   const rendered = renderTileGridPreview(grid(), [
@@ -106,6 +109,7 @@ test("diagnostic preview renders gameplay and navigation overlays", () => {
   assert.equal(rendered.stats.overlays.currents, 1);
   assert.equal(rendered.stats.overlays.minimapBounds, 1);
   assert.equal(rendered.stats.overlays.solids, 1);
+  assert.equal(rendered.stats.overlays.slopedSolids, 1);
   assert.equal(rendered.stats.overlays.volumes, 2);
   assert.equal(rendered.stats.overlays.slopedVolumes, 1);
   assert.equal(rendered.stats.overlays.blockingVolumes, 2);

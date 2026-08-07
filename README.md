@@ -476,14 +476,18 @@ contract explicitly uses `fill`. A terrain shape can also use
 existing managed world-space path, keeping roads synchronized with route edits.
 
 `managedSolids` adds named, always-solid `func_brush` world geometry. Each solid supplies `center`, optional `yaw`,
-an explicit visible (non-`materials/tools`) `materials/...vmat` asset, and
-`extrusion: { points: [[x,y],...], height }`. The footprint may be convex
+an explicit visible (non-`materials/tools`) `materials/...vmat` asset, and an `extrusion`. Use
+`{ points: [[x,y],...], height }` for a flat centered extrusion, or provide one local height per outline corner with
+`{ points, bottom: [z,...], top: [z,...] }` for a sloped one. Every top height must remain above its matching bottom.
+The footprint may be convex
 or concave, but it must be one simple closed outline: duplicate points, collinear adjacent edges, crossings, touching
 non-adjacent edges, out-of-range coordinates, unsafe material paths, and reserved brush-property overrides are rejected.
-The MCP normalizes winding, triangulates the top and bottom deterministically, closes every side, and then proves every
+The MCP normalizes winding (while retaining height-to-corner pairing), triangulates the top and bottom deterministically,
+closes every side, and then proves every
 half-edge has exactly one opposite before writing the VMAP. Solids reconcile by targetname, mirror inside reusable
-components, appear in `map_preview`, and block their true concave footprint in offline reachability. The repository
-fixture round-trips an L-shaped solid through Valve's converter and compiles it into a real VPK.
+components, appear in `map_preview` with an uphill arrow when sloped, and block their true concave footprint in offline
+reachability. The repository fixture round-trips flat and sloped L-shaped solids through Valve's converter and compiles
+them into a real VPK.
 
 `managedVolumes` adds named convex gameplay solids in world coordinates. A volume chooses `size: [x,y,z]` for a box,
 `polygon: { points: [[x,y],...], height }` for a flat three- to 64-sided prism, or
@@ -506,8 +510,8 @@ the real link operation refuses to overwrite conflicting folders.
 
 Then launch it: `addon_launch_custom_game map="<name>"`.
 
-> Limitation: the MCP can safely generate checked flat extrusions with convex or concave outlines plus flat/sloped
-> convex gameplay volumes. Freeform 3D meshes, sloped concave solids, curves, terrain props, and decorative cliff
+> Limitation: the MCP can safely generate checked flat or per-corner-sloped extrusions with convex or concave outlines
+> plus flat/sloped convex gameplay volumes. Freeform 3D meshes, holes/arches, curves, terrain props, and decorative cliff
 > brushwork still require Hammer or a future checked mesh recipe.
 
 ## Notes & limitations

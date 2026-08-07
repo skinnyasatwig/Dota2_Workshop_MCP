@@ -37,6 +37,7 @@ test(
       assert.match(roundTripped, /fixture_polygon_no_wards/);
       assert.match(roundTripped, /fixture_sloped_trigger/);
       assert.match(roundTripped, /fixture_concave_solid/);
+      assert.match(roundTripped, /fixture_sloped_concave_solid/);
       const compiled = await compileVmap(compiler, dotaGame, contentMap, gameVpk, true);
       assert.equal(compiled.timedOut, false, compiled.stderr || compiled.stdout);
       assert.equal(compiled.code, 0, compiled.stderr || compiled.stdout);

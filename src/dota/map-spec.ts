@@ -505,6 +505,14 @@ function expandComponent(
     const points = mirrorCount % 2 === 1
       ? solid.extrusion.points.map(([x, y]) => [x, Math.abs(y) < 1e-9 ? 0 : -y] as [number, number]).reverse()
       : solid.extrusion.points.map(([x, y]) => [x, y] as [number, number]);
+    const reverse = mirrorCount % 2 === 1;
+    const extrusion = "height" in solid.extrusion
+      ? { points, height: solid.extrusion.height! }
+      : {
+          points,
+          bottom: reverse ? [...solid.extrusion.bottom].reverse() : [...solid.extrusion.bottom],
+          top: reverse ? [...solid.extrusion.top].reverse() : [...solid.extrusion.top],
+        };
     return {
       targetname: localName(placement.name, solid.targetname),
       center: [
@@ -514,7 +522,7 @@ function expandComponent(
       ],
       yaw: transformedAngles ? parseVector(transformedAngles, "transformed solid yaw", path)[1] : solid.yaw,
       material: solid.material,
-      extrusion: { points, height: solid.extrusion.height },
+      extrusion,
       properties: localProperties(solid.properties, placement.name),
     };
   };

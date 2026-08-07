@@ -31,13 +31,21 @@ test("repository compile fixture is self-contained and structurally inspectable"
       "fixture_radiant_start",
       "fixture_route_1",
       "fixture_route_2",
+      "fixture_sloped_concave_solid",
       "fixture_sloped_trigger",
     ],
   );
-  assert.equal(fixture.solids.length, 1);
-  assert.equal(fixture.solids[0]?.targetname, "fixture_concave_solid");
-  assert.equal(fixture.solids[0]?.footprint.length, 6);
-  assert.equal(fixture.solids[0]?.height, 256);
+  assert.equal(fixture.solids.length, 2);
+  const concave = fixture.solids.find((solid) => solid.targetname === "fixture_concave_solid");
+  assert.equal(concave?.footprint.length, 6);
+  assert.equal(concave?.height, 256);
+  const slopedConcave = fixture.solids.find(
+    (solid) => solid.targetname === "fixture_sloped_concave_solid",
+  );
+  assert.deepEqual(slopedConcave?.sloped, {
+    bottom: [-192, -64, -64, -128, -256, -256],
+    top: [64, 192, 192, 128, 0, 0],
+  });
   assert.equal(fixture.volumes.length, 2);
   const round = fixture.volumes.find((volume) => volume.targetname === "fixture_polygon_no_wards");
   assert.equal(round?.footprint.length, 12);

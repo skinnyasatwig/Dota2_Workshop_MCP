@@ -75,18 +75,33 @@ export function buildRepositoryCompileFixtureText(baseText: string): string {
       },
     },
   ]).text;
-  return reconcileMapSolids(text, [{
-    targetname: "fixture_concave_solid",
-    center: [0, -1024, 128],
-    material: "materials/dev/reflectivity_30.vmat",
-    extrusion: {
-      points: [
-        [-384, -384], [384, -384], [384, -128],
-        [-128, -128], [-128, 384], [-384, 384],
-      ],
-      height: 256,
+  return reconcileMapSolids(text, [
+    {
+      targetname: "fixture_concave_solid",
+      center: [0, -1024, 128],
+      material: "materials/dev/reflectivity_30.vmat",
+      extrusion: {
+        points: [
+          [-384, -384], [384, -384], [384, -128],
+          [-128, -128], [-128, 384], [-384, 384],
+        ],
+        height: 256,
+      },
     },
-  }]).text;
+    {
+      targetname: "fixture_sloped_concave_solid",
+      center: [1536, -1024, 256],
+      material: "materials/dev/reflectivity_30.vmat",
+      extrusion: {
+        points: [
+          [-384, -384], [384, -384], [384, -128],
+          [-128, -128], [-128, 384], [-384, 384],
+        ],
+        bottom: [-192, -64, -64, -128, -256, -256],
+        top: [64, 192, 192, 128, 0, 0],
+      },
+    },
+  ]).text;
 }
 
 export function inspectRepositoryCompileFixture(text: string): {

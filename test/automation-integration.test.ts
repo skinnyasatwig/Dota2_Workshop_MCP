@@ -28,6 +28,7 @@ test("full automation fixture crosses specification, components, terrain, and en
     ["north_lane_wall", "south_lane_wall"],
   );
   assert.ok(specification.managedSolids?.every((solid) => solid.extrusion.points.length === 6));
+  assert.ok(specification.managedSolids?.every((solid) => "top" in solid.extrusion));
 
   const routes = engineNavigationRoutesFromManagedPaths(specification.managedPaths ?? []);
   assert.equal(routes.length, 2);

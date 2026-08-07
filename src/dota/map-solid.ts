@@ -97,15 +97,24 @@ function simplePolygonError(points: readonly [number, number][]): string | undef
   return undefined;
 }
 
+const solidExtrusionInputSchema = z.union([
+  z.object({
+    points: z.array(point2).min(3).max(128),
+    height: z.number().finite().positive().max(32768),
+  }).strict(),
+  z.object({
+    points: z.array(point2).min(3).max(128),
+    bottom: z.array(z.number().finite()).min(3).max(128),
+    top: z.array(z.number().finite()).min(3).max(128),
+  }).strict(),
+]);
+
 export const managedMapSolidInputSchema = z.object({
   targetname: safeName,
   center: point3,
   yaw: z.number().finite().optional(),
   material,
-  extrusion: z.object({
-    points: z.array(point2).min(3).max(128),
-    height: z.number().finite().positive().max(32768),
-  }).strict(),
+  extrusion: solidExtrusionInputSchema,
   properties: z.record(scalar).optional(),
 }).strict().superRefine((solid, context) => {
   const polygonError = simplePolygonError(solid.extrusion.points);
@@ -114,6 +123,37 @@ export const managedMapSolidInputSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ["extrusion", "points"],
       message: polygonError,
+    });
+  }
+  if ("top" in solid.extrusion && solid.extrusion.top !== undefined && solid.extrusion.bottom !== undefined) {
+    const sloped = solid.extrusion;
+    for (const side of ["bottom", "top"] as const) {
+      if (sloped[side].length !== sloped.points.length) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["extrusion", side],
+          message: "must contain one local height for every outline point",
+        });
+      }
+      sloped[side].forEach((height, index) => {
+        if (Math.abs(height) > 16384) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["extrusion", side, index],
+            message: "local heights must stay within +/-16384 world units",
+          });
+        }
+      });
+    }
+    sloped.points.forEach((_point, index) => {
+      const thickness = sloped.top[index] - sloped.bottom[index];
+      if (!(thickness > 0) || thickness > 32768) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["extrusion", "top", index],
+          message: "must be above the matching bottom height by at most 32768 world units",
+        });
+      }
     });
   }
   for (const reserved of [
@@ -135,7 +175,9 @@ export interface ManagedMapSolid {
   center: [number, number, number];
   yaw?: number;
   material: string;
-  extrusion: { points: [number, number][]; height: number };
+  extrusion:
+    | { points: [number, number][]; height: number; bottom?: never; top?: never }
+    | { points: [number, number][]; height?: never; bottom: number[]; top: number[] };
   properties?: Record<string, string>;
 }
 
@@ -154,11 +196,19 @@ export function parseManagedMapSolids(
   }
   return result.data.map((solid) => {
     const points = solid.extrusion.points.map(([x, y]) => [x, y] as [number, number]);
-    if (signedPolygonArea(points) < 0) points.reverse();
+    const reverse = signedPolygonArea(points) < 0;
+    if (reverse) points.reverse();
+    const extrusion = "height" in solid.extrusion
+      ? { points, height: solid.extrusion.height! }
+      : {
+          points,
+          bottom: reverse ? [...solid.extrusion.bottom].reverse() : [...solid.extrusion.bottom],
+          top: reverse ? [...solid.extrusion.top].reverse() : [...solid.extrusion.top],
+        };
     return {
       ...solid,
       center: [...solid.center],
-      extrusion: { points, height: solid.extrusion.height },
+      extrusion,
       properties: solid.properties
         ? Object.fromEntries(Object.entries(solid.properties).map(([key, value]) => [key, String(value)]))
         : undefined,
@@ -216,13 +266,17 @@ export function triangulateSimplePolygon(points: readonly [number, number][]): [
 
 export function buildExtrudedSolidMesh(solid: ManagedMapSolid): MapMeshData {
   const parsed = parseManagedMapSolids([solid])![0];
-  const { points, height } = parsed.extrusion;
-  const top = height / 2;
-  const bottom = -height / 2;
+  const { points } = parsed.extrusion;
+  const bottom = "height" in parsed.extrusion
+    ? points.map(() => -parsed.extrusion.height! / 2)
+    : parsed.extrusion.bottom;
+  const top = "height" in parsed.extrusion
+    ? points.map(() => parsed.extrusion.height! / 2)
+    : parsed.extrusion.top;
   const count = points.length;
   const vertices: MeshPoint3[] = [
-    ...points.map(([x, y]) => [x, y, top] as MeshPoint3),
-    ...points.map(([x, y]) => [x, y, bottom] as MeshPoint3),
+    ...points.map(([x, y], index) => [x, y, top[index]] as MeshPoint3),
+    ...points.map(([x, y], index) => [x, y, bottom[index]] as MeshPoint3),
   ];
   const topFaces = triangulateSimplePolygon(points);
   const bottomFaces = topFaces.map(([a, b, c]) => [count + a, count + c, count + b]);
@@ -384,11 +438,12 @@ export interface ParsedMapSolid {
   yaw: number;
   material: string;
   footprint: [number, number][];
-  height: number;
+  height?: number;
+  sloped?: { bottom: number[]; top: number[] };
   blocking: true;
 }
 
-/** Read flat generated-style solid extrusions from VMAP text for inspection and preview. */
+/** Read generated-style flat or sloped solid extrusions from VMAP text for inspection and preview. */
 export function parseMapSolids(text: string): ParsedMapSolid[] {
   const parsed: ParsedMapSolid[] = [];
   for (const range of entityBlockRanges(text)) {
@@ -407,17 +462,21 @@ export function parseMapSolids(text: string): ParsedMapSolid[] {
     if (!top.every((vertex, index) =>
       Math.abs(vertex[0] - bottom[index][0]) <= 1e-4 &&
       Math.abs(vertex[1] - bottom[index][1]) <= 1e-4)) continue;
-    const topZ = top[0][2];
-    const bottomZ = bottom[0][2];
-    if (!top.every((vertex) => Math.abs(vertex[2] - topZ) <= 1e-4) ||
-        !bottom.every((vertex) => Math.abs(vertex[2] - bottomZ) <= 1e-4) || topZ <= bottomZ) continue;
+    const topHeights = top.map((vertex) => vertex[2]);
+    const bottomHeights = bottom.map((vertex) => vertex[2]);
+    if (topHeights.some((height, index) => height <= bottomHeights[index])) continue;
+    const flat = topHeights.every((height) => Math.abs(height - topHeights[0]) <= 1e-4) &&
+      bottomHeights.every((height) => Math.abs(height - bottomHeights[0]) <= 1e-4) &&
+      Math.abs(topHeights[0] + bottomHeights[0]) <= 1e-4;
     parsed.push({
       targetname: entity.targetname,
       center,
       yaw: angles[1],
       material: materialPath,
       footprint: top.map(([x, y]) => [x, y]),
-      height: topZ - bottomZ,
+      ...(flat
+        ? { height: topHeights[0] - bottomHeights[0] }
+        : { sloped: { bottom: bottomHeights, top: topHeights } }),
       blocking: true,
     });
   }

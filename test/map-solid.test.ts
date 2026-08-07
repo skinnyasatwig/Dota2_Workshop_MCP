@@ -35,6 +35,16 @@ const concaveSolid = {
   },
 };
 
+const slopedConcaveSolid = {
+  ...concaveSolid,
+  targetname: "fixture_sloped_concave_wall",
+  extrusion: {
+    points: concaveSolid.extrusion.points,
+    bottom: [-192, -64, -64, -128, -256, -256],
+    top: [64, 192, 192, 128, 0, 0],
+  },
+};
+
 test("simple concave outlines triangulate without adding vertices", () => {
   const triangles = triangulateSimplePolygon(concaveSolid.extrusion.points);
   assert.equal(triangles.length, concaveSolid.extrusion.points.length - 2);
@@ -69,6 +79,20 @@ test("managed solids reject unsafe outlines, materials, and property overrides",
     () => parseManagedMapSolids([{ ...concaveSolid, properties: { Solidity: 0 } }]),
     /controlled by the checked solid recipe/,
   );
+  assert.throws(
+    () => parseManagedMapSolids([{
+      ...slopedConcaveSolid,
+      extrusion: { ...slopedConcaveSolid.extrusion, top: [64, 192, 192] },
+    }]),
+    /one local height for every outline point/,
+  );
+  assert.throws(
+    () => parseManagedMapSolids([{
+      ...slopedConcaveSolid,
+      extrusion: { ...slopedConcaveSolid.extrusion, top: [-256, 192, 192, 128, 0, 0] },
+    }]),
+    /above the matching bottom height/,
+  );
 });
 
 test("a concave extrusion becomes a closed solid Source 2 mesh", () => {
@@ -86,6 +110,45 @@ test("a concave extrusion becomes a closed solid Source 2 mesh", () => {
   assert.equal(entity.properties.Solidity, "2");
   assert.equal(entity.properties.AlwaysSolidIgnoreNav, "0");
   assert.equal(entity.targetname, concaveSolid.targetname);
+});
+
+test("paired height rings produce a watertight sloped concave solid", () => {
+  const mesh = buildExtrudedSolidMesh(slopedConcaveSolid);
+  assert.equal(mesh.vertices.length, 12);
+  assert.deepEqual(mesh.vertices.slice(0, 6).map((vertex) => Number(vertex.split(" ")[2])),
+    slopedConcaveSolid.extrusion.top);
+  assert.deepEqual(mesh.vertices.slice(6).map((vertex) => Number(vertex.split(" ")[2])),
+    slopedConcaveSolid.extrusion.bottom);
+  const first = reconcileMapSolids(EMPTY_MAP, [slopedConcaveSolid]);
+  assert.deepEqual(parseMapSolids(first.text), [{
+    targetname: slopedConcaveSolid.targetname,
+    center: slopedConcaveSolid.center,
+    yaw: 0,
+    material: slopedConcaveSolid.material,
+    footprint: slopedConcaveSolid.extrusion.points,
+    sloped: {
+      bottom: slopedConcaveSolid.extrusion.bottom,
+      top: slopedConcaveSolid.extrusion.top,
+    },
+    blocking: true,
+  }]);
+  assert.deepEqual(reconcileMapSolids(first.text, [slopedConcaveSolid]).unchanged,
+    [slopedConcaveSolid.targetname]);
+
+  const verticallyOffset = {
+    ...slopedConcaveSolid,
+    targetname: "fixture_offset_concave_wall",
+    extrusion: {
+      points: slopedConcaveSolid.extrusion.points,
+      bottom: slopedConcaveSolid.extrusion.points.map(() => -64),
+      top: slopedConcaveSolid.extrusion.points.map(() => 192),
+    },
+  };
+  const offsetText = reconcileMapSolids(EMPTY_MAP, [verticallyOffset]).text;
+  assert.deepEqual(parseMapSolids(offsetText)[0]?.sloped, {
+    bottom: verticallyOffset.extrusion.bottom,
+    top: verticallyOffset.extrusion.top,
+  });
 });
 
 test("managed solids reconcile idempotently and detect topology drift", () => {
