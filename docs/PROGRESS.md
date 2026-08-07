@@ -1,6 +1,20 @@
 # Automation improvement progress
 
-Last updated: 2026-08-05
+Last updated: 2026-08-07
+
+## Current visual verification and wall milestone
+
+- Added `map_engine_visual_test`, a dry-run-first, single-launch minimap verifier that discovers native HUD geometry,
+  clicks normalized probes, reads the exact client camera position, attaches screenshots, and performs bounded shutdown.
+- DebugSDK 1.4.0 can optionally attach an invisible, idempotent Panorama camera bridge. Attach/detach preserves unrelated
+  manifest entries; malformed manifests fail closed rather than being rewritten blindly.
+- Added a strongly validated `wall` Dota component. Open or closed outlines become overlapping checked convex
+  `playerClip` volumes, making practical curved and concave base silhouettes reusable without unsafe concave solids.
+- Focused camera coordinate tests, bridge lifecycle tests, wall expansion tests, and the TypeScript build pass.
+- The first live acceptance run exposed two useful facts: Valve forbids an `id` on the bridge layout's root panel
+  (corrected), and Windows can return a successful input call after another application steals foreground focus.
+  The runner now fails closed before clicking and discards any screen capture made after focus loss. The completed
+  run's later probes are not treated as minimap evidence because their screenshots showed the clicks reached another app.
 
 ## Verified milestones
 

@@ -15,6 +15,7 @@ import { resolveDataPath } from "../util/datapath.js";
 import { pathExists, ensureDir } from "../util/fsx.js";
 
 const MARKER = "[MCP DebugSDK]";
+const CAMERA_MARKER = "[MCP DebugSDK Camera]";
 
 const LUA_SNIPPET =
   `-- ${MARKER} auto-attached; remove this line + mcp_debug.lua to detach\n` +
@@ -31,10 +32,74 @@ export interface AttachResult {
   bootstrapAction: "inserted" | "already-present" | "not-found" | "skipped (dryRun)";
   instructions: string[];
   dryRun: boolean;
+  cameraBridge?: {
+    copiedTo: string[];
+    manifestFile: string;
+    manifestAction: "created" | "inserted" | "already-present" | "skipped (dryRun)";
+  };
+}
+
+export interface AttachDebugSdkOptions {
+  /** Install the tiny Panorama telemetry panel used by map_engine_visual_test. */
+  cameraBridge?: boolean;
 }
 
 async function bundledSdkPath(): Promise<string> {
   return resolveDataPath("debug-sdk/mcp_debug.lua");
+}
+
+async function attachCameraBridge(
+  project: AddonProject,
+  dryRun: boolean,
+): Promise<NonNullable<AttachResult["cameraBridge"]>> {
+  const layoutSource = await resolveDataPath("debug-sdk/mcp_debug_camera.xml");
+  const scriptSource = await resolveDataPath("debug-sdk/mcp_debug_camera.js");
+  const layoutDestination = join(project.panoramaContentDir, "layout", "custom_game", "mcp_debug_camera.xml");
+  const scriptDestination = join(project.panoramaContentDir, "scripts", "custom_game", "mcp_debug_camera.js");
+  const manifestFile = join(project.panoramaContentDir, "layout", "custom_game", "custom_ui_manifest.xml");
+  const copiedTo = [layoutDestination, scriptDestination];
+  const manifestEntry =
+    `    <!-- ${CAMERA_MARKER} auto-attached -->\n` +
+    '    <CustomUIElement type="Hud" layoutfile="file://{resources}/layout/custom_game/mcp_debug_camera.xml" />';
+
+  const manifestExists = await pathExists(manifestFile);
+  const manifestText = manifestExists ? await readFile(manifestFile, "utf8") : "";
+  let manifestAction: NonNullable<AttachResult["cameraBridge"]>["manifestAction"] = manifestText.includes(CAMERA_MARKER)
+    ? "already-present"
+    : manifestExists
+      ? "inserted"
+      : "created";
+
+  if (dryRun) {
+    return { copiedTo, manifestFile, manifestAction: "skipped (dryRun)" };
+  }
+
+  await ensureDir(join(layoutDestination, ".."));
+  await ensureDir(join(scriptDestination, ".."));
+  await Promise.all([
+    copyFile(layoutSource, layoutDestination),
+    copyFile(scriptSource, scriptDestination),
+  ]);
+
+  if (manifestAction === "created") {
+    await ensureDir(join(manifestFile, ".."));
+    await writeFile(manifestFile, `<root>\n  <Panel>\n${manifestEntry}\n  </Panel>\n</root>\n`, "utf8");
+  } else if (manifestAction === "inserted") {
+    const panelClose = manifestText.lastIndexOf("</Panel>");
+    const rootClose = manifestText.lastIndexOf("</root>");
+    const insertionPoint = panelClose >= 0 ? panelClose : rootClose;
+    if (insertionPoint < 0) {
+      throw new Error(`Cannot safely add the DebugSDK camera bridge: malformed Panorama manifest ${manifestFile}`);
+    }
+    const indent = panelClose >= 0 ? "" : "  ";
+    const updated =
+      manifestText.slice(0, insertionPoint) +
+      `${indent}${manifestEntry}\n` +
+      manifestText.slice(insertionPoint);
+    await writeFile(manifestFile, updated, "utf8");
+  }
+
+  return { copiedTo, manifestFile, manifestAction };
 }
 
 /** Find the best bootstrap file to wire the require into. */
@@ -49,7 +114,11 @@ async function findBootstrap(project: AddonProject): Promise<{ file: string; kin
   return undefined;
 }
 
-export async function attachDebugSdk(project: AddonProject, dryRun = false): Promise<AttachResult> {
+export async function attachDebugSdk(
+  project: AddonProject,
+  dryRun = false,
+  options: AttachDebugSdkOptions = {},
+): Promise<AttachResult> {
   const src = await bundledSdkPath();
   const instructions: string[] = [];
   const copiedTo: string[] = [];
@@ -77,7 +146,11 @@ export async function attachDebugSdk(project: AddonProject, dryRun = false): Pro
     if (boot && bootstrapAction !== "already-present") {
       instructions.push(`[dry run] would insert require into ${boot.file} (${boot.kind})`);
     }
-    return { copiedTo, bootstrapFile, bootstrapAction: "skipped (dryRun)", instructions, dryRun: true };
+    const cameraBridge = options.cameraBridge ? await attachCameraBridge(project, true) : undefined;
+    if (cameraBridge) {
+      instructions.push(`[dry run] would install camera telemetry bridge -> ${cameraBridge.copiedTo.join(", ")}`);
+    }
+    return { copiedTo, bootstrapFile, bootstrapAction: "skipped (dryRun)", instructions, dryRun: true, cameraBridge };
   }
 
   // Copy the SDK.
@@ -108,13 +181,41 @@ export async function attachDebugSdk(project: AddonProject, dryRun = false): Pro
   }
   instructions.push('Verify with: dota_send_console_command command="mcp_ping" (expect "[MCP] PONG ...").');
 
-  return { copiedTo, bootstrapFile, bootstrapAction, instructions, dryRun: false };
+  const cameraBridge = options.cameraBridge ? await attachCameraBridge(project, false) : undefined;
+  if (cameraBridge) {
+    instructions.push("Camera telemetry bridge installed; compile addon content before using mcp_camera.");
+  }
+
+  return { copiedTo, bootstrapFile, bootstrapAction, instructions, dryRun: false, cameraBridge };
 }
 
 export interface DetachResult {
   removedFiles: string[];
   bootstrapFile?: string;
   bootstrapCleaned: boolean;
+}
+
+async function removeCameraManifestEntry(file: string): Promise<boolean> {
+  if (!(await pathExists(file))) return false;
+  const lines = (await readFile(file, "utf8")).split(/\r?\n/);
+  const kept: string[] = [];
+  let removed = false;
+  let skipEntry = false;
+  for (const line of lines) {
+    if (line.includes(CAMERA_MARKER)) {
+      removed = true;
+      skipEntry = true;
+      continue;
+    }
+    if (skipEntry && line.includes("mcp_debug_camera.xml")) {
+      skipEntry = false;
+      continue;
+    }
+    skipEntry = false;
+    kept.push(line);
+  }
+  if (removed) await writeFile(file, kept.join("\n"), "utf8");
+  return removed;
 }
 
 async function removeMarkerBlock(file: string): Promise<boolean> {
@@ -154,5 +255,16 @@ export async function detachDebugSdk(project: AddonProject): Promise<DetachResul
   const boot = await findBootstrap(project);
   let bootstrapCleaned = false;
   if (boot) bootstrapCleaned = await removeMarkerBlock(boot.file);
+  const cameraFiles = [
+    join(project.panoramaContentDir, "layout", "custom_game", "mcp_debug_camera.xml"),
+    join(project.panoramaContentDir, "scripts", "custom_game", "mcp_debug_camera.js"),
+  ];
+  for (const file of cameraFiles) {
+    if (await pathExists(file)) {
+      await rm(file, { force: true });
+      removedFiles.push(file);
+    }
+  }
+  await removeCameraManifestEntry(join(project.panoramaContentDir, "layout", "custom_game", "custom_ui_manifest.xml"));
   return { removedFiles, bootstrapFile: boot?.file, bootstrapCleaned };
 }

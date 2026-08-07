@@ -114,6 +114,53 @@ const fowBlockerComponentSchema = z.object({
   closed: z.boolean().optional(),
 }).strict();
 
+const wallComponentSchema = z.object({
+  kind: z.literal("wall"),
+  name: nameSchema,
+  points: z.array(point3).min(2).max(256),
+  thickness: z.number().finite().positive().max(4096),
+  height: z.number().finite().positive().max(32768),
+  overlap: z.number().finite().nonnegative().max(4096).optional(),
+  closed: z.boolean().optional(),
+}).strict().superRefine((wall, context) => {
+  for (let index = 0; index < wall.points.length - 1; index++) {
+    const current = wall.points[index];
+    const next = wall.points[index + 1];
+    if (current[0] === next[0] && current[1] === next[1]) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["points", index + 1],
+        message: "must not repeat the preceding XY point",
+      });
+    }
+    if (Math.abs(current[2] - next[2]) > 1e-6) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["points", index + 1, 2],
+        message: "must use the same base Z as the preceding point; sloped wall segments are not yet supported",
+      });
+    }
+  }
+  if (wall.closed && wall.points.length > 2) {
+    const first = wall.points[0];
+    const last = wall.points[wall.points.length - 1];
+    if (first[0] === last[0] && first[1] === last[1]) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["points", wall.points.length - 1],
+        message: "must not repeat the first point when closed=true",
+      });
+    }
+    if (Math.abs(first[2] - last[2]) > 1e-6) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["points", wall.points.length - 1, 2],
+        message: "must use the same base Z as the first point when closed=true",
+      });
+    }
+  }
+});
+
 const bossPitComponentSchema = z.object({
   kind: z.literal("bossPit"),
   name: nameSchema,
@@ -204,6 +251,7 @@ export const dotaComponentInputSchema = z.union([
   gateComponentSchema,
   baseBlockerComponentSchema,
   fowBlockerComponentSchema,
+  wallComponentSchema,
   bossPitComponentSchema,
   baseComponentSchema,
 ]);
@@ -432,6 +480,33 @@ function fowBlockerEntities(component: z.infer<typeof fowBlockerComponentSchema>
   });
 }
 
+function wallVolumes(component: z.infer<typeof wallComponentSchema>): ManagedMapVolume[] {
+  const pairs: Array<[Point3, Point3]> = [];
+  for (let index = 0; index < component.points.length - 1; index++) {
+    pairs.push([component.points[index], component.points[index + 1]]);
+  }
+  if (component.closed && component.points.length > 2) {
+    pairs.push([component.points[component.points.length - 1], component.points[0]]);
+  }
+  const overlap = component.overlap ?? Math.min(component.thickness * 0.25, 64);
+  return pairs.map(([from, to], index) => {
+    const dx = to[0] - from[0];
+    const dy = to[1] - from[1];
+    const length = Math.hypot(dx, dy);
+    return {
+      targetname: `${component.name}_${index + 1}`,
+      recipe: "playerClip",
+      center: [
+        (from[0] + to[0]) / 2,
+        (from[1] + to[1]) / 2,
+        from[2] + component.height / 2,
+      ],
+      size: [length + overlap, component.thickness, component.height],
+      yaw: (Math.atan2(dy, dx) * 180) / Math.PI,
+    };
+  });
+}
+
 function pitOperations(component: z.infer<typeof bossPitComponentSchema>): ExpandedDotaComponents {
   const [cx, cy] = component.tileCenter;
   const rimWidth = component.rimWidth ?? 1.5;
@@ -641,6 +716,9 @@ export function expandDotaComponents(components: DotaComponentInput[]): Expanded
         break;
       case "fowBlocker":
         managedEntities.push(...fowBlockerEntities(component));
+        break;
+      case "wall":
+        managedVolumes.push(...wallVolumes(component));
         break;
       case "bossPit": {
         const pit = pitOperations(component);

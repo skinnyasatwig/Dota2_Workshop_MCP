@@ -1,0 +1,6 @@
+<root>
+  <scripts>
+    <include src="file://{resources}/scripts/custom_game/mcp_debug_camera.js" />
+  </scripts>
+  <Panel hittest="false" />
+</root>

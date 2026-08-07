@@ -17,7 +17,7 @@ import {
   matchesAbsentSelector,
 } from "../dota/vmap.js";
 import { readAddonInfo, registerMapFile } from "../dota/addoninfo.js";
-import { compileProjectMap, projectMapPaths } from "../dota/map-project.js";
+import { compileProjectContent, compileProjectMap, projectMapPaths } from "../dota/map-project.js";
 import { loadMapContract, managedEntitiesForContract } from "../dota/map-contract.js";
 import { inspectMapText } from "../dota/map-inspect.js";
 import { reconcileMapTerrain } from "../dota/map-terrain.js";
@@ -47,6 +47,18 @@ import { isProcessRunning } from "../dota/process.js";
 import { closeTransientStallDialog, diagnoseDota } from "../dota/diagnose.js";
 import { captureWindowPng } from "../dota/capture.js";
 import { prepareAttachedEngineWindow, waitForEngineWindow } from "../dota/engine-window.js";
+import { dotaWindowInfo, runWin32Spec } from "../dota/win32.js";
+import {
+  cameraErrorDistance,
+  DEFAULT_MINIMAP_PROBES,
+  minimapProbePixel,
+  minimapProbeWorld,
+  minimapRectFromTelemetry,
+  MinimapClientRect,
+  MinimapProbe,
+  requestCameraTelemetry,
+  validateMinimapProbes,
+} from "../dota/engine-visual-test.js";
 import {
   explainEngineReadiness,
   observeEngineReadiness,
@@ -1064,6 +1076,329 @@ export function registerMapTools(server: McpServer) {
         return { ...json(data, output), isError: failed };
       },
     ),
+  );
+
+  server.registerTool(
+    "map_engine_visual_test",
+    {
+      title: "Verify minimap clicks against the real Dota camera",
+      description:
+        "Perform one guarded Dota launch, click normalized points on the native minimap, read the camera's exact " +
+        "world position through the optional DebugSDK Panorama bridge, capture visual evidence, and shut down. " +
+        "This detects mirrored, rotated, scaled, offset, or dead minimaps that offline asset checks cannot prove. " +
+        "Dry-run is the default.",
+      inputSchema: {
+        projectRoot: z.string().optional(),
+        map: z.string(),
+        probes: z.array(z.object({
+          name: z.string().min(1),
+          u: z.number().min(0).max(1).describe("Horizontal minimap fraction: 0=west, 1=east."),
+          v: z.number().min(0).max(1).describe("Vertical minimap fraction: 0=north, 1=south."),
+        })).min(1).max(16).optional().describe("Defaults to west, center, east, north, and south probes."),
+        minimapRect: z.object({
+          x: z.number().nonnegative(),
+          y: z.number().nonnegative(),
+          width: z.number().positive(),
+          height: z.number().positive(),
+        }).optional().describe("Client-relative minimap rectangle override. Normally discovered from Panorama."),
+        tolerance: z.number().positive().max(8192).optional().describe("Maximum camera error in world units (default 1000)."),
+        cameraSettleMs: z.number().int().min(100).max(5000).optional().describe("Wait after each click (default 750ms)."),
+        cameraTimeoutMs: z.number().int().min(500).max(30000).optional().describe("Per-camera-query timeout (default 5000ms)."),
+        captureScreenshots: z.boolean().optional().describe("Attach one PNG per probe to the result (default true)."),
+        compile: z.boolean().optional().describe("Compile all addon content, including the camera bridge (default true)."),
+        forceCompile: z.boolean().optional(),
+        ensureDebugSdk: z.boolean().optional().describe("Attach/update Lua and camera bridge before compiling (default true)."),
+        readyGameState: z.number().int().min(3).max(9).optional().describe("State required before clicking (default 6)."),
+        hero: z.string().regex(/^npc_dota_hero_[a-z0-9_]+$/).optional().describe("Hero selected if the map waits at hero selection (default Axe)."),
+        readyTimeoutMs: z.number().int().min(1000).max(180000).optional(),
+        mapLoadGraceMs: z.number().int().min(0).max(30000).optional(),
+        shutdownTimeoutMs: z.number().int().min(1000).max(60000).optional(),
+        replaceRunningDota: z.boolean().optional().describe("Allow closing an existing Dota session (default false)."),
+        launchStrategy: z.enum(["auto", "steam", "direct"]).optional(),
+        renderer: z.enum(["default", "dx11", "vulkan"]).optional(),
+        vconPort: z.number().int().min(1).max(65535).optional(),
+        dryRun: z.boolean().optional().describe("Return the plan without writing, compiling, or launching (default true)."),
+      },
+    },
+    guard(async ({
+      projectRoot,
+      map,
+      probes,
+      minimapRect,
+      tolerance,
+      cameraSettleMs,
+      cameraTimeoutMs,
+      captureScreenshots,
+      compile,
+      forceCompile,
+      ensureDebugSdk,
+      readyGameState,
+      hero,
+      readyTimeoutMs,
+      mapLoadGraceMs,
+      shutdownTimeoutMs,
+      replaceRunningDota,
+      launchStrategy,
+      renderer,
+      vconPort,
+      dryRun,
+    }): Promise<ToolResult> => {
+      const dota = await requireDotaPaths();
+      const project = await resolveProject(projectRoot);
+      const p = projectMapPaths(dota, project, map);
+      if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}.`);
+
+      const chosenProbes = validateMinimapProbes((probes ?? DEFAULT_MINIMAP_PROBES) as MinimapProbe[]);
+      const allowedError = tolerance ?? 1000;
+      const settleMs = cameraSettleMs ?? 750;
+      const queryTimeout = cameraTimeoutMs ?? 5000;
+      const targetState = readyGameState ?? 6;
+      const selectedHero = hero ?? "npc_dota_hero_axe";
+      const shouldCapture = captureScreenshots !== false;
+      const shouldCompile = compile !== false;
+      const shouldAttach = ensureDebugSdk !== false;
+      const isDryRun = dryRun !== false;
+      const port = vconPort ?? defaultVconPort();
+      const dotaWasRunning = await isProcessRunning("dota2.exe");
+
+      const mapText = await vmapToText(dota.dmxconvertExe, p.contentVmap);
+      const overview = await inspectMapOverview({
+        mapName: map,
+        mapText,
+        gameDir: project.gameDir,
+        contentDir: project.contentDir,
+        requireCompiledAssets: false,
+      });
+      if (!overview.entityBounds) {
+        return error("The map has no usable dota_minimap_boundary world bounds; a visual minimap test would have no expected coordinates.");
+      }
+      if (overview.metadata?.rotate !== undefined && overview.metadata.rotate !== 0) {
+        return error(`Visual minimap testing currently requires overview rotate=0; found ${overview.metadata.rotate}.`);
+      }
+      const transformErrors = overview.findings.filter((finding) =>
+        finding.severity === "error" && /minimap|overview/.test(finding.code),
+      );
+      if (transformErrors.length) {
+        return error(`Offline minimap validation failed before launch:\n${transformErrors.map((finding) => `- ${finding.detail}`).join("\n")}`);
+      }
+
+      if (isDryRun) {
+        const sdkPlan = shouldAttach ? await attachDebugSdk(project, true, { cameraBridge: true }) : undefined;
+        return json({
+          dryRun: true,
+          map,
+          worldBounds: overview.entityBounds,
+          probes: chosenProbes,
+          minimapRect: minimapRect ?? "discover from Panorama",
+          tolerance: allowedError,
+          compileAllContent: shouldCompile,
+          ensureDebugSdkCameraBridge: shouldAttach,
+          sdkPlan,
+          readyGameState: targetState,
+          hero: selectedHero,
+          screenshotCount: shouldCapture ? chosenProbes.length : 0,
+          dotaWasRunning,
+          replaceRunningDota: replaceRunningDota === true,
+          launchCount: 1,
+          automaticShutdown: true,
+        }, [
+          `[dry run] ${map}: one guarded launch, ${chosenProbes.length} real minimap click(s), exact camera telemetry, automatic shutdown.`,
+          `Expected world bounds: ${JSON.stringify(overview.entityBounds)}; accepted error: ${allowedError} units.`,
+          `Minimap rectangle: ${minimapRect ? "explicit override" : "discover from the native HUD"}; screenshots: ${shouldCapture ? chosenProbes.length : 0}.`,
+          `Dota currently running: ${dotaWasRunning}${dotaWasRunning && !replaceRunningDota ? " (live run would refuse)" : ""}.`,
+        ].join("\n"));
+      }
+
+      if (dotaWasRunning && replaceRunningDota !== true) {
+        return error("Dota is already running. The visual test refused to close it. Exit Dota or explicitly pass replaceRunningDota=true.");
+      }
+      if (shouldAttach && !shouldCompile) {
+        return error("ensureDebugSdk=true needs compile=true so the newly attached Panorama camera bridge is compiled before launch.");
+      }
+
+      const attached = shouldAttach ? await attachDebugSdk(project, false, { cameraBridge: true }) : undefined;
+      if (shouldCompile) {
+        const compileResult = await compileProjectContent(dota, project, forceCompile === true);
+        if (compileResult.code !== 0) {
+          return error(
+            `Addon content compilation failed; Dota was not launched.\n${compileResult.stdout.slice(-3000)}\n${compileResult.stderr.slice(-3000)}`.trim(),
+          );
+        }
+      } else if (!(await pathExists(p.gameVpk)) && !(await pathExists(p.installedGameVpk))) {
+        return error("No compiled map VPK was found. Compile first or pass compile=true; Dota was not launched.");
+      }
+
+      const vc = getVConsole(port);
+      let launched = false;
+      let launchResult: Awaited<ReturnType<typeof restartGame>> | undefined;
+      let readiness: Awaited<ReturnType<typeof ensureEngineNavigationMapReady>> | undefined;
+      let windowPreparation: Awaited<ReturnType<typeof waitForEngineWindow>> | undefined;
+      let discoveredRect: MinimapClientRect | undefined;
+      let baselineTelemetry: Awaited<ReturnType<typeof requestCameraTelemetry>> | undefined;
+      const results: Array<Record<string, unknown>> = [];
+      const screenshotBuffers: Array<{ name: string; buffer: Buffer }> = [];
+      const transientStallDismissals: Awaited<ReturnType<typeof closeTransientStallDialog>>[] = [];
+      let fatalError: string | undefined;
+      let shutdown: Awaited<ReturnType<typeof shutdownGame>> | undefined;
+      let consoleTail: string[] = [];
+
+      const dismissKnownStalls = async () => {
+        const diagnosis = await diagnoseDota();
+        for (const blocker of diagnosis.blockers.filter((window) => window.role === "stall").slice(0, 3)) {
+          transientStallDismissals.push(await closeTransientStallDialog(blocker));
+        }
+        const remaining = await diagnoseDota();
+        if (remaining.blocked) {
+          const blocker = remaining.blockers[0];
+          throw new Error(`Dota is blocked by ${blocker?.role ?? "a dialog"}: ${blocker?.title || blocker?.className || "unknown window"}.`);
+        }
+      };
+
+      try {
+        launchResult = await restartGame(
+          dota,
+          project.addonName,
+          map,
+          port,
+          true,
+          true,
+          launchStrategy ?? "auto",
+          renderer === "default" ? undefined : renderer,
+        );
+        launched = true;
+        if (!vc.isConnected()) await vc.connectWithRetry(60_000, 1000);
+        await dismissKnownStalls();
+        windowPreparation = await waitForEngineWindow(true, 30_000, 500);
+        if (!windowPreparation.ok) throw new Error(`Could not prepare the Dota window: ${windowPreparation.error}`);
+
+        readiness = await ensureEngineNavigationMapReady(
+          vc,
+          project.addonName,
+          map,
+          Math.min(targetState, 3),
+          readyTimeoutMs ?? 120_000,
+          mapLoadGraceMs ?? 5000,
+        );
+        if (!readiness.ready) throw new Error("The map did not reach hero selection before the readiness timeout.");
+        if (targetState > 3) {
+          vc.send(`dota_select_hero ${selectedHero}`);
+          const inGame = await waitForEngineNavigationReady(vc, targetState, readyTimeoutMs ?? 120_000);
+          if (!inGame.ready) throw new Error(`The map did not reach Dota game state ${targetState} after selecting ${selectedHero}.`);
+        }
+
+        await dismissKnownStalls();
+        const windowInfo = await dotaWindowInfo();
+        if (!windowInfo.ok || !windowInfo.client) throw new Error(`Could not read the Dota client rectangle: ${windowInfo.error ?? "unknown error"}`);
+        baselineTelemetry = await requestCameraTelemetry(vc, queryTimeout);
+        discoveredRect = minimapRect
+          ? { ...minimapRect }
+          : minimapRectFromTelemetry(baselineTelemetry.telemetry, windowInfo.client);
+        const clientWidth = windowInfo.client.width;
+        const clientHeight = windowInfo.client.height;
+        if (
+          discoveredRect.x < 0 || discoveredRect.y < 0 ||
+          discoveredRect.x + discoveredRect.width > clientWidth + 1 ||
+          discoveredRect.y + discoveredRect.height > clientHeight + 1
+        ) {
+          throw new Error(`Resolved minimap rectangle is outside the ${clientWidth}x${clientHeight} Dota client: ${JSON.stringify(discoveredRect)}`);
+        }
+
+        for (const probe of chosenProbes) {
+          await dismissKnownStalls();
+          const pixel = minimapProbePixel(discoveredRect, probe);
+          const expected = minimapProbeWorld(overview.entityBounds, probe);
+          const input = await runWin32Spec({
+            focus: true,
+            actions: [
+              { type: "click", x: pixel.x, y: pixel.y, button: "left" },
+              { type: "sleep", ms: settleMs },
+            ],
+          }, 30_000);
+          if (!input.ok) throw new Error(`Minimap click "${probe.name}" failed: ${input.error ?? "unknown input error"}`);
+          if (input.foreground !== true) {
+            throw new Error(
+              `Dota lost foreground focus before minimap click "${probe.name}". The test stopped rather than clicking another application.`,
+            );
+          }
+          const camera = await requestCameraTelemetry(vc, queryTimeout);
+          const actual = { x: camera.telemetry.camera.x, y: camera.telemetry.camera.y };
+          const distance = cameraErrorDistance(expected, actual);
+          let screenshot: Awaited<ReturnType<typeof captureWindowPng>> | undefined;
+          if (shouldCapture) {
+            await dismissKnownStalls();
+            screenshot = await captureWindowPng("screen", true);
+            if (!screenshot.buf) screenshot = await captureWindowPng("print", false);
+            const afterCapture = await dotaWindowInfo();
+            if (screenshot.mode === "screen" && afterCapture.foreground !== true) {
+              screenshot = {
+                mode: "screen",
+                error: "Dota lost foreground focus during capture; discarded pixels that may belong to another application.",
+              };
+            }
+            if (screenshot.buf) screenshotBuffers.push({ name: probe.name, buffer: screenshot.buf });
+          }
+          results.push({
+            name: probe.name,
+            uv: { u: probe.u, v: probe.v },
+            pixel,
+            expected,
+            actual,
+            distance,
+            tolerance: allowedError,
+            passed: distance <= allowedError,
+            screenshot: { captured: !!screenshot?.buf, mode: screenshot?.mode, error: screenshot?.error },
+          });
+        }
+      } catch (caught) {
+        fatalError = caught instanceof Error ? caught.message : String(caught);
+        consoleTail = vc.recent(240).map((line) => line.text);
+      } finally {
+        if (launched || (await isProcessRunning("dota2.exe"))) {
+          shutdown = await shutdownGame(port, shutdownTimeoutMs ?? 15_000);
+        }
+      }
+
+      const failedProbes = results.filter((result) => result.passed !== true);
+      const failed = !!fatalError || failedProbes.length > 0 || !shutdown?.stopped;
+      const data = {
+        dryRun: false,
+        map,
+        compiled: shouldCompile,
+        debugSdk: attached ? {
+          copiedTo: attached.copiedTo,
+          bootstrapAction: attached.bootstrapAction,
+          cameraBridge: attached.cameraBridge,
+        } : { skipped: true },
+        launch: launchResult,
+        readiness,
+        windowPreparation,
+        worldBounds: overview.entityBounds,
+        minimapRect: discoveredRect,
+        minimapPanel: baselineTelemetry?.telemetry.minimap,
+        tolerance: allowedError,
+        results,
+        failedProbeCount: failedProbes.length,
+        transientStallDismissals,
+        consoleTail,
+        fatalError,
+        shutdown,
+        passed: !failed,
+      };
+      const output = [
+        `${map} ENGINE VISUAL: ${failed ? "FAILED" : "PASSED"}`,
+        `${results.length}/${chosenProbes.length} probe(s) completed; ${failedProbes.length} outside the ${allowedError}-unit tolerance.`,
+        `Minimap geometry: ${discoveredRect ? JSON.stringify(discoveredRect) : "unavailable"}.`,
+        `Screenshots: ${screenshotBuffers.length}/${shouldCapture ? chosenProbes.length : 0}; automatic shutdown: ${shutdown?.stopped ? "complete" : "FAILED"}.`,
+        ...results.map((result) => `  [${result.passed ? "PASS" : "FAIL"}] ${result.name}: camera error ${Math.round(Number(result.distance))} units`),
+        ...(fatalError ? [`Fatal: ${fatalError}`] : []),
+        ...(shutdown ? [`Shutdown: ${shutdown.detail}`] : []),
+      ].join("\n");
+      const toolResult = json(data, output);
+      for (const screenshot of screenshotBuffers) {
+        toolResult.content.push({ type: "image", data: screenshot.buffer.toString("base64"), mimeType: "image/png" });
+      }
+      return { ...toolResult, isError: failed };
+    }),
   );
 
   server.registerTool(

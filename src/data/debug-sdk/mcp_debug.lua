@@ -15,7 +15,7 @@
   your addon by hand — re-attach to update.
 ]]
 
-local SDK_VERSION = "1.3.0"
+local SDK_VERSION = "1.4.0"
 
 ----------------------------------------------------------------------
 -- Tiny JSON encoder (no dependencies; handles the shapes we emit).
@@ -371,6 +371,69 @@ local function cmd_event(args)
   out("EVENT", name, jsonEncode(data))
 end
 
+local function firstPlayer()
+  if PlayerResource == nil then return nil, nil end
+  for pid = 0, 23 do
+    if PlayerResource:IsValidPlayerID(pid) then
+      local player = PlayerResource:GetPlayer(pid)
+      if player then return player, pid end
+    end
+  end
+  return nil, nil
+end
+
+-- Ask the optional Panorama bridge for the local camera and minimap geometry.
+-- Usage: mcp_camera <request-id> [player-id]
+local function cmd_camera(_, requestId, requestedPid)
+  requestId = tostring(requestId or "")
+  if requestId == "" or not string.match(requestId, "^[A-Za-z0-9_.:-]+$") then
+    out("CAMERA_ERR", requestId ~= "" and requestId or "unknown", "invalid or missing request id")
+    return
+  end
+  local player, pid
+  if requestedPid ~= nil then
+    pid = tonumber(requestedPid)
+    if pid ~= nil and PlayerResource and PlayerResource:IsValidPlayerID(pid) then
+      player = PlayerResource:GetPlayer(pid)
+    end
+  else
+    player, pid = firstPlayer()
+  end
+  if not player then
+    out("CAMERA_ERR", requestId, "no connected player")
+    return
+  end
+  CustomGameEventManager:Send_ServerToPlayer(player, "mcp_camera_request", { request_id = requestId })
+  out("CAMERA_SENT", requestId, "pid=" .. tostring(pid))
+end
+
+if CustomGameEventManager and not _G.__MCP_CAMERA_REPORT_LISTENER then
+  _G.__MCP_CAMERA_REPORT_LISTENER = CustomGameEventManager:RegisterListener("mcp_camera_report", function(_, payload)
+    local requestId = tostring(payload and payload.request_id or "unknown")
+    local response = {
+      camera = {
+        x = tonumber(payload and payload.camera_x),
+        y = tonumber(payload and payload.camera_y),
+        z = tonumber(payload and payload.camera_z),
+      },
+      screen = {
+        width = tonumber(payload and payload.screen_width),
+        height = tonumber(payload and payload.screen_height),
+      },
+      minimap = {
+        id = payload and payload.minimap_id or nil,
+        x = tonumber(payload and payload.minimap_x),
+        y = tonumber(payload and payload.minimap_y),
+        width = tonumber(payload and payload.minimap_width),
+        height = tonumber(payload and payload.minimap_height),
+        uiScaleX = tonumber(payload and payload.minimap_scale_x),
+        uiScaleY = tonumber(payload and payload.minimap_scale_y),
+      },
+    }
+    out("CAMERA_OK", requestId, jsonEncode(response))
+  end)
+end
+
 local function cmd_hud(_, on)
   -- Toggle HUD/cursor for clean screenshots (client-side conveniences via convars).
   local v = (tostring(on) == "0") and 0 or 1
@@ -406,9 +469,10 @@ reg("mcp_gold", cmd_gold, "MCP: grant gold (mcp_gold <amount> [pid])")
 reg("mcp_level", cmd_level, "MCP: level a hero up to N (mcp_level <level> [pid])")
 reg("mcp_item", cmd_item, "MCP: give an item (mcp_item <item> [pid])")
 reg("mcp_event", cmd_event, "MCP: fire a custom game event to clients (mcp_event <name> [json])")
+reg("mcp_camera", cmd_camera, "MCP: query local camera/minimap geometry through the optional Panorama bridge")
 reg("mcp_hud", cmd_hud, "MCP: toggle HUD visibility (mcp_hud <0|1>) for clean shots")
 reg("mcp_pause", cmd_pause, "MCP: pause/unpause (mcp_pause <0|1>)")
 
-out("DebugSDK", "loaded", "v=" .. SDK_VERSION, "(commands: mcp_ping mcp_state mcp_dump mcp_eval mcp_nav mcp_assert mcp_spawn mcp_gold mcp_level mcp_item mcp_event mcp_hud mcp_pause)")
+out("DebugSDK", "loaded", "v=" .. SDK_VERSION, "(commands: mcp_ping mcp_state mcp_dump mcp_eval mcp_nav mcp_assert mcp_spawn mcp_gold mcp_level mcp_item mcp_event mcp_camera mcp_hud mcp_pause)")
 
 return { version = SDK_VERSION }

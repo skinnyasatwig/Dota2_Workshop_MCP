@@ -10,6 +10,7 @@ import { defaultVconPort } from "../dota/vconsole.js";
 import { pathExists } from "../util/fsx.js";
 import { createProjectLink, inspectProjectLink } from "../dota/project-link.js";
 import { json, text, error, guard, ToolResult } from "../util/result.js";
+import { compileProjectContent } from "../dota/map-project.js";
 
 async function resolveAddonName(projectRoot: string | undefined, addon: string | undefined): Promise<{ name: string; project?: AddonProject }> {
   if (addon) return { name: addon };
@@ -65,7 +66,7 @@ export function registerBuildTools(server: McpServer) {
     },
     guard(async ({ projectRoot, addon, force, dryRun }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
-      const { name } = await resolveAddonName(projectRoot, addon);
+      const { name, project } = await resolveAddonName(projectRoot, addon);
       const contentPath = join(dota.contentDotaAddons, name);
       // -game must point at the folder containing gameinfo.gi (game/dota); the compiler
       // maps the content/ path back to the addon automatically.
@@ -76,7 +77,9 @@ export function registerBuildTools(server: McpServer) {
       if (!(await pathExists(contentPath))) {
         return error(`Content folder not found: ${contentPath}. Link the addon into Dota first (addon_link / scripts/install.js).`);
       }
-      const res = await run(dota.resourceCompilerExe, args, { timeoutMs: 600_000 });
+      const res = project
+        ? await compileProjectContent(dota, project, force === true)
+        : await run(dota.resourceCompilerExe, args, { timeoutMs: 600_000 });
       const ok = res.code === 0;
       return json(
         { command: res.command, exitCode: res.code, ok },

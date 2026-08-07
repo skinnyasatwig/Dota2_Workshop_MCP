@@ -72,7 +72,7 @@ async function main() {
     "dota_restart_game", "dota_dev_cycle", "dota_screenshot", "dota_watch_errors",
     "docs_search", "docs_get", "docs_list", "dota_patterns", "panorama_api_search", "panorama_api_get", "tools_catalog", "map_recipe_catalog", "map_recipe_refresh_report",
     "map_create", "map_add_entity", "map_to_text", "map_from_text", "map_compile", "map_list",
-    "map_engine_nav_test",
+    "map_engine_nav_test", "map_engine_visual_test",
     "kv3_read", "soundevents_list", "soundevents_get", "soundevents_upsert",
     "assets_list", "assets_search", "vpk_find", "vpk_read", "base_kv_entry",
     "scaffold_custom_event", "scaffold_net_table",

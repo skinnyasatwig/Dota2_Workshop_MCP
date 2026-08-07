@@ -3,6 +3,7 @@ import { AddonProject } from "./project.js";
 import { DotaPaths } from "./paths.js";
 import { compileVmap } from "./vmap.js";
 import { inspectProjectLink } from "./project-link.js";
+import { run } from "./process.js";
 
 export interface ProjectMapPaths {
   contentVmap: string;
@@ -52,4 +53,17 @@ export async function compileProjectMap(
     paths.installedGameVpk,
     force,
   );
+}
+
+/** Compile every source asset in one safely-linked addon (maps, Panorama, materials, particles). */
+export async function compileProjectContent(
+  dota: DotaPaths,
+  project: AddonProject,
+  force = false,
+) {
+  await assertProjectLinkedForCompile(dota, project);
+  const installedContent = join(dota.contentDotaAddons, project.addonName);
+  const args = ["-v", "-nop4", "-i", join(installedContent, "*"), "-r", "-game", dota.dotaGameDir];
+  if (force) args.splice(2, 0, "-f");
+  return run(dota.resourceCompilerExe, args, { timeoutMs: 600_000 });
 }

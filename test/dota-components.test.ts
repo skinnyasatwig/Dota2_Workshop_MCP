@@ -124,6 +124,63 @@ test("checked point blockers expand to team gates and deterministic FoW chains",
   );
 });
 
+test("segmented walls expand a practical curved outline into overlapping convex blockers", () => {
+  const [wall] = componentList.parse([
+    {
+      kind: "wall",
+      name: "radiant_base_wall",
+      points: [[-5120, -3072, 0], [-4352, -2304, 0], [-4096, -1024, 0]],
+      thickness: 192,
+      height: 768,
+      overlap: 48,
+    },
+  ]);
+  const volumes = expandDotaComponents([wall]).managedVolumes;
+
+  assert.equal(volumes.length, 2);
+  assert.equal(volumes[0].targetname, "radiant_base_wall_1");
+  assert.equal(volumes[0].recipe, "playerClip");
+  assert.deepEqual(volumes[0].center, [-4736, -2688, 384]);
+  assert.deepEqual(volumes[0].size, [Math.hypot(768, 768) + 48, 192, 768]);
+  assert.equal(volumes[0].yaw, 45);
+  assert.deepEqual(volumes[1].center, [-4224, -1664, 384]);
+});
+
+test("closed segmented walls add a final blocker and reject degenerate or sloped segments", () => {
+  const [wall] = componentList.parse([
+    {
+      kind: "wall",
+      name: "pit_wall",
+      points: [[-256, -256, 0], [256, -256, 0], [0, 256, 0]],
+      thickness: 128,
+      height: 512,
+      closed: true,
+    },
+  ]);
+  assert.equal(expandDotaComponents([wall]).managedVolumes.length, 3);
+
+  assert.throws(
+    () => componentList.parse([{
+      kind: "wall",
+      name: "bad_wall",
+      points: [[0, 0, 0], [0, 0, 0]],
+      thickness: 128,
+      height: 512,
+    }]),
+    /must not repeat/,
+  );
+  assert.throws(
+    () => componentList.parse([{
+      kind: "wall",
+      name: "sloped_wall",
+      points: [[0, 0, 0], [512, 0, 128]],
+      thickness: 128,
+      height: 512,
+    }]),
+    /sloped wall segments are not yet supported/,
+  );
+});
+
 test("boss pit components create structured terrain, entrances, and an official spawn", () => {
   const [pit] = componentList.parse([
     {

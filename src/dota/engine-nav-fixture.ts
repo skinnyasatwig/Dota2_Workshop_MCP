@@ -7,7 +7,7 @@ import {
 } from "./engine-nav-test.js";
 
 export const ENGINE_NAV_FIXTURE_MAP = "engine_nav_fixture";
-export const ENGINE_NAV_FIXTURE_DEBUG_SDK_VERSION = "1.3.0";
+export const ENGINE_NAV_FIXTURE_DEBUG_SDK_VERSION = "1.4.0";
 
 /**
  * A deliberately tiny real-engine acceptance case.

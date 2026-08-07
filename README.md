@@ -11,7 +11,7 @@ template](https://github.com/ModDota/TypeScript-Addon-Template) it scaffolds **T
 wiring) and drives the template's `npm` scripts. It also has a raw-Lua + `resourcecompiler.exe`
 fallback for non-tstl addons.
 
-> Status: working — **118 tools**, end-to-end tested. It can search the Workshop for custom games by
+> Status: working — **122 tools**, end-to-end tested. It can search the Workshop for custom games by
 > name and download them outside the client (SteamCMD) to study, generates whole playable maps from a spec
 > (terrain shaping via the Dota tile grid + entities + waypoint paths → compile → .vpk), previews them
 > top-down as an image without launching the game, edits KV1 + KV3 (soundevents/particles) data, reads
@@ -39,7 +39,7 @@ fallback for non-tstl addons.
 | **In-game DebugSDK** | `addon_attach_debug_sdk`, `addon_detach_debug_sdk`, `dota_lua_eval`, `dota_debug_dump`, `dota_selftest` |
 | **Reference library** | `ref_harvest`, `ref_harvest_top`, `ref_list`, `ref_search`, `ref_find`, `ref_passport`, `ref_inspect`, `ref_get`, `ref_recipe`, `ref_curate`, `ref_stats`, `asset_db` (SQLite index: fast structured search by kind/ext/name) |
 | **Docs & references** | `docs_search`, `docs_get`, `docs_list`, `dota_patterns`, `panorama_api_search`, `panorama_api_get`, `tools_catalog` |
-| **Maps** | `map_create`, `map_add_entity`, `map_inspect`, `map_patch_entities`, `map_sync_contract`, `map_rewrite_path`, `map_to_text`, `map_from_text`, `map_compile`, `map_list`, `map_validate`, `map_engine_readiness_probe`, `map_engine_nav_test` |
+| **Maps** | `map_create`, `map_add_entity`, `map_inspect`, `map_patch_entities`, `map_sync_contract`, `map_rewrite_path`, `map_to_text`, `map_from_text`, `map_compile`, `map_list`, `map_validate`, `map_engine_readiness_probe`, `map_engine_nav_test`, `map_engine_visual_test` |
 | **Map generation** | `map_build`, `map_terrain`, `map_preview`, `map_tile_to_world`, `map_recipe_catalog`, `entity_catalog`, `scaffold_td` |
 | **Reference games** | `workshop_search`, `workshop_download`, `workshop_list`, `workshop_inspect`, `workshop_read`, `workshop_grep`, `panorama_decompile` |
 | **Asset preview (out of engine)** | `asset_preview` (particles/textures/models → inline contact-sheet image + HTML gallery), `sound_preview` (sounds → inline waveform/icon image + playable HTML soundboard + inline audio), `preview_studio` / `preview_studio_stop` (interactive gallery + public share link: animated particles, 3D models, audio players, click-to-select), `preview_pick` / `preview_selections` (resolve the IDs the user picked/clicked → game + asset path) — decoded via ValveResourceFormat, no Dota launch |
@@ -189,7 +189,8 @@ self-testing (no pixel guessing).
 Real navigation checks use the SDK's compact `mcp_nav` command. Requests carry unique IDs and long paths are chunked,
 so stale VConsole history and Source 2's short console-command limit cannot corrupt a new result.
 
-The SDK also exposes `mcp_spawn`, `mcp_gold`, `mcp_level`, `mcp_item`, `mcp_event` (fire a custom UI event), `mcp_hud`
+The SDK also exposes `mcp_spawn`, `mcp_gold`, `mcp_level`, `mcp_item`, `mcp_event` (fire a custom UI event), `mcp_camera`
+(query the exact client camera/minimap geometry through the optional invisible Panorama bridge), `mcp_hud`
 (clean screenshots) and `mcp_pause` — all callable via `dota_send_console_command` too.
 
 ## Reference library — collect & search shipping games
@@ -256,6 +257,10 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
   Steam launch now fails in 20 seconds when Steam does not forward `-applaunch`. When automatic startup is
   unreliable, `attachToRunningDota:true` checks a user-started, VConsole-enabled tools session without compiling,
   launching, replacing, or closing that session.
+- **`map_engine_visual_test`** proves that a minimap works rather than merely validating its files. One guarded
+  launch discovers the native minimap rectangle through an invisible Panorama bridge, clicks normalized west/center/
+  east/north/south points, compares the real camera position with the overview world bounds, attaches screenshots,
+  and shuts down. It is dry-run-first and refuses to replace a running Dota session without explicit permission.
 - **`map_recipe_catalog`** — inspect the named terrain cores, Radiant/Dire cliff recipes, ramp-safe
   fallbacks, checked solid-volume recipes, and official Valve prefab references used by the generator. `verifyInstalled:true` checks
   the references against the current Workshop Tools install without opening Hammer. It also compares Steam/Dota/tools
@@ -299,6 +304,9 @@ rectangular `volume`, which creates the real `trigger_multiple` bounds reference
 at 32 sides the maximum radial overshoot is under 0.5%.
 `baseBlocker` uses Valve's team-aware base-gate entity. `fowBlocker` turns two or more points into uniquely named,
 explicitly linked `ent_fow_blocker_node` lines; broken links are reported by map inspection/validation and drawn in previews.
+The `wall` component turns an open or closed world-space outline into overlapping, checked convex `playerClip`
+segments. This supports practical curved and concave base silhouettes without relying on one fragile concave Source 2
+solid; decorative wall meshes and sloped wall runs remain separate visual work.
 
 ## Learn from other custom games
 
