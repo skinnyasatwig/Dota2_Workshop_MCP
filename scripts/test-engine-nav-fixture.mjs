@@ -5,6 +5,14 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { registerMapInAddonInfo } from "../src/dota/addoninfo.js";
 import { buildRepositoryCompileFixtureText } from "../src/dota/compile-fixture.js";
+import {
+  BRIDGE_NAV_FIXTURE_DEBUG_SDK_VERSION,
+  BRIDGE_NAV_FIXTURE_MAP,
+  assessBridgeNavigationFixture,
+  bridgeNavigationFixtureRoutesFromText,
+  buildBridgeNavigationFixtureText,
+  inspectBridgeNavigationFixture,
+} from "../src/dota/bridge-nav-fixture.js";
 import { attachDebugSdk } from "../src/dota/debugsdk.js";
 import { closeTransientStallDialog, diagnoseDota } from "../src/dota/diagnose.js";
 import {
@@ -26,6 +34,8 @@ import { compileVmap, textToVmap, vmapToText } from "../src/dota/vmap.js";
 
 const args = new Set(process.argv.slice(2));
 const probe = args.has("--probe");
+const bridge = args.has("--bridge");
+const compileOnly = args.has("--compile-only");
 const launchStrategy = args.has("--direct") ? "direct" : "steam";
 const port = Number(process.env.DOTA2_VCONPORT || 29000);
 
@@ -65,11 +75,13 @@ async function main() {
   const template = join(dota.contentDotaAddons, "addon_template", "maps", "template_map.vmap");
   if (!existsSync(template)) throw new Error(`Valve's blank-map template is missing: ${template}`);
 
-  const addonName = `codex_mcp_nav_${process.pid}_${Date.now()}`;
+  const fixtureMap = bridge ? BRIDGE_NAV_FIXTURE_MAP : ENGINE_NAV_FIXTURE_MAP;
+  const debugSdkVersion = bridge ? BRIDGE_NAV_FIXTURE_DEBUG_SDK_VERSION : ENGINE_NAV_FIXTURE_DEBUG_SDK_VERSION;
+  const addonName = `codex_mcp_${bridge ? "bridge_nav" : "nav"}_${process.pid}_${Date.now()}`;
   const contentAddon = join(dota.contentDotaAddons, addonName);
   const gameAddon = join(dota.gameDotaAddons, addonName);
-  const contentMap = join(contentAddon, "maps", `${ENGINE_NAV_FIXTURE_MAP}.vmap`);
-  const gameVpk = join(gameAddon, "maps", `${ENGINE_NAV_FIXTURE_MAP}.vpk`);
+  const contentMap = join(contentAddon, "maps", `${fixtureMap}.vmap`);
+  const gameVpk = join(gameAddon, "maps", `${fixtureMap}.vpk`);
   assertDisposablePath(dota.contentDotaAddons, contentAddon, addonName);
   assertDisposablePath(dota.gameDotaAddons, gameAddon, addonName);
 
@@ -81,17 +93,24 @@ async function main() {
     const structuralSeed = await vmapToText(dota.dmxconvertExe, template);
     await textToVmap(
       dota.dmxconvertExe,
-      buildRepositoryCompileFixtureText(structuralSeed),
+      bridge ? buildBridgeNavigationFixtureText(structuralSeed) : buildRepositoryCompileFixtureText(structuralSeed),
       contentMap,
     );
     const roundTripped = await vmapToText(dota.dmxconvertExe, contentMap);
-    if (!roundTripped.includes("fixture_nav_obstruction")) {
+    if (bridge) {
+      const inspection = inspectBridgeNavigationFixture(roundTripped);
+      if ((inspection.terrainCenterDistance ?? 0) < 40000 ||
+          inspection.navigationSurfaceNames.length !== 3 ||
+          inspection.solidNames.length !== 0) {
+        throw new Error(`The bridge fixture did not survive Valve's VMAP conversion: ${JSON.stringify(inspection)}`);
+      }
+    } else if (!roundTripped.includes("fixture_nav_obstruction")) {
       throw new Error("The fixture blocker did not survive Valve's VMAP conversion.");
     }
 
     const addonInfo = registerMapInAddonInfo(
       '"AddonInfo"\n{\n\t"maps" ""\n\t"IsPlayable" "1"\n}\n',
-      ENGINE_NAV_FIXTURE_MAP,
+      fixtureMap,
       2,
     );
     await writeFile(join(gameAddon, "addoninfo.txt"), addonInfo, "utf8");
@@ -114,11 +133,23 @@ async function main() {
       throw new Error(`Fixture compile failed.\n${compiled.stdout.slice(-2000)}\n${compiled.stderr.slice(-2000)}`);
     }
 
+    if (compileOnly) {
+      console.log(JSON.stringify({
+        addonName,
+        map: fixtureMap,
+        bridge,
+        compileOnly: true,
+        inspection: bridge ? inspectBridgeNavigationFixture(roundTripped) : undefined,
+        passed: true,
+      }, null, 2));
+      return;
+    }
+
     launchAttempted = true;
     const launch = await restartGame(
       dota,
       addonName,
-      ENGINE_NAV_FIXTURE_MAP,
+      fixtureMap,
       port,
       true,
       true,
@@ -147,26 +178,31 @@ async function main() {
     const readiness = await ensureEngineNavigationMapReady(
       vc,
       addonName,
-      ENGINE_NAV_FIXTURE_MAP,
+      fixtureMap,
       3,
       120_000,
       5000,
     );
     if (!readiness.ready) throw new Error("The disposable fixture did not reach an active game state.");
-    if (!readiness.line?.includes(`v=${ENGINE_NAV_FIXTURE_DEBUG_SDK_VERSION}`)) {
+    if (!readiness.line?.includes(`v=${debugSdkVersion}`)) {
       throw new Error(
-        `Expected DebugSDK ${ENGINE_NAV_FIXTURE_DEBUG_SDK_VERSION}, got: ${readiness.line || "no readiness line"}`,
+        `Expected DebugSDK ${debugSdkVersion}, got: ${readiness.line || "no readiness line"}`,
       );
     }
 
     vc.clearRing();
-    const execution = await executeEngineNavigationChecks(vc, ENGINE_NAV_FIXTURE_ROUTES, "both", 10_000);
-    const assessment = assessEngineNavigationFixture(execution, {
-      blockedOriginalPoint: [0, 384, 128],
-      // The first --probe run discovers the installed engine's exact repair.
-      blockedSuggestedPoint: probe ? undefined : [-32, 480, 128],
-      blockedGridOffset: probe ? undefined : [-1, 1],
-    });
+    const routes = bridge
+      ? bridgeNavigationFixtureRoutesFromText(roundTripped)
+      : ENGINE_NAV_FIXTURE_ROUTES;
+    const execution = await executeEngineNavigationChecks(vc, routes, "both", 10_000);
+    const assessment = bridge
+      ? assessBridgeNavigationFixture(execution)
+      : assessEngineNavigationFixture(execution, {
+          blockedOriginalPoint: [0, 384, 128],
+          // The first --probe run discovers the installed engine's exact repair.
+          blockedSuggestedPoint: probe ? undefined : [-32, 480, 128],
+          blockedGridOffset: probe ? undefined : [-1, 1],
+        });
     const consoleErrors = vc.recent(1000)
       .map((line) => line.text)
       .filter((line) => /(script error|stack traceback|assertion failed|lua runtime error|\.lua:\d+:)/i.test(line));
@@ -175,12 +211,14 @@ async function main() {
 
     console.log(JSON.stringify({
       addonName,
-      map: ENGINE_NAV_FIXTURE_MAP,
+      map: fixtureMap,
+      bridge,
       probe,
       launch: { method: launch.method, fallbackUsed: launch.fallbackUsed },
       readiness: readiness.line,
       results: execution.results,
-      repairSuggestions: assessment.repairSuggestions,
+      repairSuggestions: "repairSuggestions" in assessment ? assessment.repairSuggestions : [],
+      sameXyHeightAliased: "sameXyHeightAliased" in assessment ? assessment.sameXyHeightAliased : undefined,
       consoleErrors,
       passed: assessment.passed,
       issues: assessment.issues,

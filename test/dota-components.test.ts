@@ -268,6 +268,41 @@ test("checked bridges pair a visible solid deck with Valve navigation-walkable g
   assert.throws(() => componentList.parse([{ ...bridge, material: "not-a-material" }]), /Invalid/);
 });
 
+test("checked bridge approaches derive a sloped solid and exact walkable twin from world endpoints", () => {
+  const [approach] = componentList.parse([{
+    kind: "bridgeApproach",
+    name: "west_bridge_approach",
+    start: [-1536, 0, 128],
+    end: [-512, 0, 384],
+    width: 512,
+    thickness: 64,
+    material: "materials/dev/reflectivity_30.vmat",
+  }]);
+  const expanded = expandDotaComponents([approach]);
+  const expectedExtrusion = {
+    points: [[-512, -256], [512, -256], [512, 256], [-512, 256]],
+    bottom: [-192, 64, 64, -192],
+    top: [-128, 128, 128, -128],
+  };
+  assert.deepEqual(expanded.managedSolids, [{
+    targetname: "west_bridge_approach_ramp",
+    center: [-1024, 0, 256],
+    yaw: 0,
+    material: "materials/dev/reflectivity_30.vmat",
+    extrusion: expectedExtrusion,
+  }]);
+  assert.deepEqual(expanded.managedNavSurfaces, [{
+    targetname: "west_bridge_approach_walkable",
+    center: [-1024, 0, 256],
+    yaw: 0,
+    extrusion: expectedExtrusion,
+  }]);
+  assert.throws(
+    () => componentList.parse([{ ...approach, end: [-1536, 0, 384] }]),
+    /at least two horizontal world units apart/,
+  );
+});
+
 test("boss pit components create structured terrain, entrances, and an official spawn", () => {
   const [pit] = componentList.parse([
     {
@@ -349,6 +384,6 @@ test("the documented Dota component assembly remains valid", async () => {
   assert.equal(specification.managedEntities?.filter((entity) => entity.classname === "npc_dota_fort").length, 2);
   assert.equal(specification.managedEntities?.filter((entity) => entity.classname === "npc_dota_tower").length, 5);
   assert.equal(specification.managedTerrain?.filter((operation) => operation.op === "ramp").length, 3);
-  assert.equal(specification.managedSolids?.length, 4);
-  assert.equal(specification.managedNavSurfaces?.length, 1);
+  assert.equal(specification.managedSolids?.length, 6);
+  assert.equal(specification.managedNavSurfaces?.length, 3);
 });

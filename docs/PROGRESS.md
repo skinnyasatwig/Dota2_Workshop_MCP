@@ -157,11 +157,20 @@ Last updated: 2026-08-07
     The bridge builder couples one visible deck with its exact navigation twin. Offline analysis conservatively reports
     under-deck terrain clearance while explicitly reserving elevated route connectivity for Valve GridNav. The isolated
     repository fixture round-tripped and compiled the complete bridge without launching Dota or Hammer.
+38. This milestone - added `bridgeApproach`, which derives a watertight sloped solid and exact navigation twin from
+    two world-space top-surface endpoints. A disposable causal fixture relocates Valve's tile terrain 46,341 units
+    from the probe site and omits visible bridge solids, leaving only two sloped approaches and one flat
+    `dota_nav_walkable` deck. Valve conversion/compilation preserved all three surfaces. One bounded Dota run then
+    proved a 2,048-unit crossing with both 1,024-unit segments, rejected the nearby no-surface control as
+    non-traversable with path length -1, confirmed same-X/Y/different-Z probes alias to path length 0, reported no
+    console errors, shut down, and removed the disposable addon. This proves the checked surface recipe causes real
+    GridNav connectivity while also establishing that independent stacked navigation layers cannot be inferred from
+    Dota's X/Y-only API.
 
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 282 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 285 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 200 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
@@ -171,8 +180,12 @@ Last updated: 2026-08-07
   sloped trigger volumes from text to binary VMAP and back during the integration suite, preserving exact corner heights.
 - `npm run test:compiler-fixture` successfully round-tripped and compiled the repository-owned acceptance payload,
   including its sloped trigger, flat and sloped concave L-shaped world solids, checked rectangular arch, checked bridge
-  deck/navigation twin, and explicit navigation obstruction, into a real VPK. The generated map uses Valve's installed blank template only as required hidden
+  deck/navigation twin, complete visible sloped bridge approach/navigation twin, and explicit navigation obstruction,
+  into a real VPK. The generated map uses Valve's installed blank template only as required hidden
   infrastructure, depends on no private 3v3 file, stores no copied Valve VMAP, and leaves no temporary addon trees.
+- `npm run test:compiler-bridge-nav-fixture` and `npm run test:engine-bridge-nav-fixture` passed on the installed
+  Workshop Tools. The latter produced fresh DebugSDK 1.4.0 state-4 readiness, the expected positive/negative/height-
+  alias results, zero console errors, automatic shutdown, and complete fixture cleanup.
 - Installed ValveResourceFormat 19.2 recovered the physical hull bounds of
   `models/props_gameplay/cap_point001.vmdl_c` directly from `pak01_dir.vpk`; a second lookup reused the fingerprinted
   cache. The same real-resource test recovers validated exact convex-hull vertices into cache version 4.

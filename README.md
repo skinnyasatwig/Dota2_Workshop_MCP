@@ -304,7 +304,8 @@ targets with `@local:name`; it becomes the correct namespaced target for each co
 `around` tile point, which makes map-center symmetry explicit instead of relying on duplicated coordinates.
 
 For common gameplay structure, `dotaComponents` provides strongly checked `base`, `ancient`, `tower`, `fountain`,
-`shop`, `camp`, `bossPit`, `playerStart`, `gate`, `baseBlocker`, `fowBlocker`, `wall`, `arch`, and `bridge` entries. It derives team numbers, official entity classes,
+`shop`, `camp`, `bossPit`, `playerStart`, `gate`, `baseBlocker`, `fowBlocker`, `wall`, `arch`, `bridge`, and
+`bridgeApproach` entries. It derives team numbers, official entity classes,
 stock unit/model names, tower tier names, shop/camp numeric values, base member transforms, and boss-pit terrain.
 See [`examples/dota-components.json`](examples/dota-components.json). A `camp` can include an optional checked
 rectangular `volume`, which creates the real `trigger_multiple` bounds referenced by its spawner. A boss pit's
@@ -323,9 +324,13 @@ so the posts block their true footprints while a sufficiently high lintel leaves
 reusable composition, not a general-purpose hole or arbitrary mesh API.
 The `bridge` component pairs one visible, checked solid deck with a same-shape `managedNavSurface` made from Valve's
 dedicated `materials/editor/dota_nav_walkable.vmat` recipe. The MCP checks and mirrors both pieces together, detects
-drift, previews the deck, and conservatively reports terrain clearance underneath it. Valve's converter and compiler
-accept the complete composition. Elevated route connectivity still requires a real GridNav test because Dota's tile
-terrain graph is single-layer and cannot honestly prove a route above another route at the same map coordinates.
+drift, previews the deck, and conservatively reports terrain clearance underneath it. `bridgeApproach` takes two
+world-space top-surface endpoints and derives a correctly sloped visible ramp plus its exact navigation twin, so a
+three-piece crossing does not need hand-calculated corner heights. Valve's converter and compiler accept the visible
+composition. A separate isolated Dota fixture moved all tile terrain 46,341 units away and proved that the three
+navigation surfaces alone create the bridge route while a nearby no-surface control remains non-traversable. Dota's
+GridNav is still X/Y-only: two probes at the same X/Y but different heights alias to a zero-length route, so the MCP
+does not claim independent stacked bridge and underpass routes at the same coordinates.
 
 ## Learn from other custom games
 
@@ -459,6 +464,13 @@ structure, compiles it, launches one guarded Steam session, and asserts both a k
 disconnected route with an exact engine-proven repair suggestion. It always closes its own Dota session and removes
 both temporary addon trees. Nothing from Valve's blank VMAP is copied into this repository.
 
+The bridge-specific proof is `npm run test:compiler-bridge-nav-fixture` for conversion/compilation only, or
+`npm run test:engine-bridge-nav-fixture` for one guarded Dota launch. It relocates Valve's tile terrain far away,
+omits visible bridge solids so they cannot generate navigation accidentally, and leaves only two sloped approaches
+plus one flat `dota_nav_walkable` deck at the probe site. The engine test requires the bridge route to pass, a nearby
+route with no surface to fail, and the same-X/Y/different-Z probe to demonstrate GridNav's two-dimensional alias.
+The runner shuts down Dota and removes both disposable addon trees in success and failure cases.
+
 For a real project, run `npm run test:engine-nav-map -- "C:\path\to\project" map_name` first. That command is a
 dry run by default. Add `--apply` only after reviewing the plan; `--no-compile` and `--no-attach` reuse an already
 compiled map and installed DebugSDK, and `--endpoints` or `--segments` narrows the checks. The runner saves the full
@@ -504,7 +516,8 @@ closes every side, and then proves every
 half-edge has exactly one opposite before writing the VMAP. Solids reconcile by targetname, mirror inside reusable
 components, appear in `map_preview` with an uphill arrow when sloped, and block their true concave footprint in offline
 reachability when their vertical range intersects the standing corridor. The repository fixture round-trips flat and
-sloped L-shaped solids, a checked three-piece arch, and a visible bridge deck paired with Valve navigation geometry
+sloped L-shaped solids, a checked three-piece arch, a visible bridge deck, and a complete sloped bridge approach,
+each paired where appropriate with Valve navigation geometry,
 through Valve's converter and compiles them into a real VPK. The general map material preflight proves the selected visible material exists before a build,
 sync, or compile is allowed to spend work on it.
 
@@ -512,8 +525,9 @@ sync, or compile is allowed to spend work on it.
 `center`, optional `yaw`, and flat or per-corner-sloped `extrusion` use the same validated polygon and watertight
 half-edge writer as `managedSolids`, but the result is grouped as navigation metadata rather than a visible
 `func_brush`. Surfaces reconcile by name, transform inside reusable components, appear in `map_preview`, and include a
-conservative underpass-clearance report against every overlapping terrain cell. The report deliberately labels deck
-connectivity as engine-required; use `map_engine_nav_test` to prove the compiled elevated route.
+conservative underpass-clearance report against every overlapping terrain cell. The report deliberately labels each
+project's deck connectivity as engine-required; the isolated repository fixture proves the generated material and
+flat/sloped geometry work in real GridNav, while `map_engine_nav_test` proves a particular compiled map's routes.
 
 `managedVolumes` adds named convex gameplay solids in world coordinates. A volume chooses `size: [x,y,z]` for a box,
 `polygon: { points: [[x,y],...], height }` for a flat three- to 64-sided prism, or
@@ -537,10 +551,11 @@ the real link operation refuses to overwrite conflicting folders.
 Then launch it: `addon_launch_custom_game map="<name>"`.
 
 > Limitation: the MCP can safely generate checked flat or per-corner-sloped extrusions with convex or concave outlines,
-> flat/sloped convex gameplay volumes, a rectangular arch assembled from three checked solids, and a checked bridge
-> deck paired with Valve navigation-walkable geometry. Freeform 3D meshes,
+> flat/sloped convex gameplay volumes, a rectangular arch assembled from three checked solids, and checked bridge
+> decks/approaches paired with Valve navigation-walkable geometry. Freeform 3D meshes,
 > true holes, curved or irregular arches, curves, terrain props, and decorative cliff brushwork still require Hammer or
-> a future checked recipe.
+> a future checked recipe. Because Valve GridNav aliases height at a shared X/Y location, independent stacked bridge
+> and underpass navigation is not represented by this API.
 
 ## Notes & limitations
 

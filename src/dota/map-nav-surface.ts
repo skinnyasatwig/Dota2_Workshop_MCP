@@ -8,7 +8,7 @@ import {
   triangulateSimplePolygon,
 } from "./map-solid.js";
 import { insertEntity, maxNodeId } from "./vmap.js";
-import { TileGrid, tileToWorld, vIndex } from "./tilegrid.js";
+import { cIndex, TileGrid, tileToWorld, vIndex } from "./tilegrid.js";
 
 export const DOTA_NAV_WALKABLE_MATERIAL = "materials/editor/dota_nav_walkable.vmat";
 const GROUP_PREFIX = "MCP Nav Surface: ";
@@ -364,6 +364,8 @@ export function analyzeMapNavSurfaceClearance(
     const terrainSamples: number[] = [];
     for (let y = 0; y < grid.height; y++) {
       for (let x = 0; x < grid.width; x++) {
+        const configuration = grid.configurations[cIndex(grid, x, y)] ?? [];
+        if (!configuration.some((value) => value > 0)) continue;
         const minimum = tileToWorld(grid, x, y);
         const maximum = tileToWorld(grid, x + 1, y + 1);
         if (!polygonOverlapsCell(footprint, minimum, maximum)) continue;

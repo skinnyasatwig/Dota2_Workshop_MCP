@@ -223,6 +223,25 @@ const bridgeComponentSchema = z.object({
   material: visibleMaterialSchema,
 }).strict();
 
+const bridgeApproachComponentSchema = z.object({
+  kind: z.literal("bridgeApproach"),
+  name: nameSchema,
+  /** World-space centers of the walkable top surface at each end. */
+  start: point3,
+  end: point3,
+  width: z.number().finite().min(2).max(32768),
+  thickness: z.number().finite().min(1).max(4096),
+  material: visibleMaterialSchema,
+}).strict().superRefine((approach, context) => {
+  if (Math.hypot(approach.end[0] - approach.start[0], approach.end[1] - approach.start[1]) < 2) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["end"],
+      message: "bridge approach endpoints must be at least two horizontal world units apart",
+    });
+  }
+});
+
 const bossPitComponentSchema = z.object({
   kind: z.literal("bossPit"),
   name: nameSchema,
@@ -316,6 +335,7 @@ export const dotaComponentInputSchema = z.union([
   wallComponentSchema,
   archComponentSchema,
   bridgeComponentSchema,
+  bridgeApproachComponentSchema,
   bossPitComponentSchema,
   baseComponentSchema,
 ]);
@@ -355,6 +375,11 @@ export const WORLD_STRUCTURE_RECIPES = {
     parts: ["deck", "walkable"],
     purpose: "Graybox bridge deck paired with Valve's dedicated invisible Dota navigation-walkable mesh.",
     source: "Installed dota_custom_default_000 and mine_bridge Valve prefabs",
+  },
+  bridgeApproach: {
+    parts: ["ramp", "walkable"],
+    purpose: "Sloped graybox bridge approach paired with exact Valve navigation-walkable geometry.",
+    source: "MCP composition of compiler-proven sloped managedSolids and isolated real-GridNav-proven Valve navigation surfaces",
   },
 } as const;
 
@@ -653,6 +678,54 @@ function bridgeParts(component: z.infer<typeof bridgeComponentSchema>): {
   };
 }
 
+function bridgeApproachParts(component: z.infer<typeof bridgeApproachComponentSchema>): {
+  solid: ManagedMapSolid;
+  navSurface: ManagedMapNavSurface;
+} {
+  const dx = component.end[0] - component.start[0];
+  const dy = component.end[1] - component.start[1];
+  const length = Math.hypot(dx, dy);
+  const center: [number, number, number] = [
+    (component.start[0] + component.end[0]) / 2,
+    (component.start[1] + component.end[1]) / 2,
+    (component.start[2] + component.end[2]) / 2,
+  ];
+  const startTop = component.start[2] - center[2];
+  const endTop = component.end[2] - center[2];
+  const points: [number, number][] = [
+    [-length / 2, -component.width / 2],
+    [length / 2, -component.width / 2],
+    [length / 2, component.width / 2],
+    [-length / 2, component.width / 2],
+  ];
+  const extrusion = {
+    points,
+    bottom: [
+      startTop - component.thickness,
+      endTop - component.thickness,
+      endTop - component.thickness,
+      startTop - component.thickness,
+    ],
+    top: [startTop, endTop, endTop, startTop],
+  };
+  const yaw = (Math.atan2(dy, dx) * 180) / Math.PI;
+  return {
+    solid: {
+      targetname: `${component.name}_ramp`,
+      center,
+      yaw,
+      material: component.material,
+      extrusion,
+    },
+    navSurface: {
+      targetname: `${component.name}_walkable`,
+      center,
+      yaw,
+      extrusion,
+    },
+  };
+}
+
 function pitOperations(component: z.infer<typeof bossPitComponentSchema>): ExpandedDotaComponents {
   const [cx, cy] = component.tileCenter;
   const rimWidth = component.rimWidth ?? 1.5;
@@ -875,6 +948,12 @@ export function expandDotaComponents(components: DotaComponentInput[]): Expanded
         const bridge = bridgeParts(component);
         managedSolids.push(bridge.solid);
         managedNavSurfaces.push(bridge.navSurface);
+        break;
+      }
+      case "bridgeApproach": {
+        const approach = bridgeApproachParts(component);
+        managedSolids.push(approach.solid);
+        managedNavSurfaces.push(approach.navSurface);
         break;
       }
       case "bossPit": {

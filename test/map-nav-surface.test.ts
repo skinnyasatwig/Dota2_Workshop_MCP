@@ -124,4 +124,11 @@ test("offline deck analysis reports conservative underpass clearance without cla
   const blocked = analyzeMapNavSurfaceClearance(terrain(1), surface);
   assert.equal(blocked[0].minimumUnderpassClearance, 96);
   assert.equal(blocked[0].underpassClearAtAgentHeight, false);
+
+  const voidGrid = terrain(0);
+  voidGrid.configurations = voidGrid.configurations.map(() => []);
+  const overVoid = analyzeMapNavSurfaceClearance(voidGrid, surface);
+  assert.equal(overVoid[0].overlappingCellCount, 0);
+  assert.equal(overVoid[0].terrainWorldZ, null);
+  assert.equal(overVoid[0].underpassClearAtAgentHeight, null);
 });

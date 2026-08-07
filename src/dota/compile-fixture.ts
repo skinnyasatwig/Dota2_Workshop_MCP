@@ -100,6 +100,15 @@ export function buildRepositoryCompileFixtureText(baseText: string): string {
       thickness: 64,
       material: "materials/dev/reflectivity_30.vmat",
     },
+    {
+      kind: "bridgeApproach",
+      name: "fixture_bridge_approach",
+      start: [1024, 0, 128],
+      end: [2048, 0, 384],
+      width: 384,
+      thickness: 64,
+      material: "materials/dev/reflectivity_30.vmat",
+    },
   ]);
   text = reconcileMapSolids(text, [
     {

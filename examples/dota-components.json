@@ -130,11 +130,29 @@
       "material": "materials/dev/reflectivity_30.vmat"
     },
     {
+      "kind": "bridgeApproach",
+      "name": "center_river_bridge_west_approach",
+      "start": [-1280, 0, 128],
+      "end": [-768, 0, 384],
+      "width": 512,
+      "thickness": 64,
+      "material": "materials/dev/reflectivity_30.vmat"
+    },
+    {
       "kind": "bridge",
       "name": "center_river_bridge",
       "center": [0, 0, 352],
       "yaw": 0,
       "length": 1536,
+      "width": 512,
+      "thickness": 64,
+      "material": "materials/dev/reflectivity_30.vmat"
+    },
+    {
+      "kind": "bridgeApproach",
+      "name": "center_river_bridge_east_approach",
+      "start": [768, 0, 384],
+      "end": [1280, 0, 128],
       "width": 512,
       "thickness": 64,
       "material": "materials/dev/reflectivity_30.vmat"
