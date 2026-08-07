@@ -1104,7 +1104,7 @@ export function registerMapTools(server: McpServer) {
         tolerance: z.number().positive().max(8192).optional().describe("Maximum camera error in world units (default 1000)."),
         cameraSettleMs: z.number().int().min(100).max(5000).optional().describe("Wait after each click (default 750ms)."),
         cameraTimeoutMs: z.number().int().min(500).max(30000).optional().describe("Per-camera-query timeout (default 5000ms)."),
-        captureScreenshots: z.boolean().optional().describe("Attach one PNG per probe to the result (default true)."),
+        captureScreenshots: z.boolean().optional().describe("Attach one checked non-blank PNG per probe (default false)."),
         compile: z.boolean().optional().describe("Compile all addon content, including the camera bridge (default true)."),
         forceCompile: z.boolean().optional(),
         ensureDebugSdk: z.boolean().optional().describe("Attach/update Lua and camera bridge before compiling (default true)."),
@@ -1154,7 +1154,7 @@ export function registerMapTools(server: McpServer) {
       const queryTimeout = cameraTimeoutMs ?? 5000;
       const targetState = readyGameState ?? 6;
       const selectedHero = hero ?? "npc_dota_hero_axe";
-      const shouldCapture = captureScreenshots !== false;
+      const shouldCapture = captureScreenshots === true;
       const shouldCompile = compile !== false;
       const shouldAttach = ensureDebugSdk !== false;
       const isDryRun = dryRun !== false;

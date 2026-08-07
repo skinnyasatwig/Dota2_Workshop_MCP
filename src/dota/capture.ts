@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "./process.js";
 import { dotaBlockerHint } from "./diagnose.js";
+import { decodePng } from "../util/imgmontage.js";
 
 export type WindowCaptureMode = "screen" | "print";
 
@@ -23,6 +24,52 @@ export interface WindowCaptureResult {
   buf?: Buffer;
   mode: WindowCaptureMode;
   error?: string;
+  quality?: WindowCaptureQuality;
+}
+
+export interface WindowCaptureQuality {
+  informative: boolean;
+  sampledPixels: number;
+  meanLuma: number;
+  lumaRange: number;
+  lumaStd: number;
+  nonBlackFraction: number;
+}
+
+/** Reject uniform/black GPU capture frames before they can be presented as visual evidence. */
+export function inspectWindowCapturePng(buf: Buffer, maxSamples = 4096): WindowCaptureQuality {
+  const image = decodePng(buf);
+  const pixelCount = image.width * image.height;
+  const step = Math.max(1, Math.floor(pixelCount / Math.max(1, maxSamples)));
+  let sampledPixels = 0;
+  let min = 255;
+  let max = 0;
+  let sum = 0;
+  let sum2 = 0;
+  let nonBlack = 0;
+  for (let pixel = 0; pixel < pixelCount; pixel += step) {
+    const offset = pixel * 4;
+    const luma = (54 * image.rgba[offset] + 183 * image.rgba[offset + 1] + 19 * image.rgba[offset + 2]) >> 8;
+    min = Math.min(min, luma);
+    max = Math.max(max, luma);
+    sum += luma;
+    sum2 += luma * luma;
+    if (luma >= 8) nonBlack++;
+    sampledPixels++;
+  }
+  const count = Math.max(1, sampledPixels);
+  const meanLuma = sum / count;
+  const lumaStd = Math.sqrt(Math.max(0, sum2 / count - meanLuma * meanLuma));
+  const lumaRange = max - min;
+  const nonBlackFraction = nonBlack / count;
+  return {
+    informative: lumaRange >= 16 && lumaStd >= 4 && nonBlackFraction >= 0.01,
+    sampledPixels,
+    meanLuma,
+    lumaRange,
+    lumaStd,
+    nonBlackFraction,
+  };
 }
 
 const PS_SCRIPT = String.raw`param([string]$Out, [string]$Mode, [string]$Focus)
@@ -126,7 +173,17 @@ export async function captureWindowPng(
       const blocker = await dotaBlockerHint();
       return { mode, error: `Capture produced no image. ${res.stderr.slice(-300) || res.stdout.slice(-300)}`.trim() + blocker };
     }
-    return { buf, mode };
+    const quality = inspectWindowCapturePng(buf);
+    if (!quality.informative) {
+      return {
+        mode,
+        quality,
+        error:
+          `Capture produced an uninformative frame (luma range ${quality.lumaRange}, ` +
+          `standard deviation ${quality.lumaStd.toFixed(1)}, non-black ${(quality.nonBlackFraction * 100).toFixed(1)}%).`,
+      };
+    }
+    return { buf, mode, quality };
   } catch (err) {
     return { mode, error: err instanceof Error ? err.message : String(err) };
   } finally {

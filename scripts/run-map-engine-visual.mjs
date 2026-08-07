@@ -11,7 +11,7 @@ const args = process.argv.slice(2);
 const apply = args.includes("--apply");
 const compile = !args.includes("--no-compile");
 const ensureDebugSdk = !args.includes("--no-attach");
-const captureScreenshots = !args.includes("--no-screenshots");
+const captureScreenshots = args.includes("--screenshots");
 const positional = args.filter((argument) => !argument.startsWith("--"));
 const projectRoot = resolve(positional[0] ?? ".");
 const map = positional[1] ?? "three_vs_three_blockout";

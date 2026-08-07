@@ -443,8 +443,8 @@ shut down a Dota session it launched. It refuses to replace an existing Dota ses
 `--replace-running-dota` is explicitly supplied.
 
 The companion `npm run test:engine-visual-map -- "C:\path\to\project" map_name` command is also dry-run-first.
-Add `--apply` for the guarded minimap/camera check. Use `--no-screenshots` when calibrating several probe points;
-this keeps screenshot capture from interfering with Panorama telemetry while still saving the structured measurements.
+Add `--apply` for the guarded minimap/camera check. Structured measurement is the default; add `--screenshots` only
+when visual frames are needed. Blank or nearly uniform GPU captures are rejected instead of being attached as evidence.
 
 If engine startup is uncertain, run `map_engine_readiness_probe` before `map_engine_nav_test`; unlike the
 navigation test, the readiness probe sends no gameplay command and returns a screenshot plus structured

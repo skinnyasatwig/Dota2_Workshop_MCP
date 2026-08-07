@@ -17,6 +17,8 @@ Last updated: 2026-08-07
 - The final measurement-only acceptance run completed all five native minimap probes with a 63-unit error at each point,
   zero focus recoveries, and graceful shutdown. The prior failed/black screenshot is retained only as evidence that
   per-probe capture is renderer-sensitive on this machine; it is not counted as a map failure.
+- Structured measurement is now the default for the project CLI. Explicit screenshot mode decodes each PNG and rejects
+  black or nearly uniform frames using sampled luminance range, variance, and non-black coverage before attachment.
 - The 3v3 acceptance contract moved the mirrored hard-camp pair 256 units away from a generated wall and removed a
   two-cell accidental high shelf. Offline reachability now has zero holes, zero inaccessible camps, and only the
   deliberate 384-cell off-map strip. The rebuilt map passed all four routes and all 64 Valve GridNav checks through
@@ -106,11 +108,14 @@ Last updated: 2026-08-07
     to the exact input moment, added bounded camera-telemetry focus recovery, and proved the 3v3 minimap with five
     63-unit probes. It also removed the last accidental isolated shelf and wall-blocked camp, rebuilt the VPK, and
     re-proved all four routes and all 64 real GridNav checks after segmented base walls were enabled.
+30. This follow-up - made structured minimap measurement the safe CLI default and added dependency-free PNG quality
+    checks so a black `PrintWindow` result cannot be mistaken for visual evidence. Focused tests cover both black-frame
+    rejection and acceptance of a varied rendered frame.
 
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 245 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 247 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 200 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
