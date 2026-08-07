@@ -28,6 +28,7 @@ import { analyzeMapReachability } from "../dota/map-reachability.js";
 import { resolveMapCollisionObstacles } from "../dota/map-collision.js";
 import { reconcileMapVolumes } from "../dota/map-volume.js";
 import { reconcileMapSolids } from "../dota/map-solid.js";
+import { inspectProjectMapMaterials, MapMaterialReport } from "../dota/map-material.js";
 import { inspectMapOverview, MapOverviewReport } from "../dota/map-overview.js";
 import {
   buildEngineNavigationCommand,
@@ -76,10 +77,16 @@ import {
   validateEntitiesAgainstFgd,
 } from "../dota/fgd-validation.js";
 import { pathExists } from "../util/fsx.js";
-import { json, text, error, guard, ToolResult } from "../util/result.js";
+import { json, error, guard, ToolResult } from "../util/result.js";
 
 const NAME_RE = /^[a-z][a-z0-9_]+$/;
 const numOrStr = z.union([z.string(), z.number()]);
+
+function materialFindingText(report: MapMaterialReport): string {
+  return report.findings
+    .map((finding) => `[${finding.severity.toUpperCase()}] ${finding.detail}`)
+    .join("\n");
+}
 
 export function registerMapTools(server: McpServer) {
   server.registerTool(
@@ -1557,7 +1564,8 @@ export function registerMapTools(server: McpServer) {
         "Paths expand into complete linked waypoint chains. Missing named entities " +
         "are created; existing named entities are repaired; obsolete managed path nodes are removed; and declared " +
         "terrain shapes are restored while terrain outside those shapes is preserved. The operation is idempotent and " +
-        "refuses ambiguous duplicate targetnames. Defaults to preview-only; pass apply=true.",
+        "refuses ambiguous duplicate targetnames or missing/unsafe material assets. Preview reports material blockers " +
+        "without writing. Defaults to preview-only; pass apply=true.",
       inputSchema: {
         projectRoot: z.string().optional(),
         map: z.string(),
@@ -1598,6 +1606,28 @@ export function registerMapTools(server: McpServer) {
         return error(
           `No changes written. Duplicate targetnames make these managed entities ambiguous: ${result.conflicts.join(", ")}`,
         );
+      }
+      const materialValidation = await inspectProjectMapMaterials(
+        synchronization.text,
+        dota,
+        project,
+        false,
+      );
+      if (apply && !materialValidation.safeToWrite) {
+        const failure = json(
+          {
+            map,
+            contract: resolved.path,
+            applied: false,
+            safeToApply: false,
+            materialValidation,
+          },
+          `No changes written. Material preflight found ` +
+            `${materialValidation.missingCount + materialValidation.invalidCount} blocker(s).\n` +
+            materialFindingText(materialValidation),
+        );
+        failure.isError = true;
+        return failure;
       }
 
       const terrain = synchronization.terrain;
@@ -1658,6 +1688,14 @@ export function registerMapTools(server: McpServer) {
           `${terrain.changedConfigurationCells} tile recipes plus ${terrain.changedPathEdges} path edges.`,
       ];
       if (!apply && changed) steps.push("No files changed. Pass apply=true to write this plan.");
+      steps.push(
+        `Materials: ${materialValidation.resolvedCount} resolved, ` +
+        `${materialValidation.sourceOnlyCount} awaiting compilation, ` +
+        `${materialValidation.missingCount + materialValidation.invalidCount} blocker(s).`,
+      );
+      if (!apply && !materialValidation.safeToWrite) {
+        steps.push("This preview is unsafe to apply until the material blockers are fixed.");
+      }
       if (apply && recompile) steps.push(`Recompiled -> ${p.installedGameVpk}`);
       if (transaction) steps.push(`Recovery backup -> ${transaction.backupDirectory}`);
       return json(
@@ -1665,6 +1703,8 @@ export function registerMapTools(server: McpServer) {
           map,
           contract: resolved.path,
           applied: apply === true,
+          safeToApply: materialValidation.safeToWrite,
+          materialValidation,
           changed,
           changedEntities,
           changedSolids,
@@ -1774,7 +1814,9 @@ export function registerMapTools(server: McpServer) {
     "map_compile",
     {
       title: "Compile a map",
-      description: "Compile a map's content .vmap into a playable game .vpk (resourcecompiler).",
+      description:
+        "Preflight every VMAP material against addon/base loose assets and VPKs, then compile the content .vmap into " +
+        "a playable game .vpk (resourcecompiler). Missing or unsafe materials stop before the expensive compiler run.",
       inputSchema: {
         projectRoot: z.string().optional(),
         name: z.string(),
@@ -1786,12 +1828,35 @@ export function registerMapTools(server: McpServer) {
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
       const p = projectMapPaths(dota, project, name);
-      if (dryRun) return text(`[dry run]\n"${dota.resourceCompilerExe}" -v -nop4${force ? " -f" : ""} -i "${p.installedContentVmap}" -game "${dota.dotaGameDir}"`);
-      if (!(await pathExists(p.contentVmap))) return error(`Map content not found: ${p.contentVmap}.`);
+      const command = `"${dota.resourceCompilerExe}" -v -nop4${force ? " -f" : ""} -i "${p.installedContentVmap}" -game "${dota.dotaGameDir}"`;
+      const sourceExists = await pathExists(p.contentVmap);
+      if (dryRun && !sourceExists) {
+        return json(
+          { dryRun: true, name, command, sourceExists: false, materialValidation: null },
+          `[dry run]\n${command}\nMaterial preflight unavailable because the source VMAP does not exist: ${p.contentVmap}`,
+        );
+      }
+      if (!sourceExists) return error(`Map content not found: ${p.contentVmap}.`);
+      const mapText = await vmapToText(dota.dmxconvertExe, p.contentVmap);
+      const materials = await inspectProjectMapMaterials(mapText, dota, project, false);
+      if (dryRun) {
+        return json(
+          { dryRun: true, name, command, materialValidation: materials },
+          `[dry run]\n${command}\nMaterials: ${materials.resolvedCount} resolved, ` +
+            `${materials.sourceOnlyCount} awaiting compilation, ${materials.missingCount + materials.invalidCount} blocker(s).` +
+            `${materials.findings.length ? `\n${materialFindingText(materials)}` : ""}`,
+        );
+      }
+      if (!materials.safeToWrite) {
+        return error(
+          `Map compilation was not started because material preflight found ` +
+          `${materials.missingCount + materials.invalidCount} blocker(s).\n${materialFindingText(materials)}`,
+        );
+      }
       const res = await compileProjectMap(dota, project, name, force);
       const ok = res.code === 0 && (await pathExists(p.installedGameVpk));
       return json(
-        { name, ok, vpk: p.installedGameVpk, exitCode: res.code },
+        { name, ok, vpk: p.installedGameVpk, exitCode: res.code, materialValidation: materials },
         `${ok ? "COMPILE OK -> " + p.installedGameVpk : "COMPILE FAILED (exit " + res.code + ")"}\n\n${res.stdout.slice(-2000)}\n${res.stderr.slice(-500)}`.trim(),
       );
     }),
@@ -1855,7 +1920,8 @@ export function registerMapTools(server: McpServer) {
         "and whether the compiled VPK is older than its VMAP source, " +
         "extracts entities, finds duplicate targetnames and broken path_corner/path_track links, and verifies required " +
         "targetname/classname pairs used by game scripts. It also checks minimap boundary entities, overview metadata, " +
-        "source/compiled material and texture assets, image dimensions, and the world-to-minimap transform. When a project contract declares managedTerrain or " +
+        "all VMAP material references across addon/base loose assets and VPKs, overview source/compiled material and " +
+        "texture assets, image dimensions, and the world-to-minimap transform. When a project contract declares managedTerrain or " +
         "managedSolids or managedVolumes, validation also reports tile-grid, checked-solid, or checked-volume drift without writing it. Whole-map " +
         "offline reachability checks detect terrain holes, " +
         "trapped spawns, blocked entrances/path segments, and inaccessible objectives or camps. Known entity keyvalues " +
@@ -1952,6 +2018,7 @@ export function registerMapTools(server: McpServer) {
       let entities: ReturnType<typeof parseMapEntities> = [];
       let entityDefinitionValidation: FgdValidationReport | undefined;
       let overviewReport: MapOverviewReport | undefined;
+      let materialReport: MapMaterialReport | undefined;
       let terrainDrift:
         | {
             changedHeightVertices: number;
@@ -2002,6 +2069,19 @@ export function registerMapTools(server: McpServer) {
       if (source) {
         const mapText = await vmapToText(dota.dmxconvertExe, p.contentVmap);
         entities = parseMapEntities(mapText);
+        materialReport = await inspectProjectMapMaterials(
+          mapText,
+          dota,
+          project,
+          requireCompiled === true,
+        );
+        for (const finding of materialReport.findings) {
+          findings.push({
+            severity: finding.severity,
+            code: finding.code,
+            message: finding.detail,
+          });
+        }
         overviewReport = await inspectMapOverview({
           mapName: map,
           mapText,
@@ -2290,6 +2370,7 @@ export function registerMapTools(server: McpServer) {
           contract: resolvedContract?.path ?? null,
           requirementCount: requirements.length,
           entityDefinitions: entityDefinitionValidation ?? null,
+          materials: materialReport ?? null,
           overview: overviewReport ?? null,
           terrainDrift: terrainDrift ?? null,
           solidDrift: solidDrift ?? null,

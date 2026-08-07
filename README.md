@@ -223,7 +223,9 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
   contain local entities, paths, terrain, checked world solids, and gameplay volumes, and every placement is automatically namespaced. Legacy
   `terrain` / `entities` / `paths` inputs remain compatible. See
   [`examples/map-specification.json`](examples/map-specification.json) for a complete starter. Pass
-  `dryRun:true` to generate and report the plan without writing, registering, or compiling anything.
+  `dryRun:true` to generate and report the plan without writing, registering, or compiling anything. The report also
+  resolves every resulting VMAP material against addon/base content, compiled assets, and Dota/core VPKs; a real write
+  refuses missing or unsafe materials before conversion begins.
 - **`map_terrain`** — apply the shared validated terrain vocabulary to an existing map. It supports
   `fill` / `height` / `water` / `tileset` / `ramp` over `rect` / `circle` / `ring` / `path` /
   `polygon` / reusable `region` / `managedPath` shapes and regenerates valid cliff orientation and tile recipes. It is
@@ -401,7 +403,8 @@ playable `.vpk` — a pipeline verified end to end.
   `map_build`, conventionally stored in `.dota-workshop/map-contract.json`. It creates missing named entities, expands
   complete linked waypoint chains, repairs drifted class/position/rotation/keyvalues, prunes obsolete
   numbered nodes owned by those paths, creates or repairs checked solid volumes, expands reusable regions/components/placements, preserves unrelated map data, and refuses ambiguous duplicate
-  target names. Preview is the default; pass `apply:true` to write and `recompile:true` to compile.
+  target names. Its preview includes the same whole-map material resolution as `map_build`; applying is blocked when a
+  material cannot be safely resolved. Preview is the default; pass `apply:true` to write and `recompile:true` to compile.
   Applied map changes use a transaction: the current source map (and compiled map when relevant) is
   backed up under `.dota-workshop/backups`, conversion is staged before replacement, and a failed
   conversion or compile restores the prior files automatically. `map_build` and `map_terrain` use the
@@ -409,7 +412,8 @@ playable `.vpk` — a pipeline verified end to end.
 - **`map_rewrite_path`** — convert/rename a complete numbered waypoint chain while repairing all
   target links (for example generated `path_track` routes → creep `path_corner` routes).
 - **`map_to_text` / `map_from_text`** — read/write the full vmap DMX text for arbitrary edits.
-- **`map_compile`** — compile a map's `.vmap` → `.vpk`.
+- **`map_compile`** — resolve all VMAP materials first, then compile `.vmap` → `.vpk`; missing or unsafe assets stop
+  before the expensive Valve compiler run. `dryRun:true` returns both the command and material evidence.
 - **`map_list`** — list maps with source/compiled status.
 - **`map_validate`** — no-game preflight: verify map registration, source/compiled state, required
   script-facing entities, duplicate target names, and broken `path_corner`/`path_track` chains. It
@@ -420,7 +424,9 @@ playable `.vpk` — a pipeline verified end to end.
   `strictEntityProperties:true` to turn unknown classes/properties into warnings. Declared dropdown choices and
   numeric bounds are enforced; a named destination that cannot be resolved is reported as a warning. Dynamic
   targets such as `!activator`, wildcard targets, and existing class-name destinations are not misreported. The same
-  preflight verifies both `dota_minimap_boundary` corners, overview KeyValues, source and compiled material/texture
+  preflight resolves every material serialized in the VMAP against addon/base loose source, compiled assets, and
+  addon/Dota/core VPKs. Missing or unsafe resources are errors; source-only custom materials are warnings until
+  compiled, or errors when `requireCompiled:true`. It also verifies both `dota_minimap_boundary` corners, overview KeyValues, source and compiled material/texture
   assets, PNG dimensions, and the exact world/image/display transform. Valve's legacy `rotate` field is validated as
   an integer flag: `0` is north-up and any nonzero value is one clockwise 90-degree display turn. Rotated source
   images must be square, matching Valve's client requirement.
@@ -487,7 +493,8 @@ closes every side, and then proves every
 half-edge has exactly one opposite before writing the VMAP. Solids reconcile by targetname, mirror inside reusable
 components, appear in `map_preview` with an uphill arrow when sloped, and block their true concave footprint in offline
 reachability. The repository fixture round-trips flat and sloped L-shaped solids through Valve's converter and compiles
-them into a real VPK.
+them into a real VPK. The general map material preflight proves the selected visible material exists before a build,
+sync, or compile is allowed to spend work on it.
 
 `managedVolumes` adds named convex gameplay solids in world coordinates. A volume chooses `size: [x,y,z]` for a box,
 `polygon: { points: [[x,y],...], height }` for a flat three- to 64-sided prism, or

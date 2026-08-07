@@ -4,7 +4,9 @@ import { existsSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { buildRepositoryCompileFixtureText } from "../src/dota/compile-fixture.js";
+import { inspectMapMaterials } from "../src/dota/map-material.js";
 import { compileVmap, textToVmap, vmapToText } from "../src/dota/vmap.js";
+import { Vpk } from "../src/dota/vpk.js";
 
 const dotaRoot = process.env.DOTA2_PATH || "C:\\Program Files (x86)\\Steam\\steamapps\\common\\dota 2 beta";
 const converter = join(dotaRoot, "game", "bin", "win64", "dmxconvert.exe");
@@ -38,6 +40,29 @@ test(
       assert.match(roundTripped, /fixture_sloped_trigger/);
       assert.match(roundTripped, /fixture_concave_solid/);
       assert.match(roundTripped, /fixture_sloped_concave_solid/);
+      const [dotaPak, corePak] = await Promise.all([
+        Vpk.open(join(dotaRoot, "game", "dota", "pak01_dir.vpk")),
+        Vpk.open(join(dotaRoot, "game", "core", "pak01_dir.vpk")),
+      ]);
+      const materials = await inspectMapMaterials({
+        mapText: roundTripped,
+        sourceRoots: [
+          contentAddon,
+          join(dotaRoot, "content", "dota"),
+          join(dotaRoot, "content", "core"),
+        ],
+        compiledRoots: [
+          gameAddon,
+          join(dotaRoot, "game", "dota"),
+          join(dotaRoot, "game", "core"),
+        ],
+        packedResources: [
+          { label: "Dota pak01", entries: dotaPak.entries },
+          { label: "core pak01", entries: corePak.entries },
+        ],
+      });
+      assert.equal(materials.safeToWrite, true, JSON.stringify(materials.findings));
+      assert.equal(materials.missingCount, 0);
       const compiled = await compileVmap(compiler, dotaGame, contentMap, gameVpk, true);
       assert.equal(compiled.timedOut, false, compiled.stderr || compiled.stdout);
       assert.equal(compiled.code, 0, compiled.stderr || compiled.stdout);

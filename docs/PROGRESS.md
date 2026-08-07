@@ -137,11 +137,17 @@ Last updated: 2026-08-07
     remain a single-valued, non-intersecting surface over the checked outline; every top corner must stay above its
     matching bottom. Winding normalization and component mirroring preserve height pairing, preview marks the uphill
     direction, exact drift repair remains idempotent, and Valve compiled the second sloped L-shaped fixture.
+35. This milestone - added whole-map material preflight. Every quoted `materials/...vmat` resource is deduplicated and
+    resolved against addon/base loose source, compiled game assets, and addon/Dota/core VPK indexes. Build and sync dry
+    runs expose the evidence, unsafe writes are refused before conversion, `map_compile` refuses blockers before
+    ResourceCompiler, and `map_validate` can require compiled readiness. The real 3v3 VMAP resolves all 10 references
+    (2 unique materials) with no findings; the repository compiler fixture proves its generated materials against the
+    installed Valve packages before producing its VPK.
 
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 269 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 272 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 200 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
