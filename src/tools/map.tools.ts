@@ -45,7 +45,8 @@ import { restartGame, shutdownGame } from "../dota/game-session.js";
 import { defaultVconPort, getVConsole } from "../dota/vconsole.js";
 import { isProcessRunning } from "../dota/process.js";
 import { closeTransientStallDialog, diagnoseDota } from "../dota/diagnose.js";
-import { captureWindowPng } from "../dota/capture.js";
+import { captureWindowPng, WindowCaptureQuality } from "../dota/capture.js";
+import { captureEngineScreenshot } from "../dota/engine-screenshot.js";
 import { prepareAttachedEngineWindow, waitForEngineWindow } from "../dota/engine-window.js";
 import { dotaWindowInfo, runWin32Spec } from "../dota/win32.js";
 import {
@@ -1105,6 +1106,10 @@ export function registerMapTools(server: McpServer) {
         cameraSettleMs: z.number().int().min(100).max(5000).optional().describe("Wait after each click (default 750ms)."),
         cameraTimeoutMs: z.number().int().min(500).max(30000).optional().describe("Per-camera-query timeout (default 5000ms)."),
         captureScreenshots: z.boolean().optional().describe("Attach one checked non-blank PNG per probe (default false)."),
+        screenshotMethod: z.enum(["window", "engine"]).optional().describe(
+          "Screenshot source when captureScreenshots=true: focused Windows pixels (default) or Source 2's native PNG renderer. " +
+          "The engine method is occlusion-proof and stops after one failed capture.",
+        ),
         compile: z.boolean().optional().describe("Compile all addon content, including the camera bridge (default true)."),
         forceCompile: z.boolean().optional(),
         ensureDebugSdk: z.boolean().optional().describe("Attach/update Lua and camera bridge before compiling (default true)."),
@@ -1129,6 +1134,7 @@ export function registerMapTools(server: McpServer) {
       cameraSettleMs,
       cameraTimeoutMs,
       captureScreenshots,
+      screenshotMethod,
       compile,
       forceCompile,
       ensureDebugSdk,
@@ -1155,6 +1161,7 @@ export function registerMapTools(server: McpServer) {
       const targetState = readyGameState ?? 6;
       const selectedHero = hero ?? "npc_dota_hero_axe";
       const shouldCapture = captureScreenshots === true;
+      const chosenScreenshotMethod = screenshotMethod ?? "window";
       const shouldCompile = compile !== false;
       const shouldAttach = ensureDebugSdk !== false;
       const isDryRun = dryRun !== false;
@@ -1201,6 +1208,10 @@ export function registerMapTools(server: McpServer) {
           readyGameState: targetState,
           hero: selectedHero,
           screenshotCount: shouldCapture ? chosenProbes.length : 0,
+          screenshotMethod: shouldCapture ? chosenScreenshotMethod : undefined,
+          screenshotRisk: shouldCapture && chosenScreenshotMethod === "engine"
+            ? "Renderer capture is explicit; one missing, malformed, or blank PNG stops further screenshot commands."
+            : undefined,
           dotaWasRunning,
           replaceRunningDota: replaceRunningDota === true,
           launchCount: 1,
@@ -1208,7 +1219,8 @@ export function registerMapTools(server: McpServer) {
         }, [
           `[dry run] ${map}: one guarded launch, ${chosenProbes.length} real minimap click(s), exact camera telemetry, automatic shutdown.`,
           `Expected world bounds: ${JSON.stringify(overview.entityBounds)}; accepted error: ${allowedError} units.`,
-          `Minimap rectangle: ${minimapRect ? "explicit override" : "discover from the native HUD"}; screenshots: ${shouldCapture ? chosenProbes.length : 0}.`,
+          `Minimap rectangle: ${minimapRect ? "explicit override" : "discover from the native HUD"}; ` +
+            `screenshots: ${shouldCapture ? `${chosenProbes.length} (${chosenScreenshotMethod})` : 0}.`,
           `Dota currently running: ${dotaWasRunning}${dotaWasRunning && !replaceRunningDota ? " (live run would refuse)" : ""}.`,
         ].join("\n"));
       }
@@ -1247,6 +1259,7 @@ export function registerMapTools(server: McpServer) {
         reason: "post-input-focus" | "camera-timeout";
         preparation: Awaited<ReturnType<typeof prepareAttachedEngineWindow>>;
       }> = [];
+      let failedScreenshotCount = 0;
       let fatalError: string | undefined;
       let shutdown: Awaited<ReturnType<typeof shutdownGame>> | undefined;
       let consoleTail: string[] = [];
@@ -1349,19 +1362,48 @@ export function registerMapTools(server: McpServer) {
           }
           const actual = { x: camera.telemetry.camera.x, y: camera.telemetry.camera.y };
           const distance = cameraErrorDistance(expected, actual);
-          let screenshot: Awaited<ReturnType<typeof captureWindowPng>> | undefined;
+          let screenshot: {
+            buf?: Buffer;
+            mode: "screen" | "print" | "engine";
+            error?: string;
+            sourcePath?: string;
+            sourceFormat?: "png" | "jpeg";
+            commandOutput?: string[];
+            dimensions?: { width: number; height: number };
+            quality?: WindowCaptureQuality;
+            correlated?: boolean;
+            retained?: boolean;
+          } | undefined;
           if (shouldCapture) {
             await dismissKnownStalls();
-            screenshot = await captureWindowPng("screen", true);
-            if (!screenshot.buf) screenshot = await captureWindowPng("print", false);
-            const afterCapture = await dotaWindowInfo();
-            if (screenshot.mode === "screen" && afterCapture.foreground !== true) {
-              screenshot = {
-                mode: "screen",
-                error: "Dota lost foreground focus during capture; discarded pixels that may belong to another application.",
-              };
+            if (chosenScreenshotMethod === "engine") {
+              const rendered = await captureEngineScreenshot({
+                screenshotsDir: dota.screenshotsDir,
+                sendCommand: async (command) => (
+                  await vc.sendAndCapture(command, `MCP_SCREENSHOT_${Date.now()}_${probe.name}`, 1500)
+                ).map((line) => line.text),
+              });
+              screenshot = { ...rendered, mode: "engine" };
+            } else {
+              screenshot = await captureWindowPng("screen", true);
+              if (!screenshot.buf) screenshot = await captureWindowPng("print", false);
+              const afterCapture = await dotaWindowInfo();
+              if (screenshot.mode === "screen" && afterCapture.foreground !== true) {
+                screenshot = {
+                  mode: "screen",
+                  error: "Dota lost foreground focus during capture; discarded pixels that may belong to another application.",
+                };
+              }
             }
             if (screenshot.buf) screenshotBuffers.push({ name: probe.name, buffer: screenshot.buf });
+            else {
+              failedScreenshotCount++;
+              if (chosenScreenshotMethod === "engine") {
+                throw new Error(
+                  `Dota renderer screenshot failed at probe "${probe.name}": ${screenshot.error ?? "no checked image was returned"}`,
+                );
+              }
+            }
           }
           results.push({
             name: probe.name,
@@ -1372,7 +1414,18 @@ export function registerMapTools(server: McpServer) {
             distance,
             tolerance: allowedError,
             passed: distance <= allowedError,
-            screenshot: { captured: !!screenshot?.buf, mode: screenshot?.mode, error: screenshot?.error },
+            screenshot: {
+              captured: !!screenshot?.buf,
+              mode: screenshot?.mode,
+              sourcePath: screenshot?.sourcePath,
+              sourceFormat: screenshot?.sourceFormat,
+              commandOutput: screenshot?.commandOutput,
+              dimensions: screenshot?.dimensions,
+              quality: screenshot?.quality,
+              correlated: screenshot?.correlated,
+              retained: screenshot?.retained,
+              error: screenshot?.error,
+            },
           });
         }
       } catch (caught) {
@@ -1385,7 +1438,7 @@ export function registerMapTools(server: McpServer) {
       }
 
       const failedProbes = results.filter((result) => result.passed !== true);
-      const failed = !!fatalError || failedProbes.length > 0 || !shutdown?.stopped;
+      const failed = !!fatalError || failedProbes.length > 0 || failedScreenshotCount > 0 || !shutdown?.stopped;
       const data = {
         dryRun: false,
         map,
@@ -1406,8 +1459,10 @@ export function registerMapTools(server: McpServer) {
         minimapRect: discoveredRect,
         minimapPanel: baselineTelemetry?.telemetry.minimap,
         tolerance: allowedError,
+        screenshotMethod: shouldCapture ? chosenScreenshotMethod : undefined,
         results,
         failedProbeCount: failedProbes.length,
+        failedScreenshotCount,
         transientStallDismissals,
         cameraFocusRecoveries,
         consoleTail,
@@ -1419,7 +1474,9 @@ export function registerMapTools(server: McpServer) {
         `${map} ENGINE VISUAL: ${failed ? "FAILED" : "PASSED"}`,
         `${results.length}/${chosenProbes.length} probe(s) completed; ${failedProbes.length} outside the ${allowedError}-unit tolerance.`,
         `Minimap geometry: ${discoveredRect ? JSON.stringify(discoveredRect) : "unavailable"}.`,
-        `Screenshots: ${screenshotBuffers.length}/${shouldCapture ? chosenProbes.length : 0}; automatic shutdown: ${shutdown?.stopped ? "complete" : "FAILED"}.`,
+        `Screenshots (${shouldCapture ? chosenScreenshotMethod : "disabled"}): ` +
+          `${screenshotBuffers.length}/${shouldCapture ? chosenProbes.length : 0}; ` +
+          `automatic shutdown: ${shutdown?.stopped ? "complete" : "FAILED"}.`,
         `Camera focus recoveries: ${cameraFocusRecoveries.filter((recovery) => recovery.preparation.ok).length}/${cameraFocusRecoveries.length}.`,
         ...results.map((result) => `  [${result.passed ? "PASS" : "FAIL"}] ${result.name}: camera error ${Math.round(Number(result.distance))} units`),
         ...(fatalError ? [`Fatal: ${fatalError}`] : []),

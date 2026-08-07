@@ -27,6 +27,13 @@ Last updated: 2026-08-07
   `rotate=15` example, while Valve's published `CMapOverview` client source proves that the value is read as a
   0/nonzero flag and applies one 90-degree display turn. Offline bounds, world/display round trips, and live-click
   expectations now share that transform; non-square rotated images and fractional pseudo-angles fail closed.
+- Replaced the stale Source 1 `jpeg` assumption with installed Source 2's real `png_screenshot` and
+  `jpeg_screenshot` commands. Renderer capture snapshots the destination first, accepts only a brand-new stable file,
+  validates its format and dimensions, rejects blank/uniform pixels, records command evidence, and never deletes or
+  overwrites a pre-existing screenshot. PNG is the safe default; JPEG remains explicit-only.
+- A one-probe 3v3 acceptance run produced a checked 1900x1080 Source 2 PNG, moved the camera to within 63 units of
+  the expected center, needed no focus recovery, and shut Dota down gracefully. Requested screenshots now fail the
+  visual run when evidence is absent, and a failed engine capture stops before another renderer request is sent.
 
 ## Verified milestones
 
@@ -118,11 +125,14 @@ Last updated: 2026-08-07
 31. This milestone - replaced the nonzero-rotation refusal with Valve-grounded legacy quarter-turn transforms.
     Offline validation, forward/inverse coordinate conversion, and live minimap probes now agree; fixtures cover
     north-up, nonzero `rotate=15`, square-image enforcement, and unsafe fractional values.
+32. This milestone - added renderer-native Source 2 PNG evidence with strict new-file correlation, stable-write and
+    pixel-quality checks, structured provenance, and fail-fast screenshot semantics. The 3v3 center probe produced a
+    checked 1900x1080 frame, retained Valve's source PNG, passed at 63 units, and shut down automatically.
 
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 251 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 257 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 200 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.

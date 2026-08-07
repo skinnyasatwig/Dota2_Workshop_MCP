@@ -140,7 +140,9 @@ The launch tools already pass `-tools` (and `-vconport`), so the channel is avai
 - **`dota_dev_cycle`** — one call: build, then pick the cheapest apply path (with `autoRestart` if a reload errors).
 - **`dota_screenshot`** — default **`auto`** safely captures the focused Dota window, then tries offscreen
   `PrintWindow` if Windows refuses focus. It will not capture another foreground application. **`game`** explicitly
-  invokes Dota's `jpeg` command, but is not used automatically because that engine path can crash some Workshop sessions.
+  invokes Source 2's renderer-native `png_screenshot` by default. It accepts only a newly created, stable image,
+  rejects black/uniform pixels, and retains Valve's source file. Explicit JPEG remains available but is never selected
+  automatically because some Workshop sessions crash in that renderer path.
 - **`dota_watch_errors`** — scan the live console for Lua/engine errors (script error, stack traceback, *.lua:NN, …).
 - **`dota_wait_for`** — block until a console line matches (optionally after sending a command) — for sequencing tests.
 
@@ -262,7 +264,9 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
   east/north/south points, compares the real camera position with the overview transform, optionally attaches checked
   screenshots, and shuts down. It is dry-run-first and refuses to replace a running Dota session without explicit
   permission. Valve's legacy overview `rotate` key is handled exactly as its client source does: `0` is north-up and
-  any nonzero integer applies one clockwise quarter-turn; it is not a degree value.
+  any nonzero integer applies one clockwise quarter-turn; it is not a degree value. Set `screenshotMethod:"engine"`
+  (or CLI flags `--screenshots --screenshot-method=engine`) for occlusion-proof Source 2 PNG evidence. Requested
+  screenshots are pass/fail evidence: one renderer failure stops further screenshot commands and fails the run.
 - **`map_recipe_catalog`** — inspect the named terrain cores, Radiant/Dire cliff recipes, ramp-safe
   fallbacks, checked solid-volume recipes, and official Valve prefab references used by the generator. `verifyInstalled:true` checks
   the references against the current Workshop Tools install without opening Hammer. It also compares Steam/Dota/tools

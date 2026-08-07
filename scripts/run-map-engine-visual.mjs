@@ -12,6 +12,12 @@ const apply = args.includes("--apply");
 const compile = !args.includes("--no-compile");
 const ensureDebugSdk = !args.includes("--no-attach");
 const captureScreenshots = args.includes("--screenshots");
+const centerOnly = args.includes("--center-only");
+const screenshotMethodArg = args.find((argument) => argument.startsWith("--screenshot-method="));
+const screenshotMethod = screenshotMethodArg?.slice("--screenshot-method=".length) ?? "window";
+if (!new Set(["window", "engine"]).has(screenshotMethod)) {
+  throw new Error("--screenshot-method must be 'window' or 'engine'.");
+}
 const positional = args.filter((argument) => !argument.startsWith("--"));
 const projectRoot = resolve(positional[0] ?? ".");
 const map = positional[1] ?? "three_vs_three_blockout";
@@ -36,6 +42,8 @@ try {
         compile,
         ensureDebugSdk,
         captureScreenshots,
+        screenshotMethod,
+        probes: centerOnly ? [{ name: "center", u: 0.5, v: 0.5 }] : undefined,
         launchStrategy: "steam",
       },
     },

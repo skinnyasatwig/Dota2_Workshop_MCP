@@ -1,15 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { readdir, stat, readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { resolveProject } from "../config.js";
 import { requireDotaPaths } from "../dota/paths.js";
 import { getVConsole, defaultVconPort, ConsoleLine } from "../dota/vconsole.js";
 import { buildDotaLaunchTarget, buildLaunchArgs } from "../dota/launch.js";
 import { run, npmCommand } from "../dota/process.js";
 import { restartGame } from "../dota/game-session.js";
-import { ensureDir } from "../util/fsx.js";
 import { captureWindowPng } from "../dota/capture.js";
+import { captureEngineScreenshot } from "../dota/engine-screenshot.js";
 import { json, text, image, error, guard, ToolResult } from "../util/result.js";
 
 let sentinelCounter = 0;
@@ -234,28 +232,29 @@ export function registerDebugTools(server: McpServer) {
       title: "Capture a screenshot",
       description:
         "Screenshot the running game — two distinct variants:\n" +
-        "• method 'game' (a.k.a. 'console'): the in-game RENDER via the `jpeg` console command. This is explicit-only " +
-        "because some Workshop sessions crash inside Dota's JPEG renderer.\n" +
+        "• method 'game' (a.k.a. 'console'): the in-game RENDER via Source 2's `png_screenshot` by default. " +
+        "JPEG stays explicit because some Workshop sessions crash in its JPEG renderer.\n" +
         "• method 'window': the dota2 WINDOW via the OS, captured with real screen pixels (CopyFromScreen) so the 3D " +
         "viewport is NOT black; it is focused first by default (focus:false to skip). Works in menus/tools/Panorama too.\n" +
         "• method 'print': offscreen PrintWindow capture (grabs an occluded/background window, but a GPU 3D viewport " +
         "may come back black).\n" +
         "• method 'auto' (default): safely tries a focused window capture, then an offscreen PrintWindow fallback. " +
-        "It never sends the in-game `jpeg` command.",
+        "It never sends an in-game screenshot command.",
       inputSchema: {
         method: z.enum(["auto", "game", "console", "window", "print"]).optional(),
-        quality: z.number().int().min(1).max(100).optional().describe("JPEG quality for the in-game render method (default 90)."),
+        format: z.enum(["png", "jpeg"]).optional().describe("Dota renderer format for game/console mode (default PNG)."),
+        quality: z.number().int().min(1).max(100).optional().describe("JPEG quality for game/console mode (default 90; ignored for PNG)."),
         focus: z.boolean().optional().describe("For the 'window' method: bring dota2 to the foreground first (default true)."),
         vconPort: z.number().int().min(1).max(65535).optional(),
       },
     },
-    guard(async ({ method, quality, focus, vconPort }): Promise<ToolResult> => {
+    guard(async ({ method, format, quality, focus, vconPort }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
       const raw = method ?? "auto";
       // Normalize aliases: 'game' === 'console' (in-game render); 'window' === screen capture.
       const mode = raw === "game" ? "console" : raw;
 
-      // In-game render: send `jpeg`, then read the new file from the screenshots dir.
+      // In-game render: ask Source 2 for an image, then verify the newly created file.
       if (mode === "console") {
         const vc = getVConsole(vconPort);
         let connected = vc.isConnected();
@@ -268,39 +267,22 @@ export function registerDebugTools(server: McpServer) {
           }
         }
         if (connected) {
-          const dir = dota.screenshotsDir;
-          await ensureDir(dir);
-          const before = new Set(await readdir(dir).catch(() => []));
-          const sinceMs = Date.now() - 1000;
-          vc.send(`jpeg ${quality ?? 90}`);
-          const isImg = (n: string) => /\.(jpe?g|png|tga)$/i.test(n);
-          let found: string | undefined;
-          // Pick the NEWEST qualifying image (a brand-new name always beats an old file
-          // merely touched within the window) — not whatever readdir happens to list last.
-          for (let i = 0; i < 16 && !found; i++) {
-            await sleep(250);
-            let bestScore = -1;
-            for (const name of (await readdir(dir).catch(() => [])) as string[]) {
-              if (!isImg(name)) continue;
-              const st = await stat(join(dir, name)).catch(() => null);
-              if (!st) continue;
-              const isNew = !before.has(name);
-              if (!isNew && st.mtimeMs < sinceMs) continue;
-              const score = st.mtimeMs + (isNew ? 1e13 : 0);
-              if (score > bestScore) {
-                bestScore = score;
-                found = name;
-              }
-            }
+          const screenshot = await captureEngineScreenshot({
+            screenshotsDir: dota.screenshotsDir,
+            sendCommand: async (command) => (await vc.sendAndCapture(command, nextSentinel(), 1500)).map((line) => line.text),
+            format,
+            quality,
+          });
+          if (screenshot.buf) {
+            return image(
+              screenshot.buf.toString("base64"),
+              "image/png",
+              `Screenshot (Dota renderer): ${screenshot.sourcePath} ` +
+                `(${screenshot.dimensions?.width}x${screenshot.dimensions?.height}, ` +
+                `${Math.round((screenshot.sourceBytes ?? 0) / 1024)} KB source)`,
+            );
           }
-          if (found) {
-            await sleep(200);
-            const fp = join(dir, found);
-            const buf = await readFile(fp);
-            const mimeType = /\.png$/i.test(found) ? "image/png" : "image/jpeg";
-            return image(buf.toString("base64"), mimeType, `Screenshot (console): ${fp} (${Math.round(buf.length / 1024)} KB)`);
-          }
-          return error(`Sent 'jpeg' but no new screenshot appeared in ${dota.screenshotsDir}. Is a map rendering? Try method 'window'.`);
+          return error(`${screenshot.error ?? "Dota renderer capture failed."} Is a map rendering? Try method 'window'.`);
         } else {
           return error(VCON_HINT);
         }

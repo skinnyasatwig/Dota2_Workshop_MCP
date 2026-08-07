@@ -7,7 +7,7 @@
 //   "print"   — PrintWindow(PW_RENDERFULLCONTENT). Works even when the window is
 //               occluded/background, but a GPU 3D viewport often comes back BLACK.
 //
-// The in-game `jpeg`/`screenshot` console command (driven from debug.tools) is the
+// The in-game Source 2 screenshot commands (driven from debug.tools) are the
 // highest-fidelity path when a map is rendering; these OS captures are for the window
 // itself (tools mode, menus, panorama) and as a fallback.
 
@@ -34,6 +34,44 @@ export interface WindowCaptureQuality {
   lumaRange: number;
   lumaStd: number;
   nonBlackFraction: number;
+}
+
+const PS_IMAGE_TO_PNG = String.raw`param([string]$In, [string]$Out)
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Drawing
+$image = [System.Drawing.Image]::FromFile($In)
+try {
+  $image.Save($Out, [System.Drawing.Imaging.ImageFormat]::Png)
+} finally {
+  $image.Dispose()
+}
+`;
+
+/** Decode a Windows-supported image file and return a PNG suitable for pixel-level inspection. */
+export async function convertImageFileToPng(path: string): Promise<Buffer> {
+  if (process.platform !== "win32") {
+    throw new Error("Image conversion for engine screenshots is only supported on Windows.");
+  }
+  const dir = await mkdtemp(join(tmpdir(), "d2image-"));
+  const ps1 = join(dir, "convert.ps1");
+  const out = join(dir, "image.png");
+  try {
+    await writeFile(ps1, PS_IMAGE_TO_PNG, "utf8");
+    const result = await run(
+      "powershell",
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1, path, out],
+      { timeoutMs: 25_000 },
+    );
+    const png = await readFile(out).catch(() => undefined);
+    if (!png?.length) {
+      throw new Error(
+        `Image conversion produced no PNG. ${result.stderr.slice(-300) || result.stdout.slice(-300)}`.trim(),
+      );
+    }
+    return png;
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 /** Reject uniform/black GPU capture frames before they can be presented as visual evidence. */
