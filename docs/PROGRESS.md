@@ -149,11 +149,19 @@ Last updated: 2026-08-07
     solid vertical ranges with a conservative 256-unit standing corridor: posts block their true footprints while a high
     lintel leaves the opening reachable. The repository fixture includes the complete arch for Valve conversion and
     compiler proof; true holes, curved arches, and arbitrary meshes remain deliberately unsupported.
+37. This milestone - added checked Valve navigation surfaces and a reusable `bridge` composition. Installed Valve
+    sources showed that stock Dota bridges keep visible art separate from a `CMapMesh` using
+    `materials/editor/dota_nav_walkable.vmat`; the MCP now writes that dedicated mesh through the same validated,
+    watertight flat/sloped polygon pipeline as world solids. Desired-state parsing, component placement/mirroring,
+    drift repair, transactions, preview, material preflight, and name-collision checks all include the new surface.
+    The bridge builder couples one visible deck with its exact navigation twin. Offline analysis conservatively reports
+    under-deck terrain clearance while explicitly reserving elevated route connectivity for Valve GridNav. The isolated
+    repository fixture round-tripped and compiled the complete bridge without launching Dota or Hammer.
 
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 275 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 282 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 200 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
@@ -162,7 +170,8 @@ Last updated: 2026-08-07
 - Valve's installed `dmxconvert.exe` successfully round-trips generated camp, polygonal no-ward, player-clip, and
   sloped trigger volumes from text to binary VMAP and back during the integration suite, preserving exact corner heights.
 - `npm run test:compiler-fixture` successfully round-tripped and compiled the repository-owned acceptance payload,
-  including its sloped trigger, flat and sloped concave L-shaped world solids, checked rectangular arch, and explicit navigation obstruction, into a real VPK. The generated map uses Valve's installed blank template only as required hidden
+  including its sloped trigger, flat and sloped concave L-shaped world solids, checked rectangular arch, checked bridge
+  deck/navigation twin, and explicit navigation obstruction, into a real VPK. The generated map uses Valve's installed blank template only as required hidden
   infrastructure, depends on no private 3v3 file, stores no copied Valve VMAP, and leaves no temporary addon trees.
 - Installed ValveResourceFormat 19.2 recovered the physical hull bounds of
   `models/props_gameplay/cap_point001.vmdl_c` directly from `pak01_dir.vpk`; a second lookup reused the fingerprinted

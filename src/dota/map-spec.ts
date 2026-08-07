@@ -35,6 +35,12 @@ import {
   MapSolidReconcileResult,
   reconcileMapSolids,
 } from "./map-solid.js";
+import {
+  ManagedMapNavSurface,
+  managedMapNavSurfaceInputSchema,
+  MapNavSurfaceReconcileResult,
+  reconcileMapNavSurfaces,
+} from "./map-nav-surface.js";
 
 const scalar = z.union([z.string(), z.number(), z.boolean()]);
 const properties = z.record(scalar);
@@ -175,6 +181,7 @@ export const componentDefinitionInputSchema = z.object({
   managedPaths: z.array(managedMapPathInputSchema).optional(),
   managedTerrain: z.array(terrainOperationInputSchema).optional(),
   managedSolids: z.array(managedMapSolidInputSchema).optional(),
+  managedNavSurfaces: z.array(managedMapNavSurfaceInputSchema).optional(),
   managedVolumes: z.array(managedMapVolumeInputSchema).optional(),
 }).strict();
 
@@ -194,6 +201,7 @@ export const mapSpecificationInputSchema = z.object({
   managedPaths: z.array(managedMapPathInputSchema).optional(),
   managedTerrain: z.array(terrainOperationInputSchema).optional(),
   managedSolids: z.array(managedMapSolidInputSchema).optional(),
+  managedNavSurfaces: z.array(managedMapNavSurfaceInputSchema).optional(),
   managedVolumes: z.array(managedMapVolumeInputSchema).optional(),
   regions: z.record(regionDefinitionInputSchema).optional(),
   components: z.record(componentDefinitionInputSchema).optional(),
@@ -412,7 +420,7 @@ function expandComponent(
   component: MapContract,
   placement: ComponentPlacementInput,
   path: string,
-): Pick<MapContract, "managedEntities" | "managedAbsentEntities" | "managedPaths" | "managedTerrain" | "managedSolids" | "managedVolumes"> {
+): Pick<MapContract, "managedEntities" | "managedAbsentEntities" | "managedPaths" | "managedTerrain" | "managedSolids" | "managedNavSurfaces" | "managedVolumes"> {
   const worldOffset = placement.worldOffset ?? [0, 0, 0];
   const transformOrigin = (origin: string, field: string) =>
     transformVectorString(origin, placement.mirrorAxis, worldOffset, field, path);
@@ -526,6 +534,37 @@ function expandComponent(
       properties: localProperties(solid.properties, placement.name),
     };
   };
+  const transformNavSurface = (surface: ManagedMapNavSurface): ManagedMapNavSurface => {
+    const transformedAngles = transformAngles(
+      `0 ${surface.yaw ?? 0} 0`,
+      placement.mirrorAxis,
+      `${fieldPrefix(placement)}.${surface.targetname}.yaw`,
+      path,
+    );
+    const mirrorCount = Number(placement.mirrorAxis?.includes("x") ?? false) +
+      Number(placement.mirrorAxis?.includes("y") ?? false);
+    const reverse = mirrorCount % 2 === 1;
+    const points = reverse
+      ? surface.extrusion.points.map(([x, y]) => [x, Math.abs(y) < 1e-9 ? 0 : -y] as [number, number]).reverse()
+      : surface.extrusion.points.map(([x, y]) => [x, y] as [number, number]);
+    const transformedExtrusion = "height" in surface.extrusion
+      ? { points, height: surface.extrusion.height! }
+      : {
+          points,
+          bottom: reverse ? [...surface.extrusion.bottom].reverse() : [...surface.extrusion.bottom],
+          top: reverse ? [...surface.extrusion.top].reverse() : [...surface.extrusion.top],
+        };
+    return {
+      targetname: localName(placement.name, surface.targetname),
+      center: [
+        (placement.mirrorAxis?.includes("x") ? -surface.center[0] : surface.center[0]) + worldOffset[0],
+        (placement.mirrorAxis?.includes("y") ? -surface.center[1] : surface.center[1]) + worldOffset[1],
+        surface.center[2] + worldOffset[2],
+      ],
+      yaw: transformedAngles ? parseVector(transformedAngles, "transformed navigation surface yaw", path)[1] : surface.yaw,
+      extrusion: transformedExtrusion,
+    };
+  };
   return {
     managedEntities: (component.managedEntities ?? []).map(transformEntity),
     managedAbsentEntities: (component.managedAbsentEntities ?? []).map(transformAbsent),
@@ -533,6 +572,7 @@ function expandComponent(
     managedTerrain: (component.managedTerrain ?? []).map((operation) =>
       transformComponentTerrain(operation, placement, path)),
     managedSolids: (component.managedSolids ?? []).map(transformSolid),
+    managedNavSurfaces: (component.managedNavSurfaces ?? []).map(transformNavSurface),
     managedVolumes: (component.managedVolumes ?? []).map(transformVolume),
   };
 }
@@ -568,6 +608,7 @@ export function parseMapSpecification(value: unknown, path = "inline map specifi
           managedPaths: definition.managedPaths,
           managedTerrain,
           managedSolids: definition.managedSolids,
+          managedNavSurfaces: definition.managedNavSurfaces,
           managedVolumes: definition.managedVolumes,
         },
         `${path}, component "${name}"`,
@@ -617,6 +658,11 @@ export function parseMapSpecification(value: unknown, path = "inline map specifi
         ...dotaComponents.managedSolids,
         ...expandedComponents.flatMap((component) => component.managedSolids ?? []),
       ],
+      managedNavSurfaces: [
+        ...(parsed.managedNavSurfaces ?? []),
+        ...dotaComponents.managedNavSurfaces,
+        ...expandedComponents.flatMap((component) => component.managedNavSurfaces ?? []),
+      ],
       managedVolumes: [
         ...(parsed.managedVolumes ?? []),
         ...dotaComponents.managedVolumes,
@@ -633,6 +679,7 @@ export interface MapSpecificationReconcileResult {
   entities: MapEntityReconcileResult;
   terrain: TerrainReconcileResult;
   solids: MapSolidReconcileResult;
+  navSurfaces: MapNavSurfaceReconcileResult;
   volumes: MapVolumeReconcileResult;
 }
 
@@ -642,7 +689,8 @@ export function reconcileMapSpecification(
   specification: MapContract,
 ): MapSpecificationReconcileResult {
   const solids = reconcileMapSolids(text, specification.managedSolids ?? []);
-  const volumes = reconcileMapVolumes(solids.text, specification.managedVolumes ?? []);
+  const navSurfaces = reconcileMapNavSurfaces(solids.text, specification.managedNavSurfaces ?? []);
+  const volumes = reconcileMapVolumes(navSurfaces.text, specification.managedVolumes ?? []);
   const entities = reconcileMapEntities(volumes.text, managedEntitiesForContract(specification), {
     prunePrefixes: (specification.managedPaths ?? []).map((path) => path.name),
     absentEntities: specification.managedAbsentEntities ?? [],
@@ -657,11 +705,13 @@ export function reconcileMapSpecification(
     changed:
       entities.added.length + entities.updated.length + entities.removed.length > 0 ||
       solids.added.length + solids.updated.length > 0 ||
+      navSurfaces.added.length + navSurfaces.updated.length > 0 ||
       volumes.added.length + volumes.updated.length > 0 ||
       terrain.changed,
     entities,
     terrain,
     solids,
+    navSurfaces,
     volumes,
   };
 }

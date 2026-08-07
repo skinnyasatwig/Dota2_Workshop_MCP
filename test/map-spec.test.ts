@@ -217,6 +217,41 @@ test("mirrored sloped concave solids keep height rings paired with their outline
   });
 });
 
+test("mirrored sloped navigation surfaces keep height rings paired with their outline", () => {
+  const specification = parseMapSpecification({
+    components: {
+      sloped_bridge: {
+        managedNavSurfaces: [{
+          targetname: "walkable",
+          center: [300, 50, 256],
+          yaw: 20,
+          extrusion: {
+            points: [[-200, -100], [200, -100], [200, 100], [-200, 100]],
+            bottom: [-96, 32, 32, -96],
+            top: [-32, 96, 96, -32],
+          },
+        }],
+      },
+    },
+    placements: [{
+      component: "sloped_bridge",
+      name: "east",
+      worldOffset: [1000, 0, 128],
+      mirrorAxis: "x",
+    }],
+  });
+  assert.deepEqual(specification.managedNavSurfaces, [{
+    targetname: "east_walkable",
+    center: [700, 50, 384],
+    yaw: 160,
+    extrusion: {
+      points: [[-200, -100], [200, -100], [200, 100], [-200, 100]],
+      bottom: [-96, 32, 32, -96],
+      top: [-32, 96, 96, -32],
+    },
+  }]);
+});
+
 test("named regions can be reused and mirrored around a chosen tile point", () => {
   const specification = parseMapSpecification({
     regions: {

@@ -218,9 +218,9 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
 
 - **`map_build`** — one call: clone the template, apply one validated desired-state map specification,
   register, and optionally compile it. The preferred `specification` object uses the same
-  `managedTerrain` / `managedEntities` / `managedPaths` / `managedSolids` / `managedVolumes` vocabulary as `map_sync_contract`. A specification can
+  `managedTerrain` / `managedEntities` / `managedPaths` / `managedSolids` / `managedNavSurfaces` / `managedVolumes` vocabulary as `map_sync_contract`. A specification can
   also define reusable named `regions`, reusable `components`, and transformed `placements`; one component may
-  contain local entities, paths, terrain, checked world solids, and gameplay volumes, and every placement is automatically namespaced. Legacy
+  contain local entities, paths, terrain, checked world solids, checked navigation surfaces, and gameplay volumes, and every placement is automatically namespaced. Legacy
   `terrain` / `entities` / `paths` inputs remain compatible. See
   [`examples/map-specification.json`](examples/map-specification.json) for a complete starter. Pass
   `dryRun:true` to generate and report the plan without writing, registering, or compiling anything. The report also
@@ -232,7 +232,8 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
   preview-only by default; pass `apply:true` after reviewing the exact change counts.
 - **`map_preview`** — render a diagnostic top-down **image straight from the data**, no game launch.
   In addition to shaded terrain and water it overlays contours, cliff cells, ramp cells, current arrows,
-  entities, complete waypoint paths, tower ranges, camps, objectives, minimap bounds, checked world solids and trigger/blocker volumes, missing terrain
+  entities, complete waypoint paths, tower ranges, camps, objectives, minimap bounds, checked world solids,
+  Valve navigation-walkable surfaces, conservative under-deck clearance, and trigger/blocker volumes, missing terrain
   recipes, color-coded outlines recovered from real model `PHYS` blocks (including conservative curved
   sphere/capsule outlines), explicit Valve tree/obstruction broad phases,
   collision-enabled props whose physical bounds remain unknown,
@@ -303,7 +304,7 @@ targets with `@local:name`; it becomes the correct namespaced target for each co
 `around` tile point, which makes map-center symmetry explicit instead of relying on duplicated coordinates.
 
 For common gameplay structure, `dotaComponents` provides strongly checked `base`, `ancient`, `tower`, `fountain`,
-`shop`, `camp`, `bossPit`, `playerStart`, `gate`, `baseBlocker`, `fowBlocker`, `wall`, and `arch` entries. It derives team numbers, official entity classes,
+`shop`, `camp`, `bossPit`, `playerStart`, `gate`, `baseBlocker`, `fowBlocker`, `wall`, `arch`, and `bridge` entries. It derives team numbers, official entity classes,
 stock unit/model names, tower tier names, shop/camp numeric values, base member transforms, and boss-pit terrain.
 See [`examples/dota-components.json`](examples/dota-components.json). A `camp` can include an optional checked
 rectangular `volume`, which creates the real `trigger_multiple` bounds referenced by its spawner. A boss pit's
@@ -320,6 +321,11 @@ origin is the center of the arch at ground level; width, depth, total height, op
 one preflighted visible material are explicit. Offline reachability uses a conservative 256-unit standing corridor,
 so the posts block their true footprints while a sufficiently high lintel leaves the doorway open. This is a safe
 reusable composition, not a general-purpose hole or arbitrary mesh API.
+The `bridge` component pairs one visible, checked solid deck with a same-shape `managedNavSurface` made from Valve's
+dedicated `materials/editor/dota_nav_walkable.vmat` recipe. The MCP checks and mirrors both pieces together, detects
+drift, previews the deck, and conservatively reports terrain clearance underneath it. Valve's converter and compiler
+accept the complete composition. Elevated route connectivity still requires a real GridNav test because Dota's tile
+terrain graph is single-layer and cannot honestly prove a route above another route at the same map coordinates.
 
 ## Learn from other custom games
 
@@ -498,8 +504,16 @@ closes every side, and then proves every
 half-edge has exactly one opposite before writing the VMAP. Solids reconcile by targetname, mirror inside reusable
 components, appear in `map_preview` with an uphill arrow when sloped, and block their true concave footprint in offline
 reachability when their vertical range intersects the standing corridor. The repository fixture round-trips flat and
-sloped L-shaped solids plus a checked three-piece arch through Valve's converter and compiles them into a real VPK. The general map material preflight proves the selected visible material exists before a build,
+sloped L-shaped solids, a checked three-piece arch, and a visible bridge deck paired with Valve navigation geometry
+through Valve's converter and compiles them into a real VPK. The general map material preflight proves the selected visible material exists before a build,
 sync, or compile is allowed to spend work on it.
+
+`managedNavSurfaces` adds named, checked Source 2 meshes using Valve's dedicated navigation-walkable material. Its
+`center`, optional `yaw`, and flat or per-corner-sloped `extrusion` use the same validated polygon and watertight
+half-edge writer as `managedSolids`, but the result is grouped as navigation metadata rather than a visible
+`func_brush`. Surfaces reconcile by name, transform inside reusable components, appear in `map_preview`, and include a
+conservative underpass-clearance report against every overlapping terrain cell. The report deliberately labels deck
+connectivity as engine-required; use `map_engine_nav_test` to prove the compiled elevated route.
 
 `managedVolumes` adds named convex gameplay solids in world coordinates. A volume chooses `size: [x,y,z]` for a box,
 `polygon: { points: [[x,y],...], height }` for a flat three- to 64-sided prism, or
@@ -523,7 +537,8 @@ the real link operation refuses to overwrite conflicting folders.
 Then launch it: `addon_launch_custom_game map="<name>"`.
 
 > Limitation: the MCP can safely generate checked flat or per-corner-sloped extrusions with convex or concave outlines,
-> flat/sloped convex gameplay volumes, and a rectangular arch assembled from three checked solids. Freeform 3D meshes,
+> flat/sloped convex gameplay volumes, a rectangular arch assembled from three checked solids, and a checked bridge
+> deck paired with Valve navigation-walkable geometry. Freeform 3D meshes,
 > true holes, curved or irregular arches, curves, terrain props, and decorative cliff brushwork still require Hammer or
 > a future checked recipe.
 

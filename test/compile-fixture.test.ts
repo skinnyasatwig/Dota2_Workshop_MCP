@@ -27,6 +27,7 @@ test("repository compile fixture is self-contained and structurally inspectable"
       "fixture_arch_lintel",
       "fixture_arch_right_post",
       "fixture_base_blocker",
+      "fixture_bridge_deck",
       "fixture_concave_solid",
       "fixture_dire_start",
       "fixture_nav_obstruction",
@@ -38,7 +39,7 @@ test("repository compile fixture is self-contained and structurally inspectable"
       "fixture_sloped_trigger",
     ],
   );
-  assert.equal(fixture.solids.length, 5);
+  assert.equal(fixture.solids.length, 6);
   const concave = fixture.solids.find((solid) => solid.targetname === "fixture_concave_solid");
   assert.equal(concave?.footprint.length, 6);
   assert.equal(concave?.height, 256);
@@ -52,6 +53,15 @@ test("repository compile fixture is self-contained and structurally inspectable"
   const lintel = fixture.solids.find((solid) => solid.targetname === "fixture_arch_lintel");
   assert.deepEqual(lintel?.center.map((value) => Number(value.toFixed(6))), [-2048, 1024, 768]);
   assert.equal(lintel?.height, 256);
+  const bridge = fixture.solids.find((solid) => solid.targetname === "fixture_bridge_deck");
+  assert.deepEqual(bridge?.center, [-2048, -1024, 384]);
+  assert.equal(bridge?.height, 64);
+  assert.deepEqual(bridge?.footprint, [[-512, -192], [512, -192], [512, 192], [-512, 192]]);
+  assert.deepEqual(fixture.navSurfaces.map((surface) => surface.targetname), [
+    "fixture_bridge_walkable",
+  ]);
+  assert.deepEqual(fixture.navSurfaces[0]?.center, [-2048, -1024, 384]);
+  assert.equal(fixture.navSurfaces[0]?.height, 64);
   assert.equal(fixture.volumes.length, 2);
   const round = fixture.volumes.find((volume) => volume.targetname === "fixture_polygon_no_wards");
   assert.equal(round?.footprint.length, 12);

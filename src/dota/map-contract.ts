@@ -4,6 +4,7 @@ import { pathExists } from "../util/fsx.js";
 import { ManagedTerrainOperation, parseManagedTerrain } from "./map-terrain.js";
 import { ManagedMapSolid, parseManagedMapSolids } from "./map-solid.js";
 import { ManagedMapVolume, parseManagedMapVolumes } from "./map-volume.js";
+import { ManagedMapNavSurface, parseManagedMapNavSurfaces } from "./map-nav-surface.js";
 
 export interface MapEntityRequirement {
   targetname: string;
@@ -51,6 +52,7 @@ export interface MapContract {
   managedPaths?: ManagedMapPath[];
   managedTerrain?: ManagedTerrainOperation[];
   managedSolids?: ManagedMapSolid[];
+  managedNavSurfaces?: ManagedMapNavSurface[];
   managedVolumes?: ManagedMapVolume[];
 }
 
@@ -387,6 +389,7 @@ export function parseMapContract(value: unknown, path: string): MapContract {
   }
   const managedTerrain = parseManagedTerrain(raw.managedTerrain, "managedTerrain", path);
   const managedSolids = parseManagedMapSolids(raw.managedSolids, "managedSolids", path);
+  const managedNavSurfaces = parseManagedMapNavSurfaces(raw.managedNavSurfaces, "managedNavSurfaces", path);
   const managedVolumes = parseManagedMapVolumes(raw.managedVolumes, "managedVolumes", path);
   const managedPathNames = new Set((managedPaths ?? []).map((managedPath) => managedPath.name));
   for (const [index, operation] of (managedTerrain ?? []).entries()) {
@@ -405,6 +408,7 @@ export function parseMapContract(value: unknown, path: string): MapContract {
     managedPaths,
     managedTerrain,
     managedSolids,
+    managedNavSurfaces,
     managedVolumes,
   };
   const names = new Set<string>();
@@ -425,6 +429,12 @@ export function parseMapContract(value: unknown, path: string): MapContract {
       throw new Error(`Managed contract contains duplicate targetname "${solid.targetname}": ${path}`);
     }
     names.add(solid.targetname);
+  }
+  for (const surface of managedNavSurfaces ?? []) {
+    if (names.has(surface.targetname)) {
+      throw new Error(`Managed contract contains duplicate targetname "${surface.targetname}": ${path}`);
+    }
+    names.add(surface.targetname);
   }
   for (const absent of managedAbsentEntities ?? []) {
     if (absent.targetname && names.has(absent.targetname)) {

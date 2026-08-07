@@ -202,6 +202,27 @@ test("loadMapContract rejects solid names that collide with managed entities", a
   await rm(root, { recursive: true, force: true });
 });
 
+test("loadMapContract rejects navigation surface names that collide with managed entities", async () => {
+  const root = await freshRoot();
+  await writeFile(
+    join(root, ".dota-workshop", "map-contract.json"),
+    JSON.stringify({
+      requiredEntities: [],
+      managedEntities: [{ targetname: "bridge", classname: "info_target", origin: "0 0 0" }],
+      managedNavSurfaces: [{
+        targetname: "bridge",
+        center: [0, 0, 384],
+        extrusion: {
+          points: [[-256, -128], [256, -128], [256, 128], [-256, 128]],
+          height: 64,
+        },
+      }],
+    }),
+  );
+  await assert.rejects(() => loadMapContract(root, "twin_gates"), /duplicate targetname "bridge"/);
+  await rm(root, { recursive: true, force: true });
+});
+
 test("loadMapContract rejects path names that collide with managed entities", async () => {
   const root = await freshRoot();
   await writeFile(

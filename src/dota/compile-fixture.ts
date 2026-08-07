@@ -11,6 +11,7 @@ import {
 } from "./vmap.js";
 import { parseMapVolumes, reconcileMapVolumes } from "./map-volume.js";
 import { parseMapSolids, reconcileMapSolids } from "./map-solid.js";
+import { parseMapNavSurfaces, reconcileMapNavSurfaces } from "./map-nav-surface.js";
 import { expandDotaComponents } from "./dota-components.js";
 
 /** Apply the repository-owned fixture payload to a valid blank VMAP structural seed. */
@@ -76,19 +77,31 @@ export function buildRepositoryCompileFixtureText(baseText: string): string {
       },
     },
   ]).text;
-  const arch = expandDotaComponents([{
-    kind: "arch",
-    name: "fixture_arch",
-    origin: [-2048, 1024, 128],
-    yaw: 15,
-    width: 1024,
-    depth: 256,
-    height: 768,
-    openingWidth: 512,
-    openingHeight: 512,
-    material: "materials/dev/reflectivity_30.vmat",
-  }]).managedSolids;
-  return reconcileMapSolids(text, [
+  const structures = expandDotaComponents([
+    {
+      kind: "arch",
+      name: "fixture_arch",
+      origin: [-2048, 1024, 128],
+      yaw: 15,
+      width: 1024,
+      depth: 256,
+      height: 768,
+      openingWidth: 512,
+      openingHeight: 512,
+      material: "materials/dev/reflectivity_30.vmat",
+    },
+    {
+      kind: "bridge",
+      name: "fixture_bridge",
+      center: [-2048, -1024, 384],
+      yaw: -10,
+      length: 1024,
+      width: 384,
+      thickness: 64,
+      material: "materials/dev/reflectivity_30.vmat",
+    },
+  ]);
+  text = reconcileMapSolids(text, [
     {
       targetname: "fixture_concave_solid",
       center: [0, -1024, 128],
@@ -114,18 +127,21 @@ export function buildRepositoryCompileFixtureText(baseText: string): string {
         top: [64, 192, 192, 128, 0, 0],
       },
     },
-    ...arch,
+    ...structures.managedSolids,
   ]).text;
+  return reconcileMapNavSurfaces(text, structures.managedNavSurfaces).text;
 }
 
 export function inspectRepositoryCompileFixture(text: string): {
   entities: ReturnType<typeof parseMapEntities>;
   solids: ReturnType<typeof parseMapSolids>;
+  navSurfaces: ReturnType<typeof parseMapNavSurfaces>;
   volumes: ReturnType<typeof parseMapVolumes>;
 } {
   return {
     entities: parseMapEntities(text),
     solids: parseMapSolids(text),
+    navSurfaces: parseMapNavSurfaces(text),
     volumes: parseMapVolumes(text),
   };
 }

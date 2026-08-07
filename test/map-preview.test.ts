@@ -6,6 +6,7 @@ import { ParsedMapEntity } from "../src/dota/vmap.js";
 import { decodePng } from "../src/util/imgmontage.js";
 import { ParsedMapVolume } from "../src/dota/map-volume.js";
 import { ParsedMapSolid } from "../src/dota/map-solid.js";
+import { ParsedMapNavSurface } from "../src/dota/map-nav-surface.js";
 
 function grid(width = 6, height = 4): TileGrid {
   return {
@@ -83,6 +84,17 @@ test("diagnostic preview renders gameplay and navigation overlays", () => {
     },
     blocking: true,
   }];
+  const navSurfaces: ParsedMapNavSurface[] = [{
+    targetname: "preview_bridge_walkable",
+    center: [768, 512, 384],
+    yaw: 15,
+    footprint: [[-256, -96], [256, -96], [256, 96], [-256, 96]],
+    sloped: {
+      bottom: [-64, 0, 0, -64],
+      top: [0, 64, 64, 0],
+    },
+    material: "materials/editor/dota_nav_walkable.vmat",
+  }];
   const rendered = renderTileGridPreview(grid(), [
     entity("radiant_spawn", "info_target", "128 128 128"),
     entity("radiant_t1", "npc_dota_tower", "640 512 128", { teamnumber: "2", attack_range: "700" }),
@@ -97,7 +109,7 @@ test("diagnostic preview renders gameplay and navigation overlays", () => {
     entity("minimap_boundary_northeast", "dota_minimap_boundary", "1536 1024 128"),
     entity("preview_tree", "ent_dota_tree", "128 896 128"),
     entity("preview_statue", "prop_static", "1408 128 128", { solid: "6" }),
-  ], { scale: 4 }, volumes, solids);
+  ], { scale: 4 }, volumes, solids, navSurfaces);
 
   const decoded = decodePng(rendered.png);
   assert.equal(decoded.width, 24);
@@ -110,6 +122,10 @@ test("diagnostic preview renders gameplay and navigation overlays", () => {
   assert.equal(rendered.stats.overlays.minimapBounds, 1);
   assert.equal(rendered.stats.overlays.solids, 1);
   assert.equal(rendered.stats.overlays.slopedSolids, 1);
+  assert.equal(rendered.stats.overlays.navSurfaces, 1);
+  assert.equal(rendered.stats.overlays.slopedNavSurfaces, 1);
+  assert.equal(rendered.navSurfaceClearance.length, 1);
+  assert.equal(rendered.navSurfaceClearance[0].deckConnectivity, "engine-navigation-required");
   assert.equal(rendered.stats.overlays.volumes, 2);
   assert.equal(rendered.stats.overlays.slopedVolumes, 1);
   assert.equal(rendered.stats.overlays.blockingVolumes, 2);

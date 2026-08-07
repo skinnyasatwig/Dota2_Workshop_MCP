@@ -653,7 +653,7 @@ export function registerMapGenTools(server: McpServer) {
       description:
         "Generate a whole playable map in one call. Prefer specification, which uses the same validated desired-state " +
         "format as map_sync_contract: managedTerrain, managedEntities, managedAbsentEntities, managedPaths, checked " +
-        "managedSolids, managedVolumes, and " +
+        "managedSolids, managedNavSurfaces, managedVolumes, and " +
         "requiredEntities, plus reusable regions, components, and transformed placements. Legacy terrain/entities/paths " +
         "remain supported. Dry runs report missing/unsafe materials, and writes refuse those blockers before conversion. " +
         "Terrain coordinates are tile units; entity/path coordinates are world units.",
@@ -714,6 +714,11 @@ export function registerMapGenTools(server: McpServer) {
             updated: result.solids.updated,
             unchanged: result.solids.unchanged,
           },
+          navSurfaces: {
+            added: result.navSurfaces.added,
+            updated: result.navSurfaces.updated,
+            unchanged: result.navSurfaces.unchanged,
+          },
           volumes: {
             added: result.volumes.added,
             updated: result.volumes.updated,
@@ -732,7 +737,8 @@ export function registerMapGenTools(server: McpServer) {
         log.push(
           `specification: add ${result.entities.added.length}, update ${result.entities.updated.length}, ` +
             `remove ${result.entities.removed.length}; solids add ${result.solids.added.length}, ` +
-            `update ${result.solids.updated.length}; volumes add ${result.volumes.added.length}, ` +
+            `update ${result.solids.updated.length}; navigation surfaces add ${result.navSurfaces.added.length}, ` +
+            `update ${result.navSurfaces.updated.length}; volumes add ${result.volumes.added.length}, ` +
             `update ${result.volumes.updated.length}; terrain ${result.terrain.changed ? "changed" : "unchanged"}`,
         );
       } else {

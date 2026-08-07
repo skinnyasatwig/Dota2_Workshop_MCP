@@ -128,6 +128,16 @@
       "openingWidth": 512,
       "openingHeight": 512,
       "material": "materials/dev/reflectivity_30.vmat"
+    },
+    {
+      "kind": "bridge",
+      "name": "center_river_bridge",
+      "center": [0, 0, 352],
+      "yaw": 0,
+      "length": 1536,
+      "width": 512,
+      "thickness": 64,
+      "material": "materials/dev/reflectivity_30.vmat"
     }
   ]
 }

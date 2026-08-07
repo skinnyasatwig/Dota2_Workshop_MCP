@@ -8,6 +8,12 @@ import { cIndex, parseTileGrid, TileGrid, vIndex } from "./tilegrid.js";
 import { parseMapEntities, ParsedMapEntity } from "./vmap.js";
 import { parseMapVolumes, ParsedMapVolume } from "./map-volume.js";
 import { parseMapSolids, ParsedMapSolid } from "./map-solid.js";
+import {
+  analyzeMapNavSurfaceClearance,
+  MapNavSurfaceClearance,
+  parseMapNavSurfaces,
+  ParsedMapNavSurface,
+} from "./map-nav-surface.js";
 import { MapCollisionObstacle } from "./map-collision.js";
 
 export interface MapPreviewOptions {
@@ -24,6 +30,7 @@ export interface MapPreviewOptions {
   showMinimapBounds?: boolean;
   showReachability?: boolean;
   showVolumes?: boolean;
+  showNavSurfaces?: boolean;
   showVisionBlockers?: boolean;
   showCollisionObstacles?: boolean;
   /** Pre-resolved physical/class collision inventory supplied by the async tools. */
@@ -51,6 +58,8 @@ export interface MapPreviewStats {
     minimapBounds: number;
     solids: number;
     slopedSolids: number;
+    navSurfaces: number;
+    slopedNavSurfaces: number;
     volumes: number;
     slopedVolumes: number;
     blockingVolumes: number;
@@ -64,6 +73,7 @@ export interface RenderedMapPreview {
   png: Buffer;
   stats: MapPreviewStats;
   reachability: MapReachabilityReport;
+  navSurfaceClearance: MapNavSurfaceClearance[];
 }
 
 type Color = [number, number, number];
@@ -85,6 +95,7 @@ function drawPreview(
   options: MapPreviewOptions,
   volumes: readonly ParsedMapVolume[] = [],
   solids: readonly ParsedMapSolid[] = [],
+  navSurfaces: readonly ParsedMapNavSurface[] = [],
 ): RenderedMapPreview {
   const scale = Math.max(2, Math.min(16, Math.floor(options.scale ?? 8)));
   const width = grid.width * scale;
@@ -94,6 +105,7 @@ function drawPreview(
     blockingVolumes: [...volumes, ...solids],
     collisionObstacles: options.collisionObstacles,
   });
+  const navSurfaceClearance = analyzeMapNavSurfaceClearance(grid, navSurfaces, reachability.agentHeight);
   const reachableComponents = new Set(reachability.spawnComponents.length
     ? reachability.spawnComponents
     : reachability.primaryComponent === undefined ? [] : [reachability.primaryComponent]);
@@ -269,6 +281,34 @@ function drawPreview(
     }
   }
 
+  if (options.showNavSurfaces !== false) {
+    for (const surface of navSurfaces) {
+      const radians = (surface.yaw * Math.PI) / 180;
+      const pixels = surface.footprint.map(([localX, localY]) => worldPixel([
+        surface.center[0] + localX * Math.cos(radians) - localY * Math.sin(radians),
+        surface.center[1] + localX * Math.sin(radians) + localY * Math.cos(radians),
+        surface.center[2],
+      ]));
+      for (let index = 0; index < pixels.length; index++) {
+        const from = pixels[index];
+        const to = pixels[(index + 1) % pixels.length];
+        line(from[0], from[1], to[0], to[1], [72, 255, 175], 0.98, 2);
+      }
+      if (surface.sloped) {
+        const low = surface.sloped.top.indexOf(Math.min(...surface.sloped.top));
+        const high = surface.sloped.top.indexOf(Math.max(...surface.sloped.top));
+        if (low !== high) {
+          const from = pixels[low];
+          const to = pixels[high];
+          line(from[0], from[1], to[0], to[1], [220, 255, 235], 0.95, 1);
+          const angle = Math.atan2(to[1] - from[1], to[0] - from[0]);
+          line(to[0], to[1], to[0] - Math.cos(angle - 0.55) * 4, to[1] - Math.sin(angle - 0.55) * 4, [220, 255, 235]);
+          line(to[0], to[1], to[0] - Math.cos(angle + 0.55) * 4, to[1] - Math.sin(angle + 0.55) * 4, [220, 255, 235]);
+        }
+      }
+    }
+  }
+
   if (options.showCollisionObstacles !== false) {
     for (const obstacle of reachability.collisionObstacles) {
       const [x, y] = worldPixel(obstacle.origin);
@@ -433,6 +473,8 @@ function drawPreview(
       minimapBounds,
       solids: solids.length,
       slopedSolids: solids.filter((solid) => !!solid.sloped).length,
+      navSurfaces: navSurfaces.length,
+      slopedNavSurfaces: navSurfaces.filter((surface) => !!surface.sloped).length,
       volumes: volumes.length,
       slopedVolumes: volumes.filter((volume) => !!volume.sloped).length,
       blockingVolumes: volumes.filter((volume) => volume.blocking).length + solids.length,
@@ -452,11 +494,12 @@ function drawPreview(
       currents: "cyan arrows",
       minimapBounds: "magenta rectangle",
       volumes: "sand world solids; orange camp, purple no-ward, cyan trigger, pink player blocker outlines; pale arrows point uphill on sloped volumes",
+      navSurfaces: "bright green Valve navigation-walkable deck outlines; pale arrows point uphill",
       visionBlockers: "purple linked lines",
       collisionObstacles: "bright cyan exact PHYS hulls; medium cyan mesh envelopes; green-cyan conservative curved primitives; muted cyan PHYS bounds; dark green/orange class approximations; white X means model bounds unknown",
     },
   };
-  return { png: encodeRgbaPng(width, height, rgba), stats, reachability };
+  return { png: encodeRgbaPng(width, height, rgba), stats, reachability, navSurfaceClearance };
 }
 
 export function renderMapPreview(text: string, options: MapPreviewOptions = {}): RenderedMapPreview {
@@ -466,6 +509,7 @@ export function renderMapPreview(text: string, options: MapPreviewOptions = {}):
     options,
     parseMapVolumes(text),
     parseMapSolids(text),
+    parseMapNavSurfaces(text),
   );
 }
 
@@ -475,6 +519,7 @@ export function renderTileGridPreview(
   options: MapPreviewOptions = {},
   volumes: readonly ParsedMapVolume[] = [],
   solids: readonly ParsedMapSolid[] = [],
+  navSurfaces: readonly ParsedMapNavSurface[] = [],
 ): RenderedMapPreview {
-  return drawPreview(grid, entities, options, volumes, solids);
+  return drawPreview(grid, entities, options, volumes, solids, navSurfaces);
 }

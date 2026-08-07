@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ManagedMapEntity } from "./map-contract.js";
 import { ManagedMapSolid } from "./map-solid.js";
+import { ManagedMapNavSurface } from "./map-nav-surface.js";
 import { ManagedTerrainOperation } from "./map-terrain.js";
 import { ManagedMapVolume, regularPolygonFootprint } from "./map-volume.js";
 
@@ -210,6 +211,18 @@ const archComponentSchema = z.object({
   }
 });
 
+const bridgeComponentSchema = z.object({
+  kind: z.literal("bridge"),
+  name: nameSchema,
+  /** World-space center of the physical deck prism. Local X runs along the bridge. */
+  center: point3,
+  yaw: yawSchema,
+  length: z.number().finite().min(2).max(32768),
+  width: z.number().finite().min(2).max(32768),
+  thickness: z.number().finite().min(1).max(4096),
+  material: visibleMaterialSchema,
+}).strict();
+
 const bossPitComponentSchema = z.object({
   kind: z.literal("bossPit"),
   name: nameSchema,
@@ -302,6 +315,7 @@ export const dotaComponentInputSchema = z.union([
   fowBlockerComponentSchema,
   wallComponentSchema,
   archComponentSchema,
+  bridgeComponentSchema,
   bossPitComponentSchema,
   baseComponentSchema,
 ]);
@@ -314,6 +328,7 @@ export interface ExpandedDotaComponents {
   managedEntities: ManagedMapEntity[];
   managedTerrain: ManagedTerrainOperation[];
   managedSolids: ManagedMapSolid[];
+  managedNavSurfaces: ManagedMapNavSurface[];
   managedVolumes: ManagedMapVolume[];
 }
 
@@ -335,6 +350,11 @@ export const WORLD_STRUCTURE_RECIPES = {
     parts: ["left_post", "right_post", "lintel"],
     purpose: "Rectangular wall opening assembled from three checked always-solid func_brush extrusions.",
     source: "MCP composition of the Valve-compiler-proven managedSolids recipe",
+  },
+  bridge: {
+    parts: ["deck", "walkable"],
+    purpose: "Graybox bridge deck paired with Valve's dedicated invisible Dota navigation-walkable mesh.",
+    source: "Installed dota_custom_default_000 and mine_bridge Valve prefabs",
   },
 } as const;
 
@@ -605,6 +625,34 @@ function archSolids(component: z.infer<typeof archComponentSchema>): ManagedMapS
   ];
 }
 
+function bridgeParts(component: z.infer<typeof bridgeComponentSchema>): {
+  solid: ManagedMapSolid;
+  navSurface: ManagedMapNavSurface;
+} {
+  const points: [number, number][] = [
+    [-component.length / 2, -component.width / 2],
+    [component.length / 2, -component.width / 2],
+    [component.length / 2, component.width / 2],
+    [-component.length / 2, component.width / 2],
+  ];
+  const extrusion = { points, height: component.thickness };
+  return {
+    solid: {
+      targetname: `${component.name}_deck`,
+      center: component.center,
+      yaw: component.yaw,
+      material: component.material,
+      extrusion,
+    },
+    navSurface: {
+      targetname: `${component.name}_walkable`,
+      center: component.center,
+      yaw: component.yaw,
+      extrusion,
+    },
+  };
+}
+
 function pitOperations(component: z.infer<typeof bossPitComponentSchema>): ExpandedDotaComponents {
   const [cx, cy] = component.tileCenter;
   const rimWidth = component.rimWidth ?? 1.5;
@@ -690,7 +738,7 @@ function pitOperations(component: z.infer<typeof bossPitComponentSchema>): Expan
       },
     });
   }
-  return { managedEntities, managedTerrain, managedSolids: [], managedVolumes };
+  return { managedEntities, managedTerrain, managedSolids: [], managedNavSurfaces: [], managedVolumes };
 }
 
 function rotateOffset(offset: Point3, yaw: number): Point3 {
@@ -785,6 +833,7 @@ export function expandDotaComponents(components: DotaComponentInput[]): Expanded
   const managedEntities: ManagedMapEntity[] = [];
   const managedTerrain: ManagedTerrainOperation[] = [];
   const managedSolids: ManagedMapSolid[] = [];
+  const managedNavSurfaces: ManagedMapNavSurface[] = [];
   const managedVolumes: ManagedMapVolume[] = [];
   for (const component of components) {
     switch (component.kind) {
@@ -822,6 +871,12 @@ export function expandDotaComponents(components: DotaComponentInput[]): Expanded
       case "arch":
         managedSolids.push(...archSolids(component));
         break;
+      case "bridge": {
+        const bridge = bridgeParts(component);
+        managedSolids.push(bridge.solid);
+        managedNavSurfaces.push(bridge.navSurface);
+        break;
+      }
       case "bossPit": {
         const pit = pitOperations(component);
         managedEntities.push(...pit.managedEntities);
@@ -834,5 +889,5 @@ export function expandDotaComponents(components: DotaComponentInput[]): Expanded
         break;
     }
   }
-  return { managedEntities, managedTerrain, managedSolids, managedVolumes };
+  return { managedEntities, managedTerrain, managedSolids, managedNavSurfaces, managedVolumes };
 }

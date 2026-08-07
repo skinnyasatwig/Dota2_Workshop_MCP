@@ -41,6 +41,9 @@ test(
       assert.match(roundTripped, /fixture_concave_solid/);
       assert.match(roundTripped, /fixture_sloped_concave_solid/);
       assert.match(roundTripped, /fixture_arch_lintel/);
+      assert.match(roundTripped, /fixture_bridge_deck/);
+      assert.match(roundTripped, /MCP Nav Surface: fixture_bridge_walkable/);
+      assert.match(roundTripped, /materials\/editor\/dota_nav_walkable\.vmat/);
       const [dotaPak, corePak] = await Promise.all([
         Vpk.open(join(dotaRoot, "game", "dota", "pak01_dir.vpk")),
         Vpk.open(join(dotaRoot, "game", "core", "pak01_dir.vpk")),

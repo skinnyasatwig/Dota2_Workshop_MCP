@@ -28,6 +28,7 @@ import { analyzeMapReachability } from "../dota/map-reachability.js";
 import { resolveMapCollisionObstacles } from "../dota/map-collision.js";
 import { reconcileMapVolumes } from "../dota/map-volume.js";
 import { reconcileMapSolids } from "../dota/map-solid.js";
+import { reconcileMapNavSurfaces } from "../dota/map-nav-surface.js";
 import { inspectProjectMapMaterials, MapMaterialReport } from "../dota/map-material.js";
 import { inspectMapOverview, MapOverviewReport } from "../dota/map-overview.js";
 import {
@@ -1558,7 +1559,7 @@ export function registerMapTools(server: McpServer) {
       title: "Synchronize a map with its managed contract",
       description:
         "Preview or apply desired managedEntities, managedAbsentEntities, compact managedPaths, managedTerrain, and " +
-        "checked managedSolids/managedVolumes " +
+        "checked managedSolids/managedNavSurfaces/managedVolumes " +
         "operations from " +
         ".dota-workshop/map-contract.json. Reusable regions/components/placements are expanded before reconciliation. " +
         "Paths expand into complete linked waypoint chains. Missing named entities " +
@@ -1589,13 +1590,14 @@ export function registerMapTools(server: McpServer) {
       const absentEntities = resolved.contract.managedAbsentEntities ?? [];
       const terrainOperations = resolved.contract.managedTerrain ?? [];
       const solidSpecifications = resolved.contract.managedSolids ?? [];
+      const navSurfaceSpecifications = resolved.contract.managedNavSurfaces ?? [];
       const volumeSpecifications = resolved.contract.managedVolumes ?? [];
       if (
         !specs.length && !absentEntities.length && !terrainOperations.length &&
-        !solidSpecifications.length && !volumeSpecifications.length
+        !solidSpecifications.length && !navSurfaceSpecifications.length && !volumeSpecifications.length
       ) {
         return error(
-          `Contract has no managedEntities, managedAbsentEntities, managedPaths, managedTerrain, managedSolids, or managedVolumes to synchronize: ${resolved.path}`,
+          `Contract has no managedEntities, managedAbsentEntities, managedPaths, managedTerrain, managedSolids, managedNavSurfaces, or managedVolumes to synchronize: ${resolved.path}`,
         );
       }
 
@@ -1632,11 +1634,13 @@ export function registerMapTools(server: McpServer) {
 
       const terrain = synchronization.terrain;
       const solids = synchronization.solids;
+      const navSurfaces = synchronization.navSurfaces;
       const volumes = synchronization.volumes;
       const changedEntities = result.added.length + result.updated.length + result.removed.length;
       const changedSolids = solids.added.length + solids.updated.length;
+      const changedNavSurfaces = navSurfaces.added.length + navSurfaces.updated.length;
       const changedVolumes = volumes.added.length + volumes.updated.length;
-      const changed = changedEntities + changedSolids + changedVolumes + (terrain.changed ? 1 : 0);
+      const changed = changedEntities + changedSolids + changedNavSurfaces + changedVolumes + (terrain.changed ? 1 : 0);
       const transaction = apply && (changed > 0 || recompile)
         ? await runMapTransaction({
             projectRoot: project.root,
@@ -1677,10 +1681,12 @@ export function registerMapTools(server: McpServer) {
       const steps = [
         `${apply ? "Synchronized" : "Previewed"} ${specs.length} desired entities and ` +
           `${absentEntities.length} absence selectors plus ${solidSpecifications.length} world solids and ` +
+          `${navSurfaceSpecifications.length} navigation surfaces and ` +
           `${volumeSpecifications.length} gameplay volumes in "${map}".`,
         `Add ${result.added.length}, update ${result.updated.length}, remove ${result.removed.length}, ` +
           `unchanged ${result.unchanged.length}.`,
         `Solids: add ${solids.added.length}, update ${solids.updated.length}, unchanged ${solids.unchanged.length}.`,
+        `Navigation surfaces: add ${navSurfaces.added.length}, update ${navSurfaces.updated.length}, unchanged ${navSurfaces.unchanged.length}.`,
         `Volumes: add ${volumes.added.length}, update ${volumes.updated.length}, unchanged ${volumes.unchanged.length}.`,
         `Terrain: ${terrainOperations.length} operations; change ${terrain.changedHeightVertices} height vertices, ` +
           `${terrain.changedWaterVertices} water vertices, ${terrain.changedTilesetCells} tileset cells, and ` +
@@ -1708,6 +1714,7 @@ export function registerMapTools(server: McpServer) {
           changed,
           changedEntities,
           changedSolids,
+          changedNavSurfaces,
           changedVolumes,
           added: result.added,
           updated: result.updated,
@@ -1718,6 +1725,12 @@ export function registerMapTools(server: McpServer) {
             added: solids.added,
             updated: solids.updated,
             unchanged: solids.unchanged,
+          },
+          navSurfaces: {
+            requested: navSurfaceSpecifications.length,
+            added: navSurfaces.added,
+            updated: navSurfaces.updated,
+            unchanged: navSurfaces.unchanged,
           },
           volumes: {
             requested: volumeSpecifications.length,
@@ -1922,7 +1935,7 @@ export function registerMapTools(server: McpServer) {
         "targetname/classname pairs used by game scripts. It also checks minimap boundary entities, overview metadata, " +
         "all VMAP material references across addon/base loose assets and VPKs, overview source/compiled material and " +
         "texture assets, image dimensions, and the world-to-minimap transform. When a project contract declares managedTerrain or " +
-        "managedSolids or managedVolumes, validation also reports tile-grid, checked-solid, or checked-volume drift without writing it. Whole-map " +
+        "managedSolids, managedNavSurfaces, or managedVolumes, validation also reports tile-grid, checked-solid, navigation-surface, or checked-volume drift without writing it. Whole-map " +
         "offline reachability checks detect terrain holes, " +
         "trapped spawns, blocked entrances/path segments, and inaccessible objectives or camps. Known entity keyvalues " +
         "are checked against the installed official Valve FGD definitions.",
@@ -2037,6 +2050,13 @@ export function registerMapTools(server: McpServer) {
           }
         | undefined;
       let solidDrift:
+        | {
+            missing: string[];
+            changed: string[];
+            unchanged: string[];
+          }
+        | undefined;
+      let navSurfaceDrift:
         | {
             missing: string[];
             changed: string[];
@@ -2193,6 +2213,24 @@ export function registerMapTools(server: McpServer) {
               message:
                 `Managed solid drift: ${solidResult.added.length} missing and ` +
                 `${solidResult.updated.length} changed checked solid(s).`,
+            });
+          }
+        }
+        const managedNavSurfaces = resolvedContract?.contract.managedNavSurfaces ?? [];
+        if (managedNavSurfaces.length) {
+          const navSurfaceResult = reconcileMapNavSurfaces(mapText, managedNavSurfaces);
+          if (navSurfaceResult.added.length || navSurfaceResult.updated.length) {
+            navSurfaceDrift = {
+              missing: navSurfaceResult.added,
+              changed: navSurfaceResult.updated,
+              unchanged: navSurfaceResult.unchanged,
+            };
+            findings.push({
+              severity: "error",
+              code: "managed-navigation-surface-drift",
+              message:
+                `Managed navigation surface drift: ${navSurfaceResult.added.length} missing and ` +
+                `${navSurfaceResult.updated.length} changed checked surface(s).`,
             });
           }
         }
@@ -2374,6 +2412,7 @@ export function registerMapTools(server: McpServer) {
           overview: overviewReport ?? null,
           terrainDrift: terrainDrift ?? null,
           solidDrift: solidDrift ?? null,
+          navSurfaceDrift: navSurfaceDrift ?? null,
           volumeDrift: volumeDrift ?? null,
           reachability: reachabilitySummary ?? null,
           findings,
