@@ -181,6 +181,56 @@ test("closed segmented walls add a final blocker and reject degenerate or sloped
   );
 });
 
+test("checked arches expand into two posts and one elevated lintel", () => {
+  const [arch] = componentList.parse([{
+    kind: "arch",
+    name: "radiant_gate_arch",
+    origin: [100, 200, 128],
+    yaw: 90,
+    width: 1024,
+    depth: 256,
+    height: 768,
+    openingWidth: 512,
+    openingHeight: 512,
+    material: "materials/dev/reflectivity_30.vmat",
+  }]);
+  const solids = expandDotaComponents([arch]).managedSolids;
+
+  assert.deepEqual(solids.map((solid) => solid.targetname), [
+    "radiant_gate_arch_left_post",
+    "radiant_gate_arch_right_post",
+    "radiant_gate_arch_lintel",
+  ]);
+  assert.deepEqual(solids.map((solid) => solid.center), [
+    [100, -184, 384],
+    [100, 584, 384],
+    [100, 200, 768],
+  ]);
+  assert.deepEqual(solids.map((solid) => solid.extrusion), [
+    { points: [[-128, -128], [128, -128], [128, 128], [-128, 128]], height: 512 },
+    { points: [[-128, -128], [128, -128], [128, 128], [-128, 128]], height: 512 },
+    { points: [[-512, -128], [512, -128], [512, 128], [-512, 128]], height: 256 },
+  ]);
+  assert.ok(solids.every((solid) => solid.yaw === 90));
+
+  assert.throws(
+    () => componentList.parse([{ ...arch, openingWidth: 1024 }]),
+    /openingWidth must be smaller/,
+  );
+  assert.throws(
+    () => componentList.parse([{ ...arch, openingHeight: 768 }]),
+    /openingHeight must be smaller/,
+  );
+  assert.throws(
+    () => componentList.parse([{ ...arch, openingWidth: 1023.5 }]),
+    /at least one world unit for each post/,
+  );
+  assert.throws(
+    () => componentList.parse([{ ...arch, openingHeight: 767.5 }]),
+    /at least one world unit for the lintel/,
+  );
+});
+
 test("boss pit components create structured terrain, entrances, and an official spawn", () => {
   const [pit] = componentList.parse([
     {
@@ -262,4 +312,5 @@ test("the documented Dota component assembly remains valid", async () => {
   assert.equal(specification.managedEntities?.filter((entity) => entity.classname === "npc_dota_fort").length, 2);
   assert.equal(specification.managedEntities?.filter((entity) => entity.classname === "npc_dota_tower").length, 5);
   assert.equal(specification.managedTerrain?.filter((operation) => operation.op === "ramp").length, 3);
+  assert.equal(specification.managedSolids?.length, 3);
 });

@@ -143,11 +143,17 @@ Last updated: 2026-08-07
     ResourceCompiler, and `map_validate` can require compiled readiness. The real 3v3 VMAP resolves all 10 references
     (2 unique materials) with no findings; the repository compiler fixture proves its generated materials against the
     installed Valve packages before producing its VPK.
+36. This milestone - added a checked rectangular `arch` structure recipe. One compact component expands into two
+    rectangular posts and an elevated lintel using the existing watertight world-solid writer, with validated dimensions,
+    yaw, deterministic names, and a visible material covered by whole-map preflight. Offline reachability now intersects
+    solid vertical ranges with a conservative 256-unit standing corridor: posts block their true footprints while a high
+    lintel leaves the opening reachable. The repository fixture includes the complete arch for Valve conversion and
+    compiler proof; true holes, curved arches, and arbitrary meshes remain deliberately unsupported.
 
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 272 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 275 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 200 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
@@ -156,7 +162,7 @@ Last updated: 2026-08-07
 - Valve's installed `dmxconvert.exe` successfully round-trips generated camp, polygonal no-ward, player-clip, and
   sloped trigger volumes from text to binary VMAP and back during the integration suite, preserving exact corner heights.
 - `npm run test:compiler-fixture` successfully round-tripped and compiled the repository-owned acceptance payload,
-  including its sloped trigger, flat and sloped concave L-shaped world solids, and explicit navigation obstruction, into a real VPK. The generated map uses Valve's installed blank template only as required hidden
+  including its sloped trigger, flat and sloped concave L-shaped world solids, checked rectangular arch, and explicit navigation obstruction, into a real VPK. The generated map uses Valve's installed blank template only as required hidden
   infrastructure, depends on no private 3v3 file, stores no copied Valve VMAP, and leaves no temporary addon trees.
 - Installed ValveResourceFormat 19.2 recovered the physical hull bounds of
   `models/props_gameplay/cap_point001.vmdl_c` directly from `pak01_dir.vpk`; a second lookup reused the fingerprinted

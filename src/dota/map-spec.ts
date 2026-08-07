@@ -614,6 +614,7 @@ export function parseMapSpecification(value: unknown, path = "inline map specifi
       ],
       managedSolids: [
         ...(parsed.managedSolids ?? []),
+        ...dotaComponents.managedSolids,
         ...expandedComponents.flatMap((component) => component.managedSolids ?? []),
       ],
       managedVolumes: [

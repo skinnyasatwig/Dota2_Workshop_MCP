@@ -23,6 +23,9 @@ test("repository compile fixture is self-contained and structurally inspectable"
   assert.deepEqual(
     fixture.entities.map((entity) => entity.targetname).sort(),
     [
+      "fixture_arch_left_post",
+      "fixture_arch_lintel",
+      "fixture_arch_right_post",
       "fixture_base_blocker",
       "fixture_concave_solid",
       "fixture_dire_start",
@@ -35,7 +38,7 @@ test("repository compile fixture is self-contained and structurally inspectable"
       "fixture_sloped_trigger",
     ],
   );
-  assert.equal(fixture.solids.length, 2);
+  assert.equal(fixture.solids.length, 5);
   const concave = fixture.solids.find((solid) => solid.targetname === "fixture_concave_solid");
   assert.equal(concave?.footprint.length, 6);
   assert.equal(concave?.height, 256);
@@ -46,6 +49,9 @@ test("repository compile fixture is self-contained and structurally inspectable"
     bottom: [-192, -64, -64, -128, -256, -256],
     top: [64, 192, 192, 128, 0, 0],
   });
+  const lintel = fixture.solids.find((solid) => solid.targetname === "fixture_arch_lintel");
+  assert.deepEqual(lintel?.center.map((value) => Number(value.toFixed(6))), [-2048, 1024, 768]);
+  assert.equal(lintel?.height, 256);
   assert.equal(fixture.volumes.length, 2);
   const round = fixture.volumes.find((volume) => volume.targetname === "fixture_polygon_no_wards");
   assert.equal(round?.footprint.length, 12);

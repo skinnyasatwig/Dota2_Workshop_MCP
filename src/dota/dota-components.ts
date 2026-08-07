@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ManagedMapEntity } from "./map-contract.js";
+import { ManagedMapSolid } from "./map-solid.js";
 import { ManagedTerrainOperation } from "./map-terrain.js";
 import { ManagedMapVolume, regularPolygonFootprint } from "./map-volume.js";
 
@@ -15,6 +16,11 @@ const nameSchema = z.string().regex(/^[A-Za-z_][A-Za-z0-9_.-]*$/);
 const yawSchema = z.number().finite().optional();
 const laneSchema = z.enum(["top", "mid", "bot"]);
 const tierSchema = z.number().int().min(1).max(4);
+const visibleMaterialSchema = z.string()
+  .regex(/^materials\/[A-Za-z0-9_./-]+\.vmat$/i)
+  .refine((value) => !value.split("/").includes(".."), "must not contain parent-directory segments")
+  .refine((value) => !value.toLowerCase().startsWith("materials/tools/"),
+    "must be a visible world material");
 
 const ancientComponentSchema = z.object({
   kind: z.literal("ancient"),
@@ -161,6 +167,49 @@ const wallComponentSchema = z.object({
   }
 });
 
+const archComponentSchema = z.object({
+  kind: z.literal("arch"),
+  name: nameSchema,
+  /** World-space center of the arch at its base elevation. */
+  origin: point3,
+  yaw: yawSchema,
+  width: z.number().finite().min(1).max(32768),
+  depth: z.number().finite().min(1).max(32768),
+  height: z.number().finite().min(1).max(32768),
+  openingWidth: z.number().finite().min(1).max(32768),
+  openingHeight: z.number().finite().min(1).max(32768),
+  material: visibleMaterialSchema,
+}).strict().superRefine((arch, context) => {
+  if (arch.openingWidth >= arch.width) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["openingWidth"],
+      message: "openingWidth must be smaller than the outer width",
+    });
+  }
+  if (arch.openingHeight >= arch.height) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["openingHeight"],
+      message: "openingHeight must be smaller than the outer height",
+    });
+  }
+  if (arch.openingWidth < arch.width && arch.width - arch.openingWidth < 2) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["openingWidth"],
+      message: "openingWidth must leave at least one world unit for each post",
+    });
+  }
+  if (arch.openingHeight < arch.height && arch.height - arch.openingHeight < 1) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["openingHeight"],
+      message: "openingHeight must leave at least one world unit for the lintel",
+    });
+  }
+});
+
 const bossPitComponentSchema = z.object({
   kind: z.literal("bossPit"),
   name: nameSchema,
@@ -252,6 +301,7 @@ export const dotaComponentInputSchema = z.union([
   baseBlockerComponentSchema,
   fowBlockerComponentSchema,
   wallComponentSchema,
+  archComponentSchema,
   bossPitComponentSchema,
   baseComponentSchema,
 ]);
@@ -263,6 +313,7 @@ type Point3 = [number, number, number];
 export interface ExpandedDotaComponents {
   managedEntities: ManagedMapEntity[];
   managedTerrain: ManagedTerrainOperation[];
+  managedSolids: ManagedMapSolid[];
   managedVolumes: ManagedMapVolume[];
 }
 
@@ -276,6 +327,14 @@ export const POINT_BLOCKER_RECIPES = {
     classname: "ent_fow_blocker_node",
     purpose: "Fog-of-war blocker line linked to another named node through TargetNode.",
     source: "Valve dota.fgd plus shipping dota_pvp_prefab.vmap node groups",
+  },
+} as const;
+
+export const WORLD_STRUCTURE_RECIPES = {
+  arch: {
+    parts: ["left_post", "right_post", "lintel"],
+    purpose: "Rectangular wall opening assembled from three checked always-solid func_brush extrusions.",
+    source: "MCP composition of the Valve-compiler-proven managedSolids recipe",
   },
 } as const;
 
@@ -507,6 +566,45 @@ function wallVolumes(component: z.infer<typeof wallComponentSchema>): ManagedMap
   });
 }
 
+function archSolids(component: z.infer<typeof archComponentSchema>): ManagedMapSolid[] {
+  const postWidth = (component.width - component.openingWidth) / 2;
+  const lintelHeight = component.height - component.openingHeight;
+  const yaw = component.yaw ?? 0;
+  const at = (localX: number, localZ: number): Point3 =>
+    addPoint(component.origin, rotateOffset([localX, 0, localZ], yaw))
+      .map((value) => Number(formatted(value))) as Point3;
+  const rectangle = (width: number): [number, number][] => [
+    [-width / 2, -component.depth / 2],
+    [width / 2, -component.depth / 2],
+    [width / 2, component.depth / 2],
+    [-width / 2, component.depth / 2],
+  ];
+  const postOffset = component.openingWidth / 2 + postWidth / 2;
+  return [
+    {
+      targetname: `${component.name}_left_post`,
+      center: at(-postOffset, component.openingHeight / 2),
+      yaw,
+      material: component.material,
+      extrusion: { points: rectangle(postWidth), height: component.openingHeight },
+    },
+    {
+      targetname: `${component.name}_right_post`,
+      center: at(postOffset, component.openingHeight / 2),
+      yaw,
+      material: component.material,
+      extrusion: { points: rectangle(postWidth), height: component.openingHeight },
+    },
+    {
+      targetname: `${component.name}_lintel`,
+      center: at(0, component.openingHeight + lintelHeight / 2),
+      yaw,
+      material: component.material,
+      extrusion: { points: rectangle(component.width), height: lintelHeight },
+    },
+  ];
+}
+
 function pitOperations(component: z.infer<typeof bossPitComponentSchema>): ExpandedDotaComponents {
   const [cx, cy] = component.tileCenter;
   const rimWidth = component.rimWidth ?? 1.5;
@@ -592,7 +690,7 @@ function pitOperations(component: z.infer<typeof bossPitComponentSchema>): Expan
       },
     });
   }
-  return { managedEntities, managedTerrain, managedVolumes };
+  return { managedEntities, managedTerrain, managedSolids: [], managedVolumes };
 }
 
 function rotateOffset(offset: Point3, yaw: number): Point3 {
@@ -686,6 +784,7 @@ function expandBase(component: z.infer<typeof baseComponentSchema>): ManagedMapE
 export function expandDotaComponents(components: DotaComponentInput[]): ExpandedDotaComponents {
   const managedEntities: ManagedMapEntity[] = [];
   const managedTerrain: ManagedTerrainOperation[] = [];
+  const managedSolids: ManagedMapSolid[] = [];
   const managedVolumes: ManagedMapVolume[] = [];
   for (const component of components) {
     switch (component.kind) {
@@ -720,6 +819,9 @@ export function expandDotaComponents(components: DotaComponentInput[]): Expanded
       case "wall":
         managedVolumes.push(...wallVolumes(component));
         break;
+      case "arch":
+        managedSolids.push(...archSolids(component));
+        break;
       case "bossPit": {
         const pit = pitOperations(component);
         managedEntities.push(...pit.managedEntities);
@@ -732,5 +834,5 @@ export function expandDotaComponents(components: DotaComponentInput[]): Expanded
         break;
     }
   }
-  return { managedEntities, managedTerrain, managedVolumes };
+  return { managedEntities, managedTerrain, managedSolids, managedVolumes };
 }

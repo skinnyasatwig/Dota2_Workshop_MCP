@@ -303,7 +303,7 @@ targets with `@local:name`; it becomes the correct namespaced target for each co
 `around` tile point, which makes map-center symmetry explicit instead of relying on duplicated coordinates.
 
 For common gameplay structure, `dotaComponents` provides strongly checked `base`, `ancient`, `tower`, `fountain`,
-`shop`, `camp`, `bossPit`, `playerStart`, `gate`, `baseBlocker`, and `fowBlocker` entries. It derives team numbers, official entity classes,
+`shop`, `camp`, `bossPit`, `playerStart`, `gate`, `baseBlocker`, `fowBlocker`, `wall`, and `arch` entries. It derives team numbers, official entity classes,
 stock unit/model names, tower tier names, shop/camp numeric values, base member transforms, and boss-pit terrain.
 See [`examples/dota-components.json`](examples/dota-components.json). A `camp` can include an optional checked
 rectangular `volume`, which creates the real `trigger_multiple` bounds referenced by its spawner. A boss pit's
@@ -315,6 +315,11 @@ explicitly linked `ent_fow_blocker_node` lines; broken links are reported by map
 The `wall` component turns an open or closed world-space outline into overlapping, checked convex `playerClip`
 segments. This supports practical curved and concave base silhouettes without relying on one fragile concave Source 2
 solid; decorative wall meshes and sloped wall runs remain separate visual work.
+The `arch` component is a checked rectangular opening assembled from two solid posts and one elevated lintel. Its
+origin is the center of the arch at ground level; width, depth, total height, opening width, opening height, yaw, and
+one preflighted visible material are explicit. Offline reachability uses a conservative 256-unit standing corridor,
+so the posts block their true footprints while a sufficiently high lintel leaves the doorway open. This is a safe
+reusable composition, not a general-purpose hole or arbitrary mesh API.
 
 ## Learn from other custom games
 
@@ -492,8 +497,8 @@ The MCP normalizes winding (while retaining height-to-corner pairing), triangula
 closes every side, and then proves every
 half-edge has exactly one opposite before writing the VMAP. Solids reconcile by targetname, mirror inside reusable
 components, appear in `map_preview` with an uphill arrow when sloped, and block their true concave footprint in offline
-reachability. The repository fixture round-trips flat and sloped L-shaped solids through Valve's converter and compiles
-them into a real VPK. The general map material preflight proves the selected visible material exists before a build,
+reachability when their vertical range intersects the standing corridor. The repository fixture round-trips flat and
+sloped L-shaped solids plus a checked three-piece arch through Valve's converter and compiles them into a real VPK. The general map material preflight proves the selected visible material exists before a build,
 sync, or compile is allowed to spend work on it.
 
 `managedVolumes` adds named convex gameplay solids in world coordinates. A volume chooses `size: [x,y,z]` for a box,
@@ -517,9 +522,10 @@ the real link operation refuses to overwrite conflicting folders.
 
 Then launch it: `addon_launch_custom_game map="<name>"`.
 
-> Limitation: the MCP can safely generate checked flat or per-corner-sloped extrusions with convex or concave outlines
-> plus flat/sloped convex gameplay volumes. Freeform 3D meshes, holes/arches, curves, terrain props, and decorative cliff
-> brushwork still require Hammer or a future checked mesh recipe.
+> Limitation: the MCP can safely generate checked flat or per-corner-sloped extrusions with convex or concave outlines,
+> flat/sloped convex gameplay volumes, and a rectangular arch assembled from three checked solids. Freeform 3D meshes,
+> true holes, curved or irregular arches, curves, terrain props, and decorative cliff brushwork still require Hammer or
+> a future checked recipe.
 
 ## Notes & limitations
 

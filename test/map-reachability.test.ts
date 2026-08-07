@@ -9,6 +9,7 @@ import { ParsedMapEntity } from "../src/dota/vmap.js";
 import { ParsedMapVolume } from "../src/dota/map-volume.js";
 import { ParsedMapSolid } from "../src/dota/map-solid.js";
 import { MapCollisionObstacle } from "../src/dota/map-collision.js";
+import { expandDotaComponents } from "../src/dota/dota-components.js";
 
 function flatGrid(width = 5, height = 3): TileGrid {
   return {
@@ -191,6 +192,61 @@ test("offline reachability follows a concave solid instead of its bounding box",
 
   assert.equal(report.cells.filter((cell) => cell.blockingVolume === blocker.targetname).length, 5);
   assert.equal(report.cells.find((cell) => cell.x === 3 && cell.y === 2)?.blockingVolume, undefined);
+});
+
+test("elevated solid lintels leave offline standing clearance open", () => {
+  const lintel: ParsedMapSolid = {
+    targetname: "arch_lintel",
+    center: [640, 384, 640],
+    yaw: 0,
+    material: "materials/dev/reflectivity_30.vmat",
+    footprint: [[-384, -128], [384, -128], [384, 128], [-384, 128]],
+    height: 256,
+    blocking: true,
+  };
+  const open = analyzeTileGridReachability(flatGrid(), [], { blockingVolumes: [lintel] });
+  assert.equal(open.agentHeight, 256);
+  assert.equal(open.volumeBlockedCellCount, 0);
+
+  const lowLintel = { ...lintel, center: [640, 384, 384] as [number, number, number] };
+  const blocked = analyzeTileGridReachability(flatGrid(), [], { blockingVolumes: [lowLintel] });
+  assert.equal(blocked.volumeBlockedCellCount, 3);
+});
+
+test("the checked arch recipe blocks its posts but leaves its opening reachable", () => {
+  const expanded = expandDotaComponents([{
+    kind: "arch",
+    name: "test_arch",
+    origin: [896, 640, 128],
+    width: 1280,
+    depth: 256,
+    height: 768,
+    openingWidth: 512,
+    openingHeight: 512,
+    material: "materials/dev/reflectivity_30.vmat",
+  }]);
+  const blockers: ParsedMapSolid[] = expanded.managedSolids.map((solid) => ({
+    targetname: solid.targetname,
+    center: solid.center,
+    yaw: solid.yaw ?? 0,
+    material: solid.material,
+    footprint: solid.extrusion.points,
+    height: solid.extrusion.height,
+    blocking: true,
+  }));
+  const report = analyzeTileGridReachability(
+    flatGrid(7, 5),
+    [
+      entity("radiant_spawn", "info_target", 896, 128),
+      entity("dragon_boss_spawn", "info_target", 896, 1152),
+    ],
+    { blockingVolumes: blockers },
+  );
+
+  assert.equal(report.cells.find((cell) => cell.x === 3 && cell.y === 2)?.blockingVolume, undefined);
+  assert.equal(report.cells.find((cell) => cell.x === 1 && cell.y === 2)?.blockingVolume, "test_arch_left_post");
+  assert.equal(report.cells.find((cell) => cell.x === 5 && cell.y === 2)?.blockingVolume, "test_arch_right_post");
+  assert.equal(report.findings.some((finding) => finding.code === "inaccessible-objective"), false);
 });
 
 test("creep routes warn when they cross explicit Valve obstruction classes", () => {

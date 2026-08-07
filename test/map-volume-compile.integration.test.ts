@@ -40,6 +40,7 @@ test(
       assert.match(roundTripped, /fixture_sloped_trigger/);
       assert.match(roundTripped, /fixture_concave_solid/);
       assert.match(roundTripped, /fixture_sloped_concave_solid/);
+      assert.match(roundTripped, /fixture_arch_lintel/);
       const [dotaPak, corePak] = await Promise.all([
         Vpk.open(join(dotaRoot, "game", "dota", "pak01_dir.vpk")),
         Vpk.open(join(dotaRoot, "game", "core", "pak01_dir.vpk")),

@@ -26,7 +26,7 @@ import { renderMapPreview } from "../dota/map-preview.js";
 import { resolveMapCollisionObstacles } from "../dota/map-collision.js";
 import { inspectProjectMapMaterials } from "../dota/map-material.js";
 import { MAP_VOLUME_RECIPES } from "../dota/map-volume.js";
-import { POINT_BLOCKER_RECIPES } from "../dota/dota-components.js";
+import { POINT_BLOCKER_RECIPES, WORLD_STRUCTURE_RECIPES } from "../dota/dota-components.js";
 import {
   CLIFF_RECIPE_SETS,
   CORE_TERRAIN_RECIPES,
@@ -325,7 +325,7 @@ export function registerMapGenTools(server: McpServer) {
         "present in the installed Workshop content.",
       inputSchema: {
         category: z
-          .enum(["base", "ancient", "tower", "fountain", "shop", "camp", "boss", "volume"])
+          .enum(["base", "ancient", "tower", "fountain", "shop", "camp", "boss", "volume", "structure"])
           .optional(),
         verifyInstalled: z.boolean().optional().describe("Check prefab paths under the installed Dota content tree."),
       },
@@ -354,6 +354,7 @@ export function registerMapGenTools(server: McpServer) {
           rampFallback: "Ramp cells use the matching core corner tile without decorative cliff layers.",
           volumeRecipes: !category || category === "volume" ? MAP_VOLUME_RECIPES : {},
           pointBlockerRecipes: !category || category === "base" ? POINT_BLOCKER_RECIPES : {},
+          worldStructureRecipes: !category || category === "structure" ? WORLD_STRUCTURE_RECIPES : {},
           prefabs,
           installVerified: verifyInstalled === true && Boolean(dota),
           recipeVerificationBaseline: RECIPE_VERIFICATION_BASELINE,
@@ -363,6 +364,7 @@ export function registerMapGenTools(server: McpServer) {
           `${CORE_TERRAIN_RECIPES.length} terrain cores, ${CLIFF_RECIPE_SETS.length} cliff sets, ` +
           `${prefabs.length} Valve prefab references, ` +
           `${!category || category === "volume" ? Object.keys(MAP_VOLUME_RECIPES).length : 0} checked volume recipes. ` +
+          `${!category || category === "structure" ? Object.keys(WORLD_STRUCTURE_RECIPES).length : 0} checked structure recipes. ` +
           `Baseline Dota build ${RECIPE_VERIFICATION_BASELINE.appBuildId}` +
           `${recipeVerification ? `; installed recipe status: ${recipeVerification.status}` : ""}.`,
       );

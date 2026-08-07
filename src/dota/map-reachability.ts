@@ -70,6 +70,8 @@ export interface MapReachabilityOptions {
   maxFlatStep?: number;
   maxRampStep?: number;
   minRegionCells?: number;
+  /** Conservative offline standing clearance above terrain (default 256 world units). */
+  agentHeight?: number;
   blockingVolumes?: readonly BlockingMapShape[];
   collisionObstacles?: readonly MapCollisionObstacle[];
 }
@@ -84,6 +86,7 @@ export interface MapReachabilityReport {
   height: number;
   tileSize: number;
   origin: [number, number, number];
+  agentHeight: number;
   walkableCellCount: number;
   blockedCellCount: number;
   volumeBlockedCellCount: number;
@@ -181,10 +184,41 @@ function volumeContainsWorldPoint(volume: BlockingMapShape, x: number, y: number
   return pointInPolygon([localX, localY], volume.footprint);
 }
 
+function blockingVerticalRange(volume: BlockingMapShape): [number, number] | undefined {
+  if (volume.sloped) {
+    return [
+      volume.center[2] + Math.min(...volume.sloped.bottom),
+      volume.center[2] + Math.max(...volume.sloped.top),
+    ];
+  }
+  if (volume.height !== undefined) {
+    return [volume.center[2] - volume.height / 2, volume.center[2] + volume.height / 2];
+  }
+  if (volume.size !== undefined) {
+    return [volume.center[2] - volume.size[2] / 2, volume.center[2] + volume.size[2] / 2];
+  }
+  return undefined;
+}
+
+function volumeBlocksStandingPoint(
+  volume: BlockingMapShape,
+  x: number,
+  y: number,
+  groundZ: number,
+  agentHeight: number,
+): boolean {
+  if (!volume.blocking || !volumeContainsWorldPoint(volume, x, y)) return false;
+  const range = blockingVerticalRange(volume);
+  if (!range) return true;
+  const [bottom, top] = range;
+  return top > groundZ + 1e-4 && bottom < groundZ + agentHeight - 1e-4;
+}
+
 function buildCells(
   grid: TileGrid,
   blockingVolumes: readonly BlockingMapShape[] = [],
   collisionObstacles: readonly MapCollisionObstacle[] = [],
+  agentHeight = 256,
 ): ReachabilityCell[] {
   const cells: ReachabilityCell[] = [];
   for (let y = 0; y < grid.height; y++) {
@@ -206,11 +240,11 @@ function buildCells(
       const cliff = !hole && maxHeight > minHeight && !ramp;
       const water = corners.filter((index) => grid.water[index]).length >= 2;
       const [worldX, worldY] = tileToWorld(grid, x + 0.5, y + 0.5);
-      const blockingVolume = blockingVolumes.find((volume) =>
-        volume.blocking && volumeContainsWorldPoint(volume, worldX, worldY));
       // Dota level-zero terrain is centered at z=128 and cliff levels are 256 units apart.
-      // Apply this only to bounds recovered from an actual model PHYS block.
       const worldZ = grid.origin[2] + 128 + height * 256;
+      const blockingVolume = blockingVolumes.find((volume) =>
+        volumeBlocksStandingPoint(volume, worldX, worldY, worldZ, agentHeight));
+      // Apply the terrain height only to bounds recovered from an actual model PHYS block.
       const collisionObstacle = collisionObstacles.find((obstacle) =>
         obstacle.confidence === "physical-model-bounds" &&
         physicalObstacleContainsPoint(obstacle, [worldX, worldY], worldZ));
@@ -290,10 +324,11 @@ export function analyzeTileGridReachability(
   const maxFlatStep = Math.max(0, options.maxFlatStep ?? 0.25);
   const maxRampStep = Math.max(maxFlatStep, options.maxRampStep ?? 0.75);
   const minRegionCells = Math.max(1, Math.floor(options.minRegionCells ?? 4));
+  const agentHeight = Math.max(1, options.agentHeight ?? 256);
   const collisionObstacles = [
     ...(options.collisionObstacles ?? collectMapCollisionObstacles(sourceEntities)),
   ];
-  const cells = buildCells(grid, options.blockingVolumes, collisionObstacles);
+  const cells = buildCells(grid, options.blockingVolumes, collisionObstacles, agentHeight);
   const componentCells: number[][] = [];
 
   for (let index = 0; index < cells.length; index++) {
@@ -527,6 +562,7 @@ export function analyzeTileGridReachability(
     height: grid.height,
     tileSize: grid.tileSize,
     origin: grid.origin,
+    agentHeight,
     walkableCellCount,
     blockedCellCount: cells.length - walkableCellCount,
     volumeBlockedCellCount: cells.filter((cell) => cell.blockingVolume !== undefined).length,

@@ -116,6 +116,18 @@
       "thickness": 192,
       "height": 768,
       "overlap": 48
+    },
+    {
+      "kind": "arch",
+      "name": "radiant_north_arch",
+      "origin": [-4352, 2304, 128],
+      "yaw": 45,
+      "width": 1024,
+      "depth": 256,
+      "height": 768,
+      "openingWidth": 512,
+      "openingHeight": 512,
+      "material": "materials/dev/reflectivity_30.vmat"
     }
   ]
 }
