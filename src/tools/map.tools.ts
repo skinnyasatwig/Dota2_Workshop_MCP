@@ -1172,14 +1172,14 @@ export function registerMapTools(server: McpServer) {
       if (!overview.entityBounds) {
         return error("The map has no usable dota_minimap_boundary world bounds; a visual minimap test would have no expected coordinates.");
       }
-      if (overview.metadata?.rotate !== undefined && overview.metadata.rotate !== 0) {
-        return error(`Visual minimap testing currently requires overview rotate=0; found ${overview.metadata.rotate}.`);
-      }
       const transformErrors = overview.findings.filter((finding) =>
         finding.severity === "error" && /minimap|overview/.test(finding.code),
       );
       if (transformErrors.length) {
         return error(`Offline minimap validation failed before launch:\n${transformErrors.map((finding) => `- ${finding.detail}`).join("\n")}`);
+      }
+      if (!overview.metadata || !overview.image) {
+        return error("The overview metadata or source PNG dimensions are unavailable; a visual minimap test cannot calculate expected coordinates.");
       }
 
       if (isDryRun) {
@@ -1188,6 +1188,10 @@ export function registerMapTools(server: McpServer) {
           dryRun: true,
           map,
           worldBounds: overview.entityBounds,
+          overviewRotation: {
+            raw: overview.metadata.rotate,
+            quarterTurnsClockwise: overview.displayQuarterTurnsClockwise,
+          },
           probes: chosenProbes,
           minimapRect: minimapRect ?? "discover from Panorama",
           tolerance: allowedError,
@@ -1311,7 +1315,7 @@ export function registerMapTools(server: McpServer) {
         for (const probe of chosenProbes) {
           await dismissKnownStalls();
           const pixel = minimapProbePixel(discoveredRect, probe);
-          const expected = minimapProbeWorld(overview.entityBounds, probe);
+          const expected = minimapProbeWorld(overview.metadata, overview.image, probe);
           const input = await runWin32Spec({
             focus: true,
             actions: [
@@ -1395,6 +1399,10 @@ export function registerMapTools(server: McpServer) {
         readiness,
         windowPreparation,
         worldBounds: overview.entityBounds,
+        overviewRotation: {
+          raw: overview.metadata.rotate,
+          quarterTurnsClockwise: overview.displayQuarterTurnsClockwise,
+        },
         minimapRect: discoveredRect,
         minimapPanel: baselineTelemetry?.telemetry.minimap,
         tolerance: allowedError,

@@ -259,8 +259,10 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
   launching, replacing, or closing that session.
 - **`map_engine_visual_test`** proves that a minimap works rather than merely validating its files. One guarded
   launch discovers the native minimap rectangle through an invisible Panorama bridge, clicks normalized west/center/
-  east/north/south points, compares the real camera position with the overview world bounds, attaches screenshots,
-  and shuts down. It is dry-run-first and refuses to replace a running Dota session without explicit permission.
+  east/north/south points, compares the real camera position with the overview transform, optionally attaches checked
+  screenshots, and shuts down. It is dry-run-first and refuses to replace a running Dota session without explicit
+  permission. Valve's legacy overview `rotate` key is handled exactly as its client source does: `0` is north-up and
+  any nonzero integer applies one clockwise quarter-turn; it is not a degree value.
 - **`map_recipe_catalog`** — inspect the named terrain cores, Radiant/Dire cliff recipes, ramp-safe
   fallbacks, checked solid-volume recipes, and official Valve prefab references used by the generator. `verifyInstalled:true` checks
   the references against the current Workshop Tools install without opening Hammer. It also compares Steam/Dota/tools
@@ -415,8 +417,9 @@ playable `.vpk` — a pipeline verified end to end.
   numeric bounds are enforced; a named destination that cannot be resolved is reported as a warning. Dynamic
   targets such as `!activator`, wildcard targets, and existing class-name destinations are not misreported. The same
   preflight verifies both `dota_minimap_boundary` corners, overview KeyValues, source and compiled material/texture
-  assets, PNG dimensions, and the `rotate=0` world-to-image transform. Nonzero image rotation is reported for human
-  verification instead of being guessed.
+  assets, PNG dimensions, and the exact world/image/display transform. Valve's legacy `rotate` field is validated as
+  an integer flag: `0` is north-up and any nonzero value is one clockwise 90-degree display turn. Rotated source
+  images must be square, matching Valve's client requirement.
 - **`map_engine_nav_test`** — optional engine preflight for facts the text pipeline cannot prove.
   Call it once with `dryRun:true` to review route/check counts, then with `dryRun:false` when Dota is
   closed, or attach to a normally launched Workshop Tools session. The tool runs correlated, console-safe chunks of

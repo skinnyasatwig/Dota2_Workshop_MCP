@@ -21,6 +21,21 @@ export interface MapOverviewBounds {
   maxY: number;
 }
 
+export interface MapOverviewImageSize {
+  width: number;
+  height: number;
+}
+
+export interface MapOverviewUv {
+  u: number;
+  v: number;
+}
+
+export interface MapOverviewWorldPoint {
+  x: number;
+  y: number;
+}
+
 export interface MapOverviewFinding {
   severity: "error" | "warn";
   code: string;
@@ -38,6 +53,7 @@ export interface MapOverviewReport {
   image?: { width: number; height: number };
   entityBounds?: MapOverviewBounds;
   projectedBounds?: MapOverviewBounds;
+  displayQuarterTurnsClockwise?: 0 | 1;
   findings: MapOverviewFinding[];
 }
 
@@ -59,14 +75,127 @@ export function parseMapOverviewMetadata(text: string): MapOverviewMetadata {
   const object = blockToObject(wrapper.value);
   const scale = finiteNumber(object.scale, "scale");
   if (!(scale > 0)) throw new Error('Overview key "scale" must be greater than zero.');
+  const rotate = object.rotate === undefined ? 0 : finiteNumber(object.rotate, "rotate");
+  if (!Number.isInteger(rotate)) {
+    throw new Error('Overview key "rotate" must be an integer. Valve treats it as a legacy 0/nonzero flag, not an angle.');
+  }
   return {
     name: wrapper.key,
     material: scalar(object.material, "material").replace(/\\/g, "/"),
     posX: finiteNumber(object.pos_x, "pos_x"),
     posY: finiteNumber(object.pos_y, "pos_y"),
     scale,
-    rotate: object.rotate === undefined ? 0 : finiteNumber(object.rotate, "rotate"),
+    rotate,
     zoom: object.zoom === undefined ? undefined : finiteNumber(object.zoom, "zoom"),
+  };
+}
+
+/**
+ * Valve's overview `rotate` key is a legacy boolean. The Source client reads it
+ * with GetInt() and applies one 90-degree map turn for every nonzero value.
+ * Some Valve Dota overviews even ship values such as 15, so do not interpret
+ * the raw number as degrees.
+ */
+export function mapOverviewDisplayQuarterTurns(metadata: Pick<MapOverviewMetadata, "rotate">): 0 | 1 {
+  if (!Number.isInteger(metadata.rotate)) {
+    throw new Error("Overview rotate must be an integer legacy flag.");
+  }
+  return metadata.rotate === 0 ? 0 : 1;
+}
+
+function validateTransformMetadata(
+  metadata: Pick<MapOverviewMetadata, "posX" | "posY" | "scale" | "rotate">,
+): void {
+  if (![metadata.posX, metadata.posY, metadata.scale].every(Number.isFinite) || !(metadata.scale > 0)) {
+    throw new Error("Overview pos_x, pos_y, and positive scale must be finite.");
+  }
+  mapOverviewDisplayQuarterTurns(metadata);
+}
+
+function validateImageSize(image: MapOverviewImageSize, rotated: boolean): void {
+  if (![image.width, image.height].every((value) => Number.isInteger(value) && value > 0)) {
+    throw new Error("Overview image dimensions must be positive integers.");
+  }
+  if (rotated && image.width !== image.height) {
+    throw new Error("Valve's rotated overview transform requires a square image.");
+  }
+}
+
+function validateUv(point: MapOverviewUv): void {
+  if (![point.u, point.v].every(Number.isFinite)) throw new Error("Overview u/v coordinates must be finite.");
+}
+
+/** Convert a displayed minimap coordinate to its source-image coordinate. */
+export function mapOverviewDisplayUvToImageUv(
+  metadata: Pick<MapOverviewMetadata, "rotate">,
+  point: MapOverviewUv,
+): MapOverviewUv {
+  validateUv(point);
+  return mapOverviewDisplayQuarterTurns(metadata) === 0
+    ? { u: point.u, v: point.v }
+    : { u: point.v, v: 1 - point.u };
+}
+
+/** Convert a source-image coordinate to its displayed minimap coordinate. */
+export function mapOverviewImageUvToDisplayUv(
+  metadata: Pick<MapOverviewMetadata, "rotate">,
+  point: MapOverviewUv,
+): MapOverviewUv {
+  validateUv(point);
+  return mapOverviewDisplayQuarterTurns(metadata) === 0
+    ? { u: point.u, v: point.v }
+    : { u: 1 - point.v, v: point.u };
+}
+
+/** Convert a normalized coordinate on the displayed minimap into Dota world X/Y. */
+export function mapOverviewDisplayUvToWorld(
+  metadata: Pick<MapOverviewMetadata, "posX" | "posY" | "scale" | "rotate">,
+  image: MapOverviewImageSize,
+  point: MapOverviewUv,
+): MapOverviewWorldPoint {
+  validateTransformMetadata(metadata);
+  const rotated = mapOverviewDisplayQuarterTurns(metadata) !== 0;
+  validateImageSize(image, rotated);
+  const imagePoint = mapOverviewDisplayUvToImageUv(metadata, point);
+  return {
+    x: metadata.posX + imagePoint.u * image.width * metadata.scale,
+    y: metadata.posY - imagePoint.v * image.height * metadata.scale,
+  };
+}
+
+/** Convert Dota world X/Y into a normalized coordinate on the displayed minimap. */
+export function mapOverviewWorldToDisplayUv(
+  metadata: Pick<MapOverviewMetadata, "posX" | "posY" | "scale" | "rotate">,
+  image: MapOverviewImageSize,
+  point: MapOverviewWorldPoint,
+): MapOverviewUv {
+  validateTransformMetadata(metadata);
+  const rotated = mapOverviewDisplayQuarterTurns(metadata) !== 0;
+  validateImageSize(image, rotated);
+  if (![point.x, point.y].every(Number.isFinite)) throw new Error("Overview world coordinates must be finite.");
+  const imagePoint = {
+    u: (point.x - metadata.posX) / (image.width * metadata.scale),
+    v: (metadata.posY - point.y) / (image.height * metadata.scale),
+  };
+  return mapOverviewImageUvToDisplayUv(metadata, imagePoint);
+}
+
+/** Axis-aligned world coverage of all four displayed minimap corners. */
+export function mapOverviewProjectedBounds(
+  metadata: Pick<MapOverviewMetadata, "posX" | "posY" | "scale" | "rotate">,
+  image: MapOverviewImageSize,
+): MapOverviewBounds {
+  const corners = [
+    mapOverviewDisplayUvToWorld(metadata, image, { u: 0, v: 0 }),
+    mapOverviewDisplayUvToWorld(metadata, image, { u: 1, v: 0 }),
+    mapOverviewDisplayUvToWorld(metadata, image, { u: 0, v: 1 }),
+    mapOverviewDisplayUvToWorld(metadata, image, { u: 1, v: 1 }),
+  ];
+  return {
+    minX: Math.min(...corners.map((point) => point.x)),
+    minY: Math.min(...corners.map((point) => point.y)),
+    maxX: Math.max(...corners.map((point) => point.x)),
+    maxY: Math.max(...corners.map((point) => point.y)),
   };
 }
 
@@ -240,16 +369,17 @@ export async function inspectMapOverview(options: InspectMapOverviewOptions): Pr
     report.findings.push({ severity: compiledSeverity, code: "minimap-texture-compiled-missing", detail: `Compiled overview texture is missing for: ${report.texturePath}` });
   }
 
-  if (report.metadata.rotate !== 0) {
-    report.findings.push({ severity: "warn", code: "minimap-rotation-unverified", detail: `Overview rotate=${report.metadata.rotate}; automatic world-bound verification currently supports rotate=0 only.` });
+  try {
+    report.displayQuarterTurnsClockwise = mapOverviewDisplayQuarterTurns(report.metadata);
+    report.projectedBounds = mapOverviewProjectedBounds(report.metadata, report.image);
+  } catch (error) {
+    report.findings.push({
+      severity: "error",
+      code: "minimap-transform-invalid",
+      detail: error instanceof Error ? error.message : String(error),
+    });
     return report;
   }
-  report.projectedBounds = {
-    minX: report.metadata.posX,
-    maxX: report.metadata.posX + report.image.width * report.metadata.scale,
-    maxY: report.metadata.posY,
-    minY: report.metadata.posY - report.image.height * report.metadata.scale,
-  };
   if (report.entityBounds && boundaries.count === 2) {
     const mismatch = compareBounds(report.projectedBounds, report.entityBounds, Math.max(1e-4, report.metadata.scale * 0.01));
     if (mismatch.length) {

@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { MapOverviewBounds } from "./map-overview.js";
+import {
+  MapOverviewImageSize,
+  MapOverviewMetadata,
+  mapOverviewDisplayUvToWorld,
+} from "./map-overview.js";
 import { VConsoleClient } from "./vconsole.js";
 
 export interface MinimapProbe {
@@ -119,11 +123,12 @@ export function minimapProbePixel(rect: MinimapClientRect, probe: MinimapProbe):
   };
 }
 
-export function minimapProbeWorld(bounds: MapOverviewBounds, probe: MinimapProbe): { x: number; y: number } {
-  return {
-    x: bounds.minX + (bounds.maxX - bounds.minX) * probe.u,
-    y: bounds.maxY - (bounds.maxY - bounds.minY) * probe.v,
-  };
+export function minimapProbeWorld(
+  metadata: Pick<MapOverviewMetadata, "posX" | "posY" | "scale" | "rotate">,
+  image: MapOverviewImageSize,
+  probe: MinimapProbe,
+): { x: number; y: number } {
+  return mapOverviewDisplayUvToWorld(metadata, image, probe);
 }
 
 export function cameraErrorDistance(

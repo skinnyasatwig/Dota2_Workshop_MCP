@@ -29,9 +29,17 @@ test("minimap geometry scales from Panorama screen pixels into the Dota client",
 });
 
 test("minimap UVs map north-up into world coordinates and report camera error", () => {
-  const bounds = { minX: -8192, minY: -4096, maxX: 8192, maxY: 4096 };
-  assert.deepEqual(minimapProbeWorld(bounds, { name: "northwest", u: 0.25, v: 0.25 }), { x: -4096, y: 2048 });
+  const metadata = { posX: -8192, posY: 4096, scale: 16, rotate: 0 };
+  const image = { width: 1024, height: 512 };
+  assert.deepEqual(minimapProbeWorld(metadata, image, { name: "northwest", u: 0.25, v: 0.25 }), { x: -4096, y: 2048 });
   assert.equal(cameraErrorDistance({ x: -4096, y: 2048 }, { x: -4000, y: 1976 }), 120);
+});
+
+test("minimap probes honor Valve's nonzero clockwise quarter-turn flag", () => {
+  const metadata = { posX: -4096, posY: 4096, scale: 8, rotate: 15 };
+  const image = { width: 1024, height: 1024 };
+  assert.deepEqual(minimapProbeWorld(metadata, image, { name: "west", u: 0.25, v: 0.5 }), { x: 0, y: -2048 });
+  assert.deepEqual(minimapProbeWorld(metadata, image, { name: "north", u: 0.5, v: 0.25 }), { x: -2048, y: 0 });
 });
 
 test("minimap probes reject duplicate, unsafe, and out-of-range inputs", () => {

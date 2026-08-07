@@ -23,6 +23,10 @@ Last updated: 2026-08-07
   two-cell accidental high shelf. Offline reachability now has zero holes, zero inaccessible camps, and only the
   deliberate 384-cell off-map strip. The rebuilt map passed all four routes and all 64 Valve GridNav checks through
   the new CLI with zero console errors and graceful shutdown.
+- Rotated overviews now use Valve's actual legacy convention. The installed Dota archive supplies a real
+  `rotate=15` example, while Valve's published `CMapOverview` client source proves that the value is read as a
+  0/nonzero flag and applies one 90-degree display turn. Offline bounds, world/display round trips, and live-click
+  expectations now share that transform; non-square rotated images and fractional pseudo-angles fail closed.
 
 ## Verified milestones
 
@@ -111,11 +115,14 @@ Last updated: 2026-08-07
 30. This follow-up - made structured minimap measurement the safe CLI default and added dependency-free PNG quality
     checks so a black `PrintWindow` result cannot be mistaken for visual evidence. Focused tests cover both black-frame
     rejection and acceptance of a varied rendered frame.
+31. This milestone - replaced the nonzero-rotation refusal with Valve-grounded legacy quarter-turn transforms.
+    Offline validation, forward/inverse coordinate conversion, and live minimap probes now agree; fixtures cover
+    north-up, nonzero `rotate=15`, square-image enforcement, and unsafe fractional values.
 
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 247 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 251 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 200 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
