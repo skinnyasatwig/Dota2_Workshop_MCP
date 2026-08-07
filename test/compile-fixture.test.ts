@@ -24,6 +24,7 @@ test("repository compile fixture is self-contained and structurally inspectable"
     fixture.entities.map((entity) => entity.targetname).sort(),
     [
       "fixture_base_blocker",
+      "fixture_concave_solid",
       "fixture_dire_start",
       "fixture_nav_obstruction",
       "fixture_polygon_no_wards",
@@ -33,6 +34,10 @@ test("repository compile fixture is self-contained and structurally inspectable"
       "fixture_sloped_trigger",
     ],
   );
+  assert.equal(fixture.solids.length, 1);
+  assert.equal(fixture.solids[0]?.targetname, "fixture_concave_solid");
+  assert.equal(fixture.solids[0]?.footprint.length, 6);
+  assert.equal(fixture.solids[0]?.height, 256);
   assert.equal(fixture.volumes.length, 2);
   const round = fixture.volumes.find((volume) => volume.targetname === "fixture_polygon_no_wards");
   assert.equal(round?.footprint.length, 12);

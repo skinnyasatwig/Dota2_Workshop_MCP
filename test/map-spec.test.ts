@@ -25,6 +25,7 @@ test("the documented map specification example stays valid", async () => {
   assert.equal(specification.map, "example_arena");
   assert.equal(specification.managedPaths?.length, 2);
   assert.equal(specification.managedTerrain?.length, 3);
+  assert.equal(specification.managedSolids?.length, 2);
 });
 
 test("parseMapSpecification exposes the contract terrain and path vocabulary", () => {
@@ -95,7 +96,7 @@ test("parseMapSpecification rejects unresolved managedPath terrain", () => {
   );
 });
 
-test("reconcileMapSpecification applies entities, paths, and volumes idempotently", () => {
+test("reconcileMapSpecification applies entities, paths, solids, and volumes idempotently", () => {
   const specification = parseMapSpecification({
     managedEntities: [
       {
@@ -118,18 +119,77 @@ test("reconcileMapSpecification applies entities, paths, and volumes idempotentl
         size: [512, 512, 256],
       },
     ],
+    managedSolids: [{
+      targetname: "objective_wall",
+      center: [0, 512, 128],
+      material: "materials/dev/reflectivity_30.vmat",
+      extrusion: {
+        points: [[-256, -64], [256, -64], [256, 64], [0, 64], [0, 192], [-256, 192]],
+        height: 256,
+      },
+    }],
   });
 
   const first = reconcileMapSpecification(EMPTY_MAP, specification);
   assert.equal(first.changed, true);
   assert.deepEqual(first.entities.added, ["objective", "creep_route_1", "creep_route_2"]);
+  assert.deepEqual(first.solids.added, ["objective_wall"]);
   assert.deepEqual(first.volumes.added, ["objective_bounds"]);
-  assert.equal(parseMapEntities(first.text).length, 4);
+  assert.equal(parseMapEntities(first.text).length, 5);
 
   const second = reconcileMapSpecification(first.text, specification);
   assert.equal(second.changed, false);
   assert.deepEqual(second.entities.unchanged, ["objective", "creep_route_1", "creep_route_2"]);
+  assert.deepEqual(second.solids.unchanged, ["objective_wall"]);
   assert.deepEqual(second.volumes.unchanged, ["objective_bounds"]);
+});
+
+test("component placements namespace and mirror asymmetric concave solids", () => {
+  const specification = parseMapSpecification({
+    components: {
+      base_wall: {
+        managedSolids: [{
+          targetname: "wall",
+          center: [100, 200, 64],
+          yaw: 30,
+          material: "materials/dev/reflectivity_30.vmat",
+          extrusion: {
+            points: [[-200, -100], [200, -100], [200, 0], [0, 0], [0, 200], [-200, 200]],
+            height: 128,
+          },
+          properties: { OnUser1: "@local:tower,Disable,,0,-1" },
+        }],
+      },
+    },
+    placements: [
+      { component: "base_wall", name: "west", worldOffset: [-1000, 0, 128] },
+      { component: "base_wall", name: "east", worldOffset: [1000, 0, 128], mirrorAxis: "x" },
+    ],
+  });
+  assert.deepEqual(specification.managedSolids, [
+    {
+      targetname: "west_wall",
+      center: [-900, 200, 192],
+      yaw: 30,
+      material: "materials/dev/reflectivity_30.vmat",
+      extrusion: {
+        points: [[-200, -100], [200, -100], [200, 0], [0, 0], [0, 200], [-200, 200]],
+        height: 128,
+      },
+      properties: { OnUser1: "west_tower,Disable,,0,-1" },
+    },
+    {
+      targetname: "east_wall",
+      center: [900, 200, 192],
+      yaw: 150,
+      material: "materials/dev/reflectivity_30.vmat",
+      extrusion: {
+        points: [[-200, -200], [0, -200], [0, 0], [200, 0], [200, 100], [-200, 100]],
+        height: 128,
+      },
+      properties: { OnUser1: "east_tower,Disable,,0,-1" },
+    },
+  ]);
 });
 
 test("named regions can be reused and mirrored around a chosen tile point", () => {

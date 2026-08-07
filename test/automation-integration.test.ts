@@ -23,6 +23,11 @@ test("full automation fixture crosses specification, components, terrain, and en
   assert.ok(specification.managedEntities?.some((entity) => entity.targetname === "dire_start"));
   assert.ok(specification.managedTerrain?.some((operation) => operation.op === "ramp"));
   assert.ok(specification.managedTerrain?.some((operation) => operation.op === "water"));
+  assert.deepEqual(
+    specification.managedSolids?.map((solid) => solid.targetname),
+    ["north_lane_wall", "south_lane_wall"],
+  );
+  assert.ok(specification.managedSolids?.every((solid) => solid.extrusion.points.length === 6));
 
   const routes = engineNavigationRoutesFromManagedPaths(specification.managedPaths ?? []);
   assert.equal(routes.length, 2);

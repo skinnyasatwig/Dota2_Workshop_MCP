@@ -71,6 +71,15 @@ test("loadMapContract loads and validates the project default", async () => {
           size: [768, 640, 384],
         },
       ],
+      managedSolids: [{
+        targetname: "north_wall",
+        center: [0, 1024, 128],
+        material: "materials/dev/reflectivity_30.vmat",
+        extrusion: {
+          points: [[-384, -128], [384, -128], [384, 0], [0, 0], [0, 256], [-384, 256]],
+          height: 256,
+        },
+      }],
     }),
   );
   const resolved = await loadMapContract(root, "twin_gates");
@@ -82,6 +91,7 @@ test("loadMapContract loads and validates the project default", async () => {
   assert.equal(resolved?.contract.managedAbsentEntities?.length, 1);
   assert.equal(resolved?.contract.managedTerrain?.length, 3);
   assert.equal(resolved?.contract.managedTerrain?.[1].op, "tileset");
+  assert.equal(resolved?.contract.managedSolids?.[0].targetname, "north_wall");
   assert.equal(resolved?.contract.managedVolumes?.[0].targetname, "north_camp_bounds");
   const managed = managedEntitiesForContract(resolved!.contract);
   assert.equal(managed.length, 4);
@@ -170,6 +180,25 @@ test("loadMapContract rejects volume names that collide with managed entities", 
     }),
   );
   await assert.rejects(() => loadMapContract(root, "twin_gates"), /duplicate targetname "bounds"/);
+  await rm(root, { recursive: true, force: true });
+});
+
+test("loadMapContract rejects solid names that collide with managed entities", async () => {
+  const root = await freshRoot();
+  await writeFile(
+    join(root, ".dota-workshop", "map-contract.json"),
+    JSON.stringify({
+      requiredEntities: [],
+      managedEntities: [{ targetname: "wall", classname: "info_target", origin: "0 0 0" }],
+      managedSolids: [{
+        targetname: "wall",
+        center: [0, 0, 128],
+        material: "materials/dev/reflectivity_30.vmat",
+        extrusion: { points: [[-128, -128], [128, -128], [128, 128], [-128, 128]], height: 256 },
+      }],
+    }),
+  );
+  await assert.rejects(() => loadMapContract(root, "twin_gates"), /duplicate targetname "wall"/);
   await rm(root, { recursive: true, force: true });
 });
 

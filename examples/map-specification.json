@@ -43,6 +43,17 @@
           }
         }
       ],
+      "managedSolids": [
+        {
+          "targetname": "concave_wall",
+          "center": [0, 640, 128],
+          "material": "materials/dev/reflectivity_30.vmat",
+          "extrusion": {
+            "points": [[-384, -128], [384, -128], [384, 0], [0, 0], [0, 256], [-384, 256]],
+            "height": 256
+          }
+        }
+      ],
       "managedVolumes": [
         {
           "targetname": "interaction_bounds",

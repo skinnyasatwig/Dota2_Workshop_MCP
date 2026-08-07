@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { buildMapMeshNode, MapMeshData, numberText, vectorText } from "./map-mesh.js";
 import { entityBlockRanges, insertEntity, maxNodeId, parseMapEntities } from "./vmap.js";
 
 const scalar = z.union([z.string(), z.number(), z.boolean()]);
@@ -335,38 +336,8 @@ export function parseManagedMapVolumes(
   }) as ManagedMapVolume[];
 }
 
-function numberText(value: number): string {
-  return String(Math.abs(value) < 1e-9 ? 0 : Number(value.toFixed(6)));
-}
-
-function vectorText(vector: readonly number[]): string {
-  return vector.map(numberText).join(" ");
-}
-
 function escaped(value: string | number): string {
   return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
-
-function arrayValues(values: readonly (string | number)[], indent: string): string {
-  return values.map((value) => `${indent}"${escaped(value)}"`).join(",\n");
-}
-
-interface PrismMeshData {
-  vertices: string[];
-  vertexEdgeIndices: number[];
-  vertexDataIndices: number[];
-  edgeVertexIndices: number[];
-  edgeOppositeIndices: number[];
-  edgeNextIndices: number[];
-  edgeFaceIndices: number[];
-  edgeDataIndices: number[];
-  edgeVertexDataIndices: number[];
-  faceEdgeIndices: number[];
-  faceDataIndices: number[];
-  normals: string[];
-  tangents: string[];
-  textureAxisU: string[];
-  textureAxisV: string[];
 }
 
 interface VolumeGeometry {
@@ -424,7 +395,7 @@ function faceNormal(
   return normal.map((value) => value * direction) as [number, number, number];
 }
 
-function buildPrismMesh(geometry: VolumeGeometry): PrismMeshData {
+function buildPrismMesh(geometry: VolumeGeometry): MapMeshData {
   const { points, bottom, top } = geometry;
   const count = points.length;
   const vertices = [
@@ -538,42 +509,6 @@ function buildPrismMesh(geometry: VolumeGeometry): PrismMeshData {
   };
 }
 
-function dataStream(
-  name: string,
-  standardName: string,
-  type: string,
-  values: readonly (string | number)[],
-  dataStateFlags: number,
-): string {
-  return `"CDmePolygonMeshDataStream"
-{
-	"id" "elementid" "${randomUUID()}"
-	"name" "string" "${name}:0"
-	"standardAttributeName" "string" "${standardName}"
-	"semanticName" "string" "${standardName}"
-	"semanticIndex" "int" "0"
-	"vertexBufferLocation" "int" "0"
-	"dataStateFlags" "int" "${dataStateFlags}"
-	"subdivisionBinding" "element" ""
-	"data" "${type}_array"
-	[
-${arrayValues(values, "\t\t")}
-	]
-}`;
-}
-
-function dataArray(size: number, streams: readonly string[]): string {
-  return `"CDmePolygonMeshDataArray"
-{
-	"id" "elementid" "${randomUUID()}"
-	"size" "int" "${size}"
-	"streams" "element_array"
-	[
-${streams.map((stream) => stream.split("\n").map((line) => `\t\t${line}`).join("\n")).join(",\n")}
-	]
-}`;
-}
-
 export function buildMapVolumeBlock(
   volume: ManagedMapVolume,
   entityNodeId: number,
@@ -593,24 +528,12 @@ export function buildMapVolumeBlock(
     .join("\n");
   const origin = vectorText(parsed.center);
   const yaw = numberText(((parsed.yaw ?? 0) % 360 + 360) % 360);
-  const vertexData = dataArray(mesh.vertices.length, [
-    dataStream("position", "position", "vector3", mesh.vertices, 3),
-  ]);
-  const faceVertexData = dataArray(mesh.edgeVertexIndices.length, [
-    dataStream("texcoord", "texcoord", "vector2", Array(mesh.edgeVertexIndices.length).fill("0 0"), 1),
-    dataStream("normal", "normal", "vector3", mesh.normals, 1),
-    dataStream("tangent", "tangent", "vector4", mesh.tangents, 1),
-  ]);
-  const edgeCount = mesh.edgeVertexIndices.length / 2;
-  const faceCount = mesh.faceEdgeIndices.length;
-  const edgeData = dataArray(edgeCount, [dataStream("flags", "flags", "int", Array(edgeCount).fill(0), 3)]);
-  const faceData = dataArray(faceCount, [
-    dataStream("textureScale", "textureScale", "vector2", Array(faceCount).fill("1 1"), 0),
-    dataStream("textureAxisU", "textureAxisU", "vector4", mesh.textureAxisU, 0),
-    dataStream("textureAxisV", "textureAxisV", "vector4", mesh.textureAxisV, 0),
-    dataStream("materialindex", "materialindex", "int", Array(faceCount).fill(0), 8),
-    dataStream("flags", "flags", "int", Array(faceCount).fill(0), 3),
-  ]);
+  const meshNode = buildMapMeshNode(mesh, {
+    nodeId: meshNodeId,
+    origin: parsed.center,
+    yaw: parsed.yaw,
+    material: recipe.material,
+  }).split("\n").map((line) => `\t\t${line}`).join("\n");
 
   return `"CMapEntity"
 {
@@ -621,55 +544,7 @@ export function buildMapVolumeBlock(
 	"nodeID" "int" "${entityNodeId}"
 	"children" "element_array"
 	[
-		"CMapMesh"
-		{
-			"id" "elementid" "${randomUUID()}"
-			"origin" "vector3" "${origin}"
-			"angles" "qangle" "0 ${yaw} 0"
-			"scales" "vector3" "1 1 1"
-			"nodeID" "int" "${meshNodeId}"
-			"children" "element_array" [ ]
-			"editorOnly" "bool" "0"
-			"force_hidden" "bool" "0"
-			"variableTargetKeys" "string_array" [ ]
-			"variableNames" "string_array" [ ]
-			"cubeMapName" "string" ""
-			"fademindist" "float" "-1"
-			"fademaxdist" "float" "0"
-			"smoothingAngle" "float" "40"
-			"tintColor" "color" "255 255 255 255"
-			"physicsType" "string" "default"
-			"physicsGroup" "string" ""
-			"physicsInteractsAs" "string" ""
-			"physicsInteractsWith" "string" ""
-			"meshData" "CDmePolygonMesh"
-			{
-				"id" "elementid" "${randomUUID()}"
-				"name" "string" "meshData"
-				"vertexEdgeIndices" "int_array" [ ${arrayValues(mesh.vertexEdgeIndices, "")} ]
-				"vertexDataIndices" "int_array" [ ${arrayValues(mesh.vertexDataIndices, "")} ]
-				"edgeVertexIndices" "int_array" [ ${arrayValues(mesh.edgeVertexIndices, "")} ]
-				"edgeOppositeIndices" "int_array" [ ${arrayValues(mesh.edgeOppositeIndices, "")} ]
-				"edgeNextIndices" "int_array" [ ${arrayValues(mesh.edgeNextIndices, "")} ]
-				"edgeFaceIndices" "int_array" [ ${arrayValues(mesh.edgeFaceIndices, "")} ]
-				"edgeDataIndices" "int_array" [ ${arrayValues(mesh.edgeDataIndices, "")} ]
-				"edgeVertexDataIndices" "int_array" [ ${arrayValues(mesh.edgeVertexDataIndices, "")} ]
-				"faceEdgeIndices" "int_array" [ ${arrayValues(mesh.faceEdgeIndices, "")} ]
-				"faceDataIndices" "int_array" [ ${arrayValues(mesh.faceDataIndices, "")} ]
-				"materials" "string_array" [ "${recipe.material}" ]
-				"vertexData" ${vertexData.split("\n").map((line) => `\t\t\t\t${line}`).join("\n").trimStart()}
-				"faceVertexData" ${faceVertexData.split("\n").map((line) => `\t\t\t\t${line}`).join("\n").trimStart()}
-				"edgeData" ${edgeData.split("\n").map((line) => `\t\t\t\t${line}`).join("\n").trimStart()}
-				"faceData" ${faceData.split("\n").map((line) => `\t\t\t\t${line}`).join("\n").trimStart()}
-				"subdivisionData" "CDmePolygonMeshSubdivisionData"
-				{
-					"id" "elementid" "${randomUUID()}"
-					"subdivisionLevels" "int_array" [ ${arrayValues(Array(mesh.edgeVertexIndices.length).fill(0), "")} ]
-					"streams" "element_array" [ ]
-				}
-			}
-			"useAsOccluder" "bool" "0"
-		}
+${meshNode}
 	]
 	"editorOnly" "bool" "0"
 	"force_hidden" "bool" "0"

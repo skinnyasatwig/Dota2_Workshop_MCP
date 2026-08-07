@@ -7,6 +7,7 @@ import {
 import { cIndex, parseTileGrid, TileGrid, vIndex } from "./tilegrid.js";
 import { parseMapEntities, ParsedMapEntity } from "./vmap.js";
 import { parseMapVolumes, ParsedMapVolume } from "./map-volume.js";
+import { parseMapSolids, ParsedMapSolid } from "./map-solid.js";
 import { MapCollisionObstacle } from "./map-collision.js";
 
 export interface MapPreviewOptions {
@@ -48,6 +49,7 @@ export interface MapPreviewStats {
     objectives: number;
     currents: number;
     minimapBounds: number;
+    solids: number;
     volumes: number;
     slopedVolumes: number;
     blockingVolumes: number;
@@ -81,13 +83,14 @@ function drawPreview(
   entities: ParsedMapEntity[],
   options: MapPreviewOptions,
   volumes: readonly ParsedMapVolume[] = [],
+  solids: readonly ParsedMapSolid[] = [],
 ): RenderedMapPreview {
   const scale = Math.max(2, Math.min(16, Math.floor(options.scale ?? 8)));
   const width = grid.width * scale;
   const height = grid.height * scale;
   const rgba = Buffer.alloc(width * height * 4);
   const reachability = analyzeTileGridReachability(grid, entities, {
-    blockingVolumes: volumes,
+    blockingVolumes: [...volumes, ...solids],
     collisionObstacles: options.collisionObstacles,
   });
   const reachableComponents = new Set(reachability.spawnComponents.length
@@ -234,6 +237,19 @@ function drawPreview(
           line(to[0], to[1], to[0] - Math.cos(angle - 0.55) * 4, to[1] - Math.sin(angle - 0.55) * 4, [245, 239, 196]);
           line(to[0], to[1], to[0] - Math.cos(angle + 0.55) * 4, to[1] - Math.sin(angle + 0.55) * 4, [245, 239, 196]);
         }
+      }
+    }
+    for (const solid of solids) {
+      const radians = (solid.yaw * Math.PI) / 180;
+      const pixels = solid.footprint.map(([localX, localY]) => worldPixel([
+        solid.center[0] + localX * Math.cos(radians) - localY * Math.sin(radians),
+        solid.center[1] + localX * Math.sin(radians) + localY * Math.cos(radians),
+        solid.center[2],
+      ]));
+      for (let index = 0; index < pixels.length; index++) {
+        const from = pixels[index];
+        const to = pixels[(index + 1) % pixels.length];
+        line(from[0], from[1], to[0], to[1], [238, 220, 145], 0.95, 2);
       }
     }
   }
@@ -400,9 +416,10 @@ function drawPreview(
       objectives: objectiveCount,
       currents: currentCount,
       minimapBounds,
+      solids: solids.length,
       volumes: volumes.length,
       slopedVolumes: volumes.filter((volume) => !!volume.sloped).length,
-      blockingVolumes: volumes.filter((volume) => volume.blocking).length,
+      blockingVolumes: volumes.filter((volume) => volume.blocking).length + solids.length,
       visionBlockers: visionBlockerSegments,
       collisionObstacles: reachability.collisionObstacleCount,
     },
@@ -418,7 +435,7 @@ function drawPreview(
       objectives: "yellow/purple markers",
       currents: "cyan arrows",
       minimapBounds: "magenta rectangle",
-      volumes: "orange camp, purple no-ward, cyan trigger, pink player blocker outlines; pale arrows point uphill on sloped volumes",
+      volumes: "sand world solids; orange camp, purple no-ward, cyan trigger, pink player blocker outlines; pale arrows point uphill on sloped volumes",
       visionBlockers: "purple linked lines",
       collisionObstacles: "bright cyan exact PHYS hulls; medium cyan mesh envelopes; green-cyan conservative curved primitives; muted cyan PHYS bounds; dark green/orange class approximations; white X means model bounds unknown",
     },
@@ -427,7 +444,13 @@ function drawPreview(
 }
 
 export function renderMapPreview(text: string, options: MapPreviewOptions = {}): RenderedMapPreview {
-  return drawPreview(parseTileGrid(text), parseMapEntities(text), options, parseMapVolumes(text));
+  return drawPreview(
+    parseTileGrid(text),
+    parseMapEntities(text),
+    options,
+    parseMapVolumes(text),
+    parseMapSolids(text),
+  );
 }
 
 export function renderTileGridPreview(
@@ -435,6 +458,7 @@ export function renderTileGridPreview(
   entities: ParsedMapEntity[],
   options: MapPreviewOptions = {},
   volumes: readonly ParsedMapVolume[] = [],
+  solids: readonly ParsedMapSolid[] = [],
 ): RenderedMapPreview {
-  return drawPreview(grid, entities, options, volumes);
+  return drawPreview(grid, entities, options, volumes, solids);
 }

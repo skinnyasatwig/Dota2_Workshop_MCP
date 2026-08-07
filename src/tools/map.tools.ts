@@ -27,6 +27,7 @@ import { runMapTransaction } from "../dota/map-transaction.js";
 import { analyzeMapReachability } from "../dota/map-reachability.js";
 import { resolveMapCollisionObstacles } from "../dota/map-collision.js";
 import { reconcileMapVolumes } from "../dota/map-volume.js";
+import { reconcileMapSolids } from "../dota/map-solid.js";
 import { inspectMapOverview, MapOverviewReport } from "../dota/map-overview.js";
 import {
   buildEngineNavigationCommand,
@@ -1550,7 +1551,7 @@ export function registerMapTools(server: McpServer) {
       title: "Synchronize a map with its managed contract",
       description:
         "Preview or apply desired managedEntities, managedAbsentEntities, compact managedPaths, managedTerrain, and " +
-        "checked managedVolumes " +
+        "checked managedSolids/managedVolumes " +
         "operations from " +
         ".dota-workshop/map-contract.json. Reusable regions/components/placements are expanded before reconciliation. " +
         "Paths expand into complete linked waypoint chains. Missing named entities " +
@@ -1579,10 +1580,14 @@ export function registerMapTools(server: McpServer) {
       const specs = managedEntitiesForContract(resolved.contract);
       const absentEntities = resolved.contract.managedAbsentEntities ?? [];
       const terrainOperations = resolved.contract.managedTerrain ?? [];
+      const solidSpecifications = resolved.contract.managedSolids ?? [];
       const volumeSpecifications = resolved.contract.managedVolumes ?? [];
-      if (!specs.length && !absentEntities.length && !terrainOperations.length && !volumeSpecifications.length) {
+      if (
+        !specs.length && !absentEntities.length && !terrainOperations.length &&
+        !solidSpecifications.length && !volumeSpecifications.length
+      ) {
         return error(
-          `Contract has no managedEntities, managedAbsentEntities, managedPaths, managedTerrain, or managedVolumes to synchronize: ${resolved.path}`,
+          `Contract has no managedEntities, managedAbsentEntities, managedPaths, managedTerrain, managedSolids, or managedVolumes to synchronize: ${resolved.path}`,
         );
       }
 
@@ -1596,10 +1601,12 @@ export function registerMapTools(server: McpServer) {
       }
 
       const terrain = synchronization.terrain;
+      const solids = synchronization.solids;
       const volumes = synchronization.volumes;
       const changedEntities = result.added.length + result.updated.length + result.removed.length;
+      const changedSolids = solids.added.length + solids.updated.length;
       const changedVolumes = volumes.added.length + volumes.updated.length;
-      const changed = changedEntities + changedVolumes + (terrain.changed ? 1 : 0);
+      const changed = changedEntities + changedSolids + changedVolumes + (terrain.changed ? 1 : 0);
       const transaction = apply && (changed > 0 || recompile)
         ? await runMapTransaction({
             projectRoot: project.root,
@@ -1639,9 +1646,11 @@ export function registerMapTools(server: McpServer) {
       }
       const steps = [
         `${apply ? "Synchronized" : "Previewed"} ${specs.length} desired entities and ` +
-          `${absentEntities.length} absence selectors plus ${volumeSpecifications.length} solid volumes in "${map}".`,
+          `${absentEntities.length} absence selectors plus ${solidSpecifications.length} world solids and ` +
+          `${volumeSpecifications.length} gameplay volumes in "${map}".`,
         `Add ${result.added.length}, update ${result.updated.length}, remove ${result.removed.length}, ` +
           `unchanged ${result.unchanged.length}.`,
+        `Solids: add ${solids.added.length}, update ${solids.updated.length}, unchanged ${solids.unchanged.length}.`,
         `Volumes: add ${volumes.added.length}, update ${volumes.updated.length}, unchanged ${volumes.unchanged.length}.`,
         `Terrain: ${terrainOperations.length} operations; change ${terrain.changedHeightVertices} height vertices, ` +
           `${terrain.changedWaterVertices} water vertices, ${terrain.changedTilesetCells} tileset cells, and ` +
@@ -1658,11 +1667,18 @@ export function registerMapTools(server: McpServer) {
           applied: apply === true,
           changed,
           changedEntities,
+          changedSolids,
           changedVolumes,
           added: result.added,
           updated: result.updated,
           removed: result.removed,
           unchanged: result.unchanged,
+          solids: {
+            requested: solidSpecifications.length,
+            added: solids.added,
+            updated: solids.updated,
+            unchanged: solids.unchanged,
+          },
           volumes: {
             requested: volumeSpecifications.length,
             added: volumes.added,
@@ -1840,7 +1856,7 @@ export function registerMapTools(server: McpServer) {
         "extracts entities, finds duplicate targetnames and broken path_corner/path_track links, and verifies required " +
         "targetname/classname pairs used by game scripts. It also checks minimap boundary entities, overview metadata, " +
         "source/compiled material and texture assets, image dimensions, and the world-to-minimap transform. When a project contract declares managedTerrain or " +
-        "managedVolumes, validation also reports tile-grid or checked-volume drift without writing it. Whole-map " +
+        "managedSolids or managedVolumes, validation also reports tile-grid, checked-solid, or checked-volume drift without writing it. Whole-map " +
         "offline reachability checks detect terrain holes, " +
         "trapped spawns, blocked entrances/path segments, and inaccessible objectives or camps. Known entity keyvalues " +
         "are checked against the installed official Valve FGD definitions.",
@@ -1947,6 +1963,13 @@ export function registerMapTools(server: McpServer) {
           }
         | undefined;
       let volumeDrift:
+        | {
+            missing: string[];
+            changed: string[];
+            unchanged: string[];
+          }
+        | undefined;
+      let solidDrift:
         | {
             missing: string[];
             changed: string[];
@@ -2072,6 +2095,24 @@ export function registerMapTools(server: McpServer) {
               message:
                 `Entity required absent by contract is present (${matches.length} match` +
                 `${matches.length === 1 ? "" : "es"}): ${absentSelectorLabel(selector)}.`,
+            });
+          }
+        }
+        const managedSolids = resolvedContract?.contract.managedSolids ?? [];
+        if (managedSolids.length) {
+          const solidResult = reconcileMapSolids(mapText, managedSolids);
+          if (solidResult.added.length || solidResult.updated.length) {
+            solidDrift = {
+              missing: solidResult.added,
+              changed: solidResult.updated,
+              unchanged: solidResult.unchanged,
+            };
+            findings.push({
+              severity: "error",
+              code: "managed-solid-drift",
+              message:
+                `Managed solid drift: ${solidResult.added.length} missing and ` +
+                `${solidResult.updated.length} changed checked solid(s).`,
             });
           }
         }
@@ -2251,6 +2292,7 @@ export function registerMapTools(server: McpServer) {
           entityDefinitions: entityDefinitionValidation ?? null,
           overview: overviewReport ?? null,
           terrainDrift: terrainDrift ?? null,
+          solidDrift: solidDrift ?? null,
           volumeDrift: volumeDrift ?? null,
           reachability: reachabilitySummary ?? null,
           findings,

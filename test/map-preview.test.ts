@@ -5,6 +5,7 @@ import { TileGrid } from "../src/dota/tilegrid.js";
 import { ParsedMapEntity } from "../src/dota/vmap.js";
 import { decodePng } from "../src/util/imgmontage.js";
 import { ParsedMapVolume } from "../src/dota/map-volume.js";
+import { ParsedMapSolid } from "../src/dota/map-solid.js";
 
 function grid(width = 6, height = 4): TileGrid {
   return {
@@ -70,6 +71,15 @@ test("diagnostic preview renders gameplay and navigation overlays", () => {
       blocking: true,
     },
   ];
+  const solids: ParsedMapSolid[] = [{
+    targetname: "concave_base_wall",
+    center: [1280, 896, 256],
+    yaw: 0,
+    material: "materials/dev/reflectivity_30.vmat",
+    footprint: [[-96, -96], [96, -96], [96, -32], [-32, -32], [-32, 96], [-96, 96]],
+    height: 512,
+    blocking: true,
+  }];
   const rendered = renderTileGridPreview(grid(), [
     entity("radiant_spawn", "info_target", "128 128 128"),
     entity("radiant_t1", "npc_dota_tower", "640 512 128", { teamnumber: "2", attack_range: "700" }),
@@ -84,7 +94,7 @@ test("diagnostic preview renders gameplay and navigation overlays", () => {
     entity("minimap_boundary_northeast", "dota_minimap_boundary", "1536 1024 128"),
     entity("preview_tree", "ent_dota_tree", "128 896 128"),
     entity("preview_statue", "prop_static", "1408 128 128", { solid: "6" }),
-  ], { scale: 4 }, volumes);
+  ], { scale: 4 }, volumes, solids);
 
   const decoded = decodePng(rendered.png);
   assert.equal(decoded.width, 24);
@@ -95,9 +105,10 @@ test("diagnostic preview renders gameplay and navigation overlays", () => {
   assert.equal(rendered.stats.overlays.objectives, 2);
   assert.equal(rendered.stats.overlays.currents, 1);
   assert.equal(rendered.stats.overlays.minimapBounds, 1);
+  assert.equal(rendered.stats.overlays.solids, 1);
   assert.equal(rendered.stats.overlays.volumes, 2);
   assert.equal(rendered.stats.overlays.slopedVolumes, 1);
-  assert.equal(rendered.stats.overlays.blockingVolumes, 1);
+  assert.equal(rendered.stats.overlays.blockingVolumes, 2);
   assert.equal(rendered.stats.overlays.visionBlockers, 1);
   assert.equal(rendered.stats.overlays.collisionObstacles, 2);
   assert.equal(rendered.reachability.findings.length, 0);

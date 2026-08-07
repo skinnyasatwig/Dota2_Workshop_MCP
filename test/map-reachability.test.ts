@@ -7,6 +7,7 @@ import {
 import { cIndex, TileGrid, vIndex } from "../src/dota/tilegrid.js";
 import { ParsedMapEntity } from "../src/dota/vmap.js";
 import { ParsedMapVolume } from "../src/dota/map-volume.js";
+import { ParsedMapSolid } from "../src/dota/map-solid.js";
 import { MapCollisionObstacle } from "../src/dota/map-collision.js";
 
 function flatGrid(width = 5, height = 3): TileGrid {
@@ -171,6 +172,25 @@ test("offline reachability follows a polygon blocker instead of its bounding box
 
   assert.equal(report.cells.filter((cell) => cell.blockingVolume === blocker.targetname).length, 5);
   assert.equal(report.volumeBlockedCellCount, 5);
+});
+
+test("offline reachability follows a concave solid instead of its bounding box", () => {
+  const blocker: ParsedMapSolid = {
+    targetname: "l_shaped_wall",
+    center: [640, 384, 256],
+    yaw: 0,
+    material: "materials/dev/reflectivity_30.vmat",
+    footprint: [
+      [-384, -384], [384, -384], [384, -128],
+      [-128, -128], [-128, 384], [-384, 384],
+    ],
+    height: 512,
+    blocking: true,
+  };
+  const report = analyzeTileGridReachability(flatGrid(), [], { blockingVolumes: [blocker] });
+
+  assert.equal(report.cells.filter((cell) => cell.blockingVolume === blocker.targetname).length, 5);
+  assert.equal(report.cells.find((cell) => cell.x === 3 && cell.y === 2)?.blockingVolume, undefined);
 });
 
 test("creep routes warn when they cross explicit Valve obstruction classes", () => {

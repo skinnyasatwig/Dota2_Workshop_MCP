@@ -1,6 +1,7 @@
 import { cIndex, parseTileGrid, TileGrid, tileToWorld, vIndex } from "./tilegrid.js";
 import { parseMapEntities, ParsedMapEntity } from "./vmap.js";
 import { parseMapVolumes, ParsedMapVolume } from "./map-volume.js";
+import { parseMapSolids, ParsedMapSolid } from "./map-solid.js";
 import {
   collectMapCollisionObstacles,
   distanceToSegment2d,
@@ -69,9 +70,14 @@ export interface MapReachabilityOptions {
   maxFlatStep?: number;
   maxRampStep?: number;
   minRegionCells?: number;
-  blockingVolumes?: readonly ParsedMapVolume[];
+  blockingVolumes?: readonly BlockingMapShape[];
   collisionObstacles?: readonly MapCollisionObstacle[];
 }
+
+export type BlockingMapShape = Pick<
+  ParsedMapVolume | ParsedMapSolid,
+  "targetname" | "center" | "yaw" | "footprint" | "blocking"
+> & Partial<Pick<ParsedMapVolume, "size" | "sloped">> & Partial<Pick<ParsedMapSolid, "height">>;
 
 export interface MapReachabilityReport {
   width: number;
@@ -147,31 +153,37 @@ function cellPathEdgeCount(grid: TileGrid, x: number, y: number): number {
   ].reduce((count, index) => count + (grid.pathEdges[index] ? 1 : 0), 0);
 }
 
-function pointInConvexPolygon(point: [number, number], polygon: readonly [number, number][]): boolean {
-  let sign = 0;
+function pointInPolygon(point: [number, number], polygon: readonly [number, number][]): boolean {
+  let inside = false;
   for (let index = 0; index < polygon.length; index++) {
     const a = polygon[index];
     const b = polygon[(index + 1) % polygon.length];
     const cross = (b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0]);
-    if (Math.abs(cross) <= 1e-6) continue;
-    if (sign && Math.sign(cross) !== sign) return false;
-    sign = Math.sign(cross);
+    if (
+      Math.abs(cross) <= 1e-6 &&
+      point[0] >= Math.min(a[0], b[0]) - 1e-6 && point[0] <= Math.max(a[0], b[0]) + 1e-6 &&
+      point[1] >= Math.min(a[1], b[1]) - 1e-6 && point[1] <= Math.max(a[1], b[1]) + 1e-6
+    ) return true;
+    const crosses = (a[1] > point[1]) !== (b[1] > point[1]);
+    if (crosses && point[0] < ((b[0] - a[0]) * (point[1] - a[1])) / (b[1] - a[1]) + a[0]) {
+      inside = !inside;
+    }
   }
-  return true;
+  return inside;
 }
 
-function volumeContainsWorldPoint(volume: ParsedMapVolume, x: number, y: number): boolean {
+function volumeContainsWorldPoint(volume: BlockingMapShape, x: number, y: number): boolean {
   const radians = (-volume.yaw * Math.PI) / 180;
   const dx = x - volume.center[0];
   const dy = y - volume.center[1];
   const localX = dx * Math.cos(radians) - dy * Math.sin(radians);
   const localY = dx * Math.sin(radians) + dy * Math.cos(radians);
-  return pointInConvexPolygon([localX, localY], volume.footprint);
+  return pointInPolygon([localX, localY], volume.footprint);
 }
 
 function buildCells(
   grid: TileGrid,
-  blockingVolumes: readonly ParsedMapVolume[] = [],
+  blockingVolumes: readonly BlockingMapShape[] = [],
   collisionObstacles: readonly MapCollisionObstacle[] = [],
 ): ReachabilityCell[] {
   const cells: ReachabilityCell[] = [];
@@ -570,6 +582,6 @@ export function analyzeTileGridReachability(
 export function analyzeMapReachability(text: string, options: MapReachabilityOptions = {}): MapReachabilityReport {
   return analyzeTileGridReachability(parseTileGrid(text), parseMapEntities(text), {
     ...options,
-    blockingVolumes: options.blockingVolumes ?? parseMapVolumes(text),
+    blockingVolumes: options.blockingVolumes ?? [...parseMapVolumes(text), ...parseMapSolids(text)],
   });
 }

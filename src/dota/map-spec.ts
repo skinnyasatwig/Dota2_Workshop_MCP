@@ -29,6 +29,12 @@ import {
   MapVolumeReconcileResult,
   reconcileMapVolumes,
 } from "./map-volume.js";
+import {
+  ManagedMapSolid,
+  managedMapSolidInputSchema,
+  MapSolidReconcileResult,
+  reconcileMapSolids,
+} from "./map-solid.js";
 
 const scalar = z.union([z.string(), z.number(), z.boolean()]);
 const properties = z.record(scalar);
@@ -168,6 +174,7 @@ export const componentDefinitionInputSchema = z.object({
   managedAbsentEntities: z.array(managedAbsentEntityInputSchema).optional(),
   managedPaths: z.array(managedMapPathInputSchema).optional(),
   managedTerrain: z.array(terrainOperationInputSchema).optional(),
+  managedSolids: z.array(managedMapSolidInputSchema).optional(),
   managedVolumes: z.array(managedMapVolumeInputSchema).optional(),
 }).strict();
 
@@ -186,6 +193,7 @@ export const mapSpecificationInputSchema = z.object({
   managedAbsentEntities: z.array(managedAbsentEntityInputSchema).optional(),
   managedPaths: z.array(managedMapPathInputSchema).optional(),
   managedTerrain: z.array(terrainOperationInputSchema).optional(),
+  managedSolids: z.array(managedMapSolidInputSchema).optional(),
   managedVolumes: z.array(managedMapVolumeInputSchema).optional(),
   regions: z.record(regionDefinitionInputSchema).optional(),
   components: z.record(componentDefinitionInputSchema).optional(),
@@ -404,7 +412,7 @@ function expandComponent(
   component: MapContract,
   placement: ComponentPlacementInput,
   path: string,
-): Pick<MapContract, "managedEntities" | "managedAbsentEntities" | "managedPaths" | "managedTerrain" | "managedVolumes"> {
+): Pick<MapContract, "managedEntities" | "managedAbsentEntities" | "managedPaths" | "managedTerrain" | "managedSolids" | "managedVolumes"> {
   const worldOffset = placement.worldOffset ?? [0, 0, 0];
   const transformOrigin = (origin: string, field: string) =>
     transformVectorString(origin, placement.mirrorAxis, worldOffset, field, path);
@@ -485,12 +493,38 @@ function expandComponent(
       ? { ...transformed, recipe: volume.recipe, size: volume.size }
       : { ...transformed, recipe: volume.recipe, polygon: polygon! };
   };
+  const transformSolid = (solid: ManagedMapSolid): ManagedMapSolid => {
+    const transformedAngles = transformAngles(
+      `0 ${solid.yaw ?? 0} 0`,
+      placement.mirrorAxis,
+      `${fieldPrefix(placement)}.${solid.targetname}.yaw`,
+      path,
+    );
+    const mirrorCount = Number(placement.mirrorAxis?.includes("x") ?? false) +
+      Number(placement.mirrorAxis?.includes("y") ?? false);
+    const points = mirrorCount % 2 === 1
+      ? solid.extrusion.points.map(([x, y]) => [x, Math.abs(y) < 1e-9 ? 0 : -y] as [number, number]).reverse()
+      : solid.extrusion.points.map(([x, y]) => [x, y] as [number, number]);
+    return {
+      targetname: localName(placement.name, solid.targetname),
+      center: [
+        (placement.mirrorAxis?.includes("x") ? -solid.center[0] : solid.center[0]) + worldOffset[0],
+        (placement.mirrorAxis?.includes("y") ? -solid.center[1] : solid.center[1]) + worldOffset[1],
+        solid.center[2] + worldOffset[2],
+      ],
+      yaw: transformedAngles ? parseVector(transformedAngles, "transformed solid yaw", path)[1] : solid.yaw,
+      material: solid.material,
+      extrusion: { points, height: solid.extrusion.height },
+      properties: localProperties(solid.properties, placement.name),
+    };
+  };
   return {
     managedEntities: (component.managedEntities ?? []).map(transformEntity),
     managedAbsentEntities: (component.managedAbsentEntities ?? []).map(transformAbsent),
     managedPaths: (component.managedPaths ?? []).map(transformPath),
     managedTerrain: (component.managedTerrain ?? []).map((operation) =>
       transformComponentTerrain(operation, placement, path)),
+    managedSolids: (component.managedSolids ?? []).map(transformSolid),
     managedVolumes: (component.managedVolumes ?? []).map(transformVolume),
   };
 }
@@ -525,6 +559,7 @@ export function parseMapSpecification(value: unknown, path = "inline map specifi
           managedAbsentEntities: definition.managedAbsentEntities,
           managedPaths: definition.managedPaths,
           managedTerrain,
+          managedSolids: definition.managedSolids,
           managedVolumes: definition.managedVolumes,
         },
         `${path}, component "${name}"`,
@@ -569,6 +604,10 @@ export function parseMapSpecification(value: unknown, path = "inline map specifi
         ...dotaComponents.managedTerrain,
         ...expandedComponents.flatMap((component) => component.managedTerrain ?? []),
       ],
+      managedSolids: [
+        ...(parsed.managedSolids ?? []),
+        ...expandedComponents.flatMap((component) => component.managedSolids ?? []),
+      ],
       managedVolumes: [
         ...(parsed.managedVolumes ?? []),
         ...dotaComponents.managedVolumes,
@@ -584,6 +623,7 @@ export interface MapSpecificationReconcileResult {
   changed: boolean;
   entities: MapEntityReconcileResult;
   terrain: TerrainReconcileResult;
+  solids: MapSolidReconcileResult;
   volumes: MapVolumeReconcileResult;
 }
 
@@ -592,7 +632,8 @@ export function reconcileMapSpecification(
   text: string,
   specification: MapContract,
 ): MapSpecificationReconcileResult {
-  const volumes = reconcileMapVolumes(text, specification.managedVolumes ?? []);
+  const solids = reconcileMapSolids(text, specification.managedSolids ?? []);
+  const volumes = reconcileMapVolumes(solids.text, specification.managedVolumes ?? []);
   const entities = reconcileMapEntities(volumes.text, managedEntitiesForContract(specification), {
     prunePrefixes: (specification.managedPaths ?? []).map((path) => path.name),
     absentEntities: specification.managedAbsentEntities ?? [],
@@ -606,10 +647,12 @@ export function reconcileMapSpecification(
     text: terrain.text,
     changed:
       entities.added.length + entities.updated.length + entities.removed.length > 0 ||
+      solids.added.length + solids.updated.length > 0 ||
       volumes.added.length + volumes.updated.length > 0 ||
       terrain.changed,
     entities,
     terrain,
+    solids,
     volumes,
   };
 }

@@ -218,9 +218,9 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
 
 - **`map_build`** — one call: clone the template, apply one validated desired-state map specification,
   register, and optionally compile it. The preferred `specification` object uses the same
-  `managedTerrain` / `managedEntities` / `managedPaths` / `managedVolumes` vocabulary as `map_sync_contract`. A specification can
+  `managedTerrain` / `managedEntities` / `managedPaths` / `managedSolids` / `managedVolumes` vocabulary as `map_sync_contract`. A specification can
   also define reusable named `regions`, reusable `components`, and transformed `placements`; one component may
-  contain local entities, paths, terrain, and checked solid volumes, and every placement is automatically namespaced. Legacy
+  contain local entities, paths, terrain, checked world solids, and gameplay volumes, and every placement is automatically namespaced. Legacy
   `terrain` / `entities` / `paths` inputs remain compatible. See
   [`examples/map-specification.json`](examples/map-specification.json) for a complete starter. Pass
   `dryRun:true` to generate and report the plan without writing, registering, or compiling anything.
@@ -230,7 +230,7 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
   preview-only by default; pass `apply:true` after reviewing the exact change counts.
 - **`map_preview`** — render a diagnostic top-down **image straight from the data**, no game launch.
   In addition to shaded terrain and water it overlays contours, cliff cells, ramp cells, current arrows,
-  entities, complete waypoint paths, tower ranges, camps, objectives, minimap bounds, checked trigger/blocker volumes, missing terrain
+  entities, complete waypoint paths, tower ranges, camps, objectives, minimap bounds, checked world solids and trigger/blocker volumes, missing terrain
   recipes, color-coded outlines recovered from real model `PHYS` blocks (including conservative curved
   sphere/capsule outlines), explicit Valve tree/obstruction broad phases,
   collision-enabled props whose physical bounds remain unknown,
@@ -238,7 +238,7 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
 - **`map_reachability`** — analyze the whole tile grid offline and report missing terrain recipes,
   cliff-separated regions, trapped spawns, blocked entrances, inaccessible objectives or camps, and
   waypoint segments that cross blocked cells. It recognizes generated ramps and checked player-blocking
-  volume footprints, treats Dota river water as walkable, and resolves collision-enabled props through
+  volume and concave world-solid footprints, treats Dota river water as walkable, and resolves collision-enabled props through
   ValveResourceFormat, preferring loose compiled models and the active addon's `pak01_dir.vpk` before the base Dota
   archive. Only collision recovered from a real non-empty model `PHYS` block is cached, transformed, previewed,
   and allowed to block covered cells; render/hitbox bounds are never substituted. Convex hull vertices project
@@ -475,6 +475,16 @@ contract explicitly uses `fill`. A terrain shape can also use
 `{"kind":"managedPath","name":"path_name","width":2}` to derive its tile-space stroke from an
 existing managed world-space path, keeping roads synchronized with route edits.
 
+`managedSolids` adds named, always-solid `func_brush` world geometry. Each solid supplies `center`, optional `yaw`,
+an explicit visible (non-`materials/tools`) `materials/...vmat` asset, and
+`extrusion: { points: [[x,y],...], height }`. The footprint may be convex
+or concave, but it must be one simple closed outline: duplicate points, collinear adjacent edges, crossings, touching
+non-adjacent edges, out-of-range coordinates, unsafe material paths, and reserved brush-property overrides are rejected.
+The MCP normalizes winding, triangulates the top and bottom deterministically, closes every side, and then proves every
+half-edge has exactly one opposite before writing the VMAP. Solids reconcile by targetname, mirror inside reusable
+components, appear in `map_preview`, and block their true concave footprint in offline reachability. The repository
+fixture round-trips an L-shaped solid through Valve's converter and compiles it into a real VPK.
+
 `managedVolumes` adds named convex gameplay solids in world coordinates. A volume chooses `size: [x,y,z]` for a box,
 `polygon: { points: [[x,y],...], height }` for a flat three- to 64-sided prism, or
 `polygon: { points: [[x,y],...], bottom: [z,...], top: [z,...] }` for a sloped one. Sloped volumes provide one local
@@ -496,9 +506,9 @@ the real link operation refuses to overwrite conflicting folders.
 
 Then launch it: `addon_launch_custom_game map="<name>"`.
 
-> Limitation: the MCP can safely generate checked box plus flat or sloped convex gameplay volumes, but general-purpose
-> **polygon-mesh world geometry** is still authored in **Hammer**. It does not sculpt concave/curved solids, bridges,
-> terrain props, or decorative cliff brushwork.
+> Limitation: the MCP can safely generate checked flat extrusions with convex or concave outlines plus flat/sloped
+> convex gameplay volumes. Freeform 3D meshes, sloped concave solids, curves, terrain props, and decorative cliff
+> brushwork still require Hammer or a future checked mesh recipe.
 
 ## Notes & limitations
 

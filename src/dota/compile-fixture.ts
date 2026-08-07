@@ -10,6 +10,7 @@ import {
   parseMapEntities,
 } from "./vmap.js";
 import { parseMapVolumes, reconcileMapVolumes } from "./map-volume.js";
+import { parseMapSolids, reconcileMapSolids } from "./map-solid.js";
 
 /** Apply the repository-owned fixture payload to a valid blank VMAP structural seed. */
 export function buildRepositoryCompileFixtureText(baseText: string): string {
@@ -50,7 +51,7 @@ export function buildRepositoryCompileFixtureText(baseText: string): string {
   ];
   for (const entity of entities) text = insertEntity(text, buildEntityBlock(entity, nodeId++));
 
-  return reconcileMapVolumes(text, [
+  text = reconcileMapVolumes(text, [
     {
       targetname: "fixture_polygon_no_wards",
       recipe: "noWards",
@@ -74,11 +75,28 @@ export function buildRepositoryCompileFixtureText(baseText: string): string {
       },
     },
   ]).text;
+  return reconcileMapSolids(text, [{
+    targetname: "fixture_concave_solid",
+    center: [0, -1024, 128],
+    material: "materials/dev/reflectivity_30.vmat",
+    extrusion: {
+      points: [
+        [-384, -384], [384, -384], [384, -128],
+        [-128, -128], [-128, 384], [-384, 384],
+      ],
+      height: 256,
+    },
+  }]).text;
 }
 
 export function inspectRepositoryCompileFixture(text: string): {
   entities: ReturnType<typeof parseMapEntities>;
+  solids: ReturnType<typeof parseMapSolids>;
   volumes: ReturnType<typeof parseMapVolumes>;
 } {
-  return { entities: parseMapEntities(text), volumes: parseMapVolumes(text) };
+  return {
+    entities: parseMapEntities(text),
+    solids: parseMapSolids(text),
+    volumes: parseMapVolumes(text),
+  };
 }
