@@ -435,6 +435,17 @@ structure, compiles it, launches one guarded Steam session, and asserts both a k
 disconnected route with an exact engine-proven repair suggestion. It always closes its own Dota session and removes
 both temporary addon trees. Nothing from Valve's blank VMAP is copied into this repository.
 
+For a real project, run `npm run test:engine-nav-map -- "C:\path\to\project" map_name` first. That command is a
+dry run by default. Add `--apply` only after reviewing the plan; `--no-compile` and `--no-attach` reuse an already
+compiled map and installed DebugSDK, and `--endpoints` or `--segments` narrows the checks. The runner saves the full
+structured result as `artifacts/mcp-engine-nav-map_name-latest.json` in the project and always asks the MCP tool to
+shut down a Dota session it launched. It refuses to replace an existing Dota session unless
+`--replace-running-dota` is explicitly supplied.
+
+The companion `npm run test:engine-visual-map -- "C:\path\to\project" map_name` command is also dry-run-first.
+Add `--apply` for the guarded minimap/camera check. Use `--no-screenshots` when calibrating several probe points;
+this keeps screenshot capture from interfering with Panorama telemetry while still saving the structured measurements.
+
 If engine startup is uncertain, run `map_engine_readiness_probe` before `map_engine_nav_test`; unlike the
 navigation test, the readiness probe sends no gameplay command and returns a screenshot plus structured
 console/window evidence explaining where startup stopped. Both tools accept `attachToRunningDota:true` for a

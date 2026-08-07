@@ -63,6 +63,9 @@ export interface Win32Result {
   error?: string;
   handle?: string;
   pid?: number;
+  /** Every non-sleep input action was issued only after Dota was verified as foreground. */
+  inputForeground?: boolean;
+  /** Whether Dota was still foreground after the complete action sequence. */
   foreground?: boolean;
   minimized?: boolean;
   window?: Win32Rect; // outer window rect (screen coords)
@@ -167,6 +170,12 @@ function Force-Foreground {
   Start-Sleep -Milliseconds 120
 }
 
+function Ensure-Foreground {
+  if ([W32]::GetForegroundWindow() -eq $h) { return $true }
+  if ($doFocus) { Force-Foreground }
+  return ([W32]::GetForegroundWindow() -eq $h)
+}
+
 # Resolve an action point to absolute screen coords (client-relative by default).
 function Resolve-Point($a) {
   $rects = Get-Rects
@@ -220,15 +229,25 @@ if ($spec.PSObject.Properties.Name -contains 'window' -and $spec.window -ne $nul
 
 # Input actions.
 $hasActions = ($spec.PSObject.Properties.Name -contains 'actions' -and $spec.actions -ne $null -and $spec.actions.Count -gt 0)
+$inputForeground = $null
 if ($hasActions) {
   if ($doFocus) { Force-Foreground }
+  $inputForeground = $true
   foreach ($a in $spec.actions) {
+    if ($a.type -ne 'sleep' -and -not (Ensure-Foreground)) {
+      Emit @{ ok = $false; error = "dota2 could not be verified as foreground before $($a.type) input"; inputForeground = $false; foreground = $false }
+      exit 0
+    }
     switch ($a.type) {
       'move' {
         $pt = Resolve-Point $a; [void][W32]::SetCursorPos($pt.X, $pt.Y); [void]$performed.Add("move->($($pt.X),$($pt.Y))")
       }
       'click' {
         $pt = Resolve-Point $a; [void][W32]::SetCursorPos($pt.X, $pt.Y); Start-Sleep -Milliseconds 20
+        if (-not (Ensure-Foreground)) {
+          Emit @{ ok = $false; error = 'dota2 lost foreground before mouse-down; no click was sent'; inputForeground = $false; foreground = $false }
+          exit 0
+        }
         $f = Btn-Flags $a.button
         $n = 1; if ($a.PSObject.Properties.Name -contains 'count' -and $a.count) { $n = [int]$a.count }
         if ($a.PSObject.Properties.Name -contains 'double' -and $a.double) { $n = 2 }
@@ -282,6 +301,7 @@ Emit @{
   ok = $true
   handle = ('0x{0:X}' -f [int64]$h)
   pid = $p.Id
+  inputForeground = $inputForeground
   foreground = $fgNow
   minimized = [W32]::IsIconic($h)
   window = $r.window

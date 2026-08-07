@@ -5,16 +5,22 @@ Last updated: 2026-08-07
 ## Current visual verification and wall milestone
 
 - Added `map_engine_visual_test`, a dry-run-first, single-launch minimap verifier that discovers native HUD geometry,
-  clicks normalized probes, reads the exact client camera position, attaches screenshots, and performs bounded shutdown.
+  clicks normalized probes, reads the exact client camera position, optionally attaches screenshots, and performs bounded shutdown.
 - DebugSDK 1.4.0 can optionally attach an invisible, idempotent Panorama camera bridge. Attach/detach preserves unrelated
   manifest entries; malformed manifests fail closed rather than being rewritten blindly.
 - Added a strongly validated `wall` Dota component. Open or closed outlines become overlapping checked convex
   `playerClip` volumes, making practical curved and concave base silhouettes reusable without unsafe concave solids.
-- Focused camera coordinate tests, bridge lifecycle tests, wall expansion tests, and the TypeScript build pass.
-- The first live acceptance run exposed two useful facts: Valve forbids an `id` on the bridge layout's root panel
-  (corrected), and Windows can return a successful input call after another application steals foreground focus.
-  The runner now fails closed before clicking and discards any screen capture made after focus loss. The completed
-  run's later probes are not treated as minimap evidence because their screenshots showed the clicks reached another app.
+- Added dry-run-first project CLIs for both engine checks. Each writes its structured result into the tested project's
+  `artifacts` directory; the navigation runner refuses to replace an existing Dota session unless explicitly permitted.
+- Windows input now verifies Dota immediately before every non-sleep action and again before mouse-down. Post-click
+  focus loss is distinguished from unsafe input, and camera telemetry has one bounded refocus/retry recovery.
+- The final measurement-only acceptance run completed all five native minimap probes with a 63-unit error at each point,
+  zero focus recoveries, and graceful shutdown. The prior failed/black screenshot is retained only as evidence that
+  per-probe capture is renderer-sensitive on this machine; it is not counted as a map failure.
+- The 3v3 acceptance contract moved the mirrored hard-camp pair 256 units away from a generated wall and removed a
+  two-cell accidental high shelf. Offline reachability now has zero holes, zero inaccessible camps, and only the
+  deliberate 384-cell off-map strip. The rebuilt map passed all four routes and all 64 Valve GridNav checks through
+  the new CLI with zero console errors and graceful shutdown.
 
 ## Verified milestones
 
@@ -96,12 +102,16 @@ Last updated: 2026-08-07
     two `dota_minimap_boundary` corners with overview KeyValues, safe source material/PNG paths, compiled material and
     hashed texture outputs, PNG dimensions, and the unrotated pixel-to-world transform. The real 3v3 overview passes:
     its 1024x1024 image at scale 16 projects exactly to the declared -8192 through +8192 world bounds.
+29. This milestone - added reusable project CLIs for real GridNav and minimap tests, hardened foreground verification
+    to the exact input moment, added bounded camera-telemetry focus recovery, and proved the 3v3 minimap with five
+    63-unit probes. It also removed the last accidental isolated shelf and wall-blocked camp, rebuilt the VPK, and
+    re-proved all four routes and all 64 real GridNav checks after segmented base walls were enabled.
 
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 238 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
-- MCP smoke suite: 199 passed, 0 failed, and 1 network-dependent Workshop search skipped.
+- Default suite: 245 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
+- MCP smoke suite: 200 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
 - The guided refresh runner completed all four safe checks in 33 seconds without opening Dota or Hammer. Because the
@@ -123,7 +133,7 @@ Last updated: 2026-08-07
 - Real Dota 3v3 contract: 86 managed entities, 4 managed paths, 97 terrain operations, and zero desired-state drift.
 - Real Dota 3v3 minimap: both boundary entities, overview metadata, 1024x1024 PNG, source/compiled material and
   hashed texture, and the scale-16 world transform validate with zero findings.
-- Offline 3v3 terrain: zero holes; only two known isolated regions (a tiny shelf and a deliberate off-map strip).
+- Offline 3v3 terrain: zero holes, zero inaccessible camps, and only the deliberate 384-cell off-map strip.
 - Installed official definitions expose 187 enum properties with 1,171 choices, 16 explicitly ranged properties,
   and 297 named-destination fields. All 157 acceptance-map entities are recognized with zero invalid types,
   choices, ranges, or unresolved named destinations.
@@ -131,10 +141,10 @@ Last updated: 2026-08-07
 - Acceptance map compiled successfully to `three_vs_three_blockout.vpk` on 2026-08-05.
 - The acceptance VMAP now contains two checked 32-sided boss no-ward prisms generated from one reusable component;
   both are contract-idempotent, visible in the diagnostic preview, and included in the fresh compiled VPK.
-- Final offline acceptance: compiled map present, zero validation errors, 3,623 walkable cells,
-  3,237 cells connected to the spawn network, zero terrain holes, and two known isolated-region warnings
-  (a 2-cell shelf and a deliberate 384-cell off-map strip).
-- Final diagnostic preview: 473 cliff cells, 127 ramp cells, 564 water cells, 86 managed entity overlays,
+- Final offline acceptance: compiled map present, zero validation errors, 3,619 walkable cells,
+  3,235 cells connected to the spawn network, zero terrain holes, and one known isolated-region warning
+  (the deliberate 384-cell off-map strip).
+- Final diagnostic preview: 469 cliff cells, 127 ramp cells, 564 water cells, 94 entity overlays,
   60 path segments, 10 tower ranges, 18 camps, 16 objectives, 3 currents, and one minimap boundary.
 
 ## Current engine acceptance result

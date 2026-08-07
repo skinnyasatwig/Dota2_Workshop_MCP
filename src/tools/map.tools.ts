@@ -1238,6 +1238,11 @@ export function registerMapTools(server: McpServer) {
       const results: Array<Record<string, unknown>> = [];
       const screenshotBuffers: Array<{ name: string; buffer: Buffer }> = [];
       const transientStallDismissals: Awaited<ReturnType<typeof closeTransientStallDialog>>[] = [];
+      const cameraFocusRecoveries: Array<{
+        probe: string;
+        reason: "post-input-focus" | "camera-timeout";
+        preparation: Awaited<ReturnType<typeof prepareAttachedEngineWindow>>;
+      }> = [];
       let fatalError: string | undefined;
       let shutdown: Awaited<ReturnType<typeof shutdownGame>> | undefined;
       let consoleTail: string[] = [];
@@ -1315,12 +1320,29 @@ export function registerMapTools(server: McpServer) {
             ],
           }, 30_000);
           if (!input.ok) throw new Error(`Minimap click "${probe.name}" failed: ${input.error ?? "unknown input error"}`);
-          if (input.foreground !== true) {
+          if (input.inputForeground !== true) {
             throw new Error(
-              `Dota lost foreground focus before minimap click "${probe.name}". The test stopped rather than clicking another application.`,
+              `Dota foreground focus could not be verified for minimap click "${probe.name}". The test stopped rather than clicking another application.`,
             );
           }
-          const camera = await requestCameraTelemetry(vc, queryTimeout);
+          if (input.foreground !== true) {
+            const preparation = await prepareAttachedEngineWindow(true);
+            cameraFocusRecoveries.push({ probe: probe.name, reason: "post-input-focus", preparation });
+            if (!preparation.ok) {
+              throw new Error(
+                `Dota lost focus after minimap click "${probe.name}" and could not be restored: ${preparation.error ?? "unknown focus error"}`,
+              );
+            }
+          }
+          let camera: Awaited<ReturnType<typeof requestCameraTelemetry>>;
+          try {
+            camera = await requestCameraTelemetry(vc, queryTimeout);
+          } catch (firstCameraError) {
+            const preparation = await prepareAttachedEngineWindow(true);
+            cameraFocusRecoveries.push({ probe: probe.name, reason: "camera-timeout", preparation });
+            if (!preparation.ok) throw firstCameraError;
+            camera = await requestCameraTelemetry(vc, queryTimeout);
+          }
           const actual = { x: camera.telemetry.camera.x, y: camera.telemetry.camera.y };
           const distance = cameraErrorDistance(expected, actual);
           let screenshot: Awaited<ReturnType<typeof captureWindowPng>> | undefined;
@@ -1379,6 +1401,7 @@ export function registerMapTools(server: McpServer) {
         results,
         failedProbeCount: failedProbes.length,
         transientStallDismissals,
+        cameraFocusRecoveries,
         consoleTail,
         fatalError,
         shutdown,
@@ -1389,6 +1412,7 @@ export function registerMapTools(server: McpServer) {
         `${results.length}/${chosenProbes.length} probe(s) completed; ${failedProbes.length} outside the ${allowedError}-unit tolerance.`,
         `Minimap geometry: ${discoveredRect ? JSON.stringify(discoveredRect) : "unavailable"}.`,
         `Screenshots: ${screenshotBuffers.length}/${shouldCapture ? chosenProbes.length : 0}; automatic shutdown: ${shutdown?.stopped ? "complete" : "FAILED"}.`,
+        `Camera focus recoveries: ${cameraFocusRecoveries.filter((recovery) => recovery.preparation.ok).length}/${cameraFocusRecoveries.length}.`,
         ...results.map((result) => `  [${result.passed ? "PASS" : "FAIL"}] ${result.name}: camera error ${Math.round(Number(result.distance))} units`),
         ...(fatalError ? [`Fatal: ${fatalError}`] : []),
         ...(shutdown ? [`Shutdown: ${shutdown.detail}`] : []),
