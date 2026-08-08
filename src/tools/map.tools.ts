@@ -1595,7 +1595,7 @@ export function registerMapTools(server: McpServer) {
         "Paths expand into complete linked waypoint chains. Missing named entities " +
         "are created; existing named entities are repaired; obsolete managed path nodes are removed; and declared " +
         "terrain shapes are restored while terrain outside those shapes is preserved. The operation is idempotent and " +
-        "declared entity-distance/path-separation assertions must pass before reconciliation. It " +
+        "declared entity-distance/entity-to-path/path-separation assertions must pass before reconciliation. It " +
         "refuses ambiguous duplicate targetnames, missing/unsafe material or model assets, or an unproven explicit " +
         "managed model-PHYS promise. Preview reports blockers " +
         "without writing. Defaults to preview-only; pass apply=true.",

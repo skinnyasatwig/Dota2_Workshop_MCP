@@ -21,6 +21,7 @@ test("spatial assertions measure entity distance and true polyline separation", 
     ],
     spatialAssertions: [
       { kind: "entityDistance", name: "tower_covers_entrance", from: "tower", to: "entrance", max: 700 },
+      { kind: "entityPathDistance", name: "tower_route_clearance", entity: "tower", path: "north", min: 500, max: 550 },
       { kind: "pathSeparation", name: "waves_stay_apart", pathA: "north", pathB: "south", min: 1000 },
     ],
   });
@@ -31,6 +32,7 @@ test("spatial assertions measure entity distance and true polyline separation", 
     actualDistance: result.actualDistance,
   })), [
     { name: "tower_covers_entrance", passed: true, actualDistance: 600 },
+    { name: "tower_route_clearance", passed: true, actualDistance: 512 },
     { name: "waves_stay_apart", passed: true, actualDistance: 1024 },
   ]);
   assert.doesNotThrow(() => assertSpatialAssertions(contract));
@@ -107,6 +109,17 @@ test("spatial assertions reject unsafe limits, duplicate names, and missing refe
     }),
     /Spatial assertion "missing_ref" is unresolved/,
   );
+  assert.throws(
+    () => parseMapSpecification({
+      requiredEntities: [],
+      managedEntities: [{ targetname: "tower", classname: "npc_dota_tower", origin: "0 0 128" }],
+      managedPaths: [{ name: "route", points: [[-10, 10, 128], [10, 10, 128]] }],
+      spatialAssertions: [
+        { kind: "entityPathDistance", name: "no_limit", entity: "tower", path: "route" },
+      ],
+    }),
+    /must set min or max/,
+  );
 });
 
 test("reusable component placement namespaces spatial assertion references", () => {
@@ -114,12 +127,16 @@ test("reusable component placement namespaces spatial assertion references", () 
     requiredEntities: [],
     components: {
       route_pair: {
+        managedEntities: [
+          { targetname: "tower", classname: "npc_dota_tower", origin: "0 0 128" },
+        ],
         managedPaths: [
           { name: "north", points: [[-512, 512, 128], [512, 512, 128]] },
           { name: "south", points: [[-512, -512, 128], [512, -512, 128]] },
         ],
         spatialAssertions: [
           { kind: "pathSeparation", name: "spacing", pathA: "north", pathB: "south", min: 1000 },
+          { kind: "entityPathDistance", name: "tower_clearance", entity: "tower", path: "north", max: 600 },
         ],
       },
     },
@@ -131,7 +148,9 @@ test("reusable component placement namespaces spatial assertion references", () 
 
   assert.deepEqual(contract.spatialAssertions, [
     { kind: "pathSeparation", name: "west_spacing", pathA: "west_north", pathB: "west_south", min: 1000 },
+    { kind: "entityPathDistance", name: "west_tower_clearance", entity: "west_tower", path: "west_north", max: 600 },
     { kind: "pathSeparation", name: "east_spacing", pathA: "east_north", pathB: "east_south", min: 1000 },
+    { kind: "entityPathDistance", name: "east_tower_clearance", entity: "east_tower", path: "east_north", max: 600 },
   ]);
   assert.ok(evaluateSpatialAssertions(contract).every((result) => result.passed));
 });

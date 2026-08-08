@@ -163,6 +163,13 @@
       "from": "radiant_fort",
       "to": "radiant_north_route_1",
       "max": 1200
+    },
+    {
+      "kind": "entityPathDistance",
+      "name": "fort_to_north_route",
+      "entity": "radiant_fort",
+      "path": "radiant_north_route",
+      "max": 800
     }
   ],
   "managedTerrain": [

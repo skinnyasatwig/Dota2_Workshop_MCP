@@ -23,6 +23,14 @@ export const spatialAssertionInputSchema = z.discriminatedUnion("kind", [
     pathB: z.string().min(1),
     min: boundedDistance.positive(),
   }).strict(),
+  z.object({
+    kind: z.literal("entityPathDistance"),
+    name: assertionName,
+    entity: z.string().min(1),
+    path: z.string().min(1),
+    min: boundedDistance.optional(),
+    max: boundedDistance.optional(),
+  }).strict(),
 ]);
 
 export type SpatialAssertion = z.infer<typeof spatialAssertionInputSchema>;
@@ -137,6 +145,19 @@ export function minimumPathSeparationWitness(a: ManagedMapPath, b: ManagedMapPat
   return minimum ?? { distance: Number.POSITIVE_INFINITY, points: [[0, 0], [0, 0]] };
 }
 
+export function minimumPointPathDistanceWitness(point: Point2, path: ManagedMapPath): DistanceWitness {
+  let minimum: DistanceWitness | undefined;
+  for (const [from, to] of pathSegments(path)) {
+    const closest = closestPointOnSegment(point, from, to);
+    const candidate: DistanceWitness = {
+      distance: Math.hypot(closest[0] - point[0], closest[1] - point[1]),
+      points: [[point[0], point[1]], closest],
+    };
+    if (!minimum || candidate.distance < minimum.distance) minimum = candidate;
+  }
+  return minimum ?? { distance: Number.POSITIVE_INFINITY, points: [[point[0], point[1]], [point[0], point[1]]] };
+}
+
 export function parseSpatialAssertions(
   value: unknown,
   field: string,
@@ -152,8 +173,8 @@ export function parseSpatialAssertions(
   for (const [index, assertion] of parsed.data.entries()) {
     if (names.has(assertion.name)) throw new Error(`${field} contains duplicate name "${assertion.name}": ${path}`);
     names.add(assertion.name);
-    if (assertion.kind === "entityDistance") {
-      if (assertion.from === assertion.to) {
+    if (assertion.kind === "entityDistance" || assertion.kind === "entityPathDistance") {
+      if (assertion.kind === "entityDistance" && assertion.from === assertion.to) {
         throw new Error(`${field}[${index}] must reference two different entities: ${path}`);
       }
       if (assertion.min === undefined && assertion.max === undefined) {
@@ -216,6 +237,40 @@ export function evaluateSpatialAssertions(contract: MapContract): SpatialAsserti
         references: [assertion.from, assertion.to],
         closestPoints: [from, to],
         detail: `Planar distance ${actualDistance.toFixed(2)}; required ` +
+          `${assertion.min === undefined ? "no minimum" : `minimum ${assertion.min}`}, ` +
+          `${assertion.max === undefined ? "no maximum" : `maximum ${assertion.max}`}.`,
+      };
+    }
+
+    if (assertion.kind === "entityPathDistance") {
+      const entity = entities.get(assertion.entity);
+      const path = paths.get(assertion.path);
+      if (!entity || !path) {
+        const missing = [!entity ? assertion.entity : undefined, !path ? assertion.path : undefined].filter(Boolean).join(", ");
+        return {
+          name: assertion.name,
+          kind: assertion.kind,
+          passed: false,
+          minimum: assertion.min,
+          maximum: assertion.max,
+          references: [assertion.entity, assertion.path],
+          detail: `Missing managed entity/path reference(s): ${missing}.`,
+        };
+      }
+      const witness = minimumPointPathDistanceWitness(entity, path);
+      const actualDistance = witness.distance;
+      const passed = (assertion.min === undefined || actualDistance >= assertion.min - 1e-6) &&
+        (assertion.max === undefined || actualDistance <= assertion.max + 1e-6);
+      return {
+        name: assertion.name,
+        kind: assertion.kind,
+        passed,
+        actualDistance,
+        minimum: assertion.min,
+        maximum: assertion.max,
+        references: [assertion.entity, assertion.path],
+        closestPoints: witness.points,
+        detail: `Minimum planar entity-to-polyline distance ${actualDistance.toFixed(2)}; required ` +
           `${assertion.min === undefined ? "no minimum" : `minimum ${assertion.min}`}, ` +
           `${assertion.max === undefined ? "no maximum" : `maximum ${assertion.max}`}.`,
       };

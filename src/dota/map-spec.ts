@@ -548,20 +548,30 @@ function expandComponent(
     mirrorOf: undefined,
     mirrorAxis: undefined,
   });
-  const transformSpatialAssertion = (assertion: SpatialAssertion): SpatialAssertion =>
-    assertion.kind === "entityDistance"
-      ? {
-          ...assertion,
-          name: localName(placement.name, assertion.name),
-          from: localName(placement.name, assertion.from),
-          to: localName(placement.name, assertion.to),
-        }
-      : {
-          ...assertion,
-          name: localName(placement.name, assertion.name),
-          pathA: localName(placement.name, assertion.pathA),
-          pathB: localName(placement.name, assertion.pathB),
-        };
+  const transformSpatialAssertion = (assertion: SpatialAssertion): SpatialAssertion => {
+    if (assertion.kind === "entityDistance") {
+      return {
+        ...assertion,
+        name: localName(placement.name, assertion.name),
+        from: localName(placement.name, assertion.from),
+        to: localName(placement.name, assertion.to),
+      };
+    }
+    if (assertion.kind === "entityPathDistance") {
+      return {
+        ...assertion,
+        name: localName(placement.name, assertion.name),
+        entity: localName(placement.name, assertion.entity),
+        path: localName(placement.name, assertion.path),
+      };
+    }
+    return {
+      ...assertion,
+      name: localName(placement.name, assertion.name),
+      pathA: localName(placement.name, assertion.pathA),
+      pathB: localName(placement.name, assertion.pathB),
+    };
+  };
   const transformVolume = (volume: ManagedMapVolume): ManagedMapVolume => {
     const transformedAngles = transformAngles(
       `0 ${volume.yaw ?? 0} 0`,

@@ -832,7 +832,7 @@ export function registerMapGenTools(server: McpServer) {
         "requiredEntities, plus reusable regions, components, and transformed placements. Legacy terrain/entities/paths " +
         "remain supported. Dry runs report missing/unsafe materials and models, and writes refuse those blockers before conversion. " +
         "Collision-enabled checked props must also prove real compiled Valve PHYS data before any write. " +
-        "Declared entity-distance and path-separation assertions must pass before reconciliation. " +
+        "Declared entity-distance, entity-to-path, and path-separation assertions must pass before reconciliation. " +
         "Terrain coordinates are tile units; entity/path coordinates are world units.",
       inputSchema: {
         projectRoot: z.string().optional(),
@@ -1112,7 +1112,7 @@ export function registerMapGenTools(server: McpServer) {
           "Show CRC-current render-only bounds for curated palette models (default true; never affects pathing).",
         ),
         showSpatialAssertions: z.boolean().optional().describe(
-          "Show passing/failing measured entity-distance and path-separation rules from the map contract (default true).",
+          "Show passing/failing entity-distance, entity-to-path, and path-separation rules from the map contract (default true).",
         ),
         resolveModelCollision: z.boolean().optional().describe(
           "Resolve and cache real model PHYS bounds through VRF (default true; no Dota launch).",

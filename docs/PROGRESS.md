@@ -494,6 +494,14 @@ Last updated: 2026-08-07
     shows both route-spacing bars, both passing at 1,024 units against the 1,000-unit rule, with zero failed assertions.
     Focused geometry and raster-color tests pass without launching Dota or Hammer.
 
+74. This milestone - added `entityPathDistance`, closing the gap between point-to-point and route-to-route checks.
+    One managed entity can now require a planar minimum and/or maximum to the closest point anywhere on a complete
+    managed polyline; segment interiors, generated waypoint names, reusable-component namespacing, mirroring, dry-run
+    reports, validation, semantic comparison, and preview witnesses all use the same evaluator. The real 3v3 contract
+    now protects each T1's relationship to both friendly creep routes. All four clearances measure 512 units inside a
+    450-to-600-unit band, both route pairs remain 1,024 units apart, and the VMAP acceptance sync remains at zero drift.
+    The regenerated preview shows six passing measurement bars and zero failures without launching Dota or Hammer.
+
 ## Current verification record
 
 - TypeScript build passes.

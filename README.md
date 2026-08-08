@@ -626,8 +626,9 @@ the terminal node explicitly removes stale `target` values (`startIndex`, `class
 `mirrorOf` plus `mirrorAxis` (`x`, `y`, or `xy`) enforces exact route symmetry. `map_validate`
 checks all expanded entities. `spatialAssertions` turns important layout intent into continuous data checks:
 `entityDistance` enforces a planar minimum and/or maximum between two managed entities (including generated path
-nodes), while `pathSeparation` measures the true closest points along two complete managed polylines rather than only
-comparing waypoints. Assertions are named, reference-checked, component-aware, and namespaced through reusable
+nodes), `entityPathDistance` measures one managed entity against the closest point anywhere on a complete route, and
+`pathSeparation` measures the true closest points along two complete managed polylines rather than only comparing
+waypoints. Assertions are named, reference-checked, component-aware, and namespaced through reusable
 placements. Build/sync refuses a violated assertion; validation reports the measured distance without writing.
 `map_preview` draws each measurement between its deterministic closest world points: bright green means the rule passes,
 red means it fails, and a red X identifies a zero-distance crossing. The same witness coordinates and measurements are
