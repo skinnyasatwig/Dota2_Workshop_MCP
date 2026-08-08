@@ -230,6 +230,9 @@ Default mode never writes the VMAP, invokes ResourceCompiler, launches Dota, or 
 Both artifacts are replaced atomically; the report carries a unique artifact-set ID plus the PNG byte count and SHA-256,
 and the runner reads the saved files back before declaring success. Run the same command with `--verify-only` to check the
 latest report/PNG pair without starting the MCP or touching the map.
+Before replacing a coherent prior pair, the runner also snapshots stable graybox-health counts (entities, requirements,
+reachability, holes, terrain, paths, towers, camps, objectives, and spatial rules) and reports every delta. Potentially risky
+changes become explicit review signals but do not veto a deliberate design change.
 Pass `--compile` only when a VPK build is wanted. The runner first requires the entire read-only gate to pass, then calls
 transactional `map_compile` and performs a second `requireCompiled:true` validation; the final verdict requires a committed,
 non-rolled-back compile and a fresh VPK. `--force` is accepted only together with `--compile`.

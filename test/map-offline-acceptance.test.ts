@@ -5,6 +5,10 @@ import {
   describeOfflineAcceptanceArtifact,
   verifyOfflineAcceptanceArtifact,
 } from "../src/dota/map-offline-acceptance-artifacts.js";
+import {
+  captureOfflineAcceptanceMetrics,
+  compareOfflineAcceptanceMetrics,
+} from "../src/dota/map-offline-acceptance-comparison.js";
 
 const passingInput = {
   stageErrors: { sync: false, compile: false, validation: false, preview: false },
@@ -119,4 +123,78 @@ test("offline acceptance artifact fingerprints detect stale or corrupt preview b
   assert.equal(changed.findings.some((finding) => finding.includes("byte length differs")), true);
   assert.equal(changed.findings.some((finding) => finding.includes("SHA-256 differs")), true);
   assert.equal(verifyOfflineAcceptanceArtifact(preview, null).ok, false);
+});
+
+const comparisonReport = {
+  ok: true,
+  stages: {
+    validation: {
+      structuredContent: {
+        entityCount: 165,
+        requirementCount: 148,
+        findings: [{ severity: "warn" }],
+        reachability: {
+          walkableCellCount: 3619,
+          reachableCellCount: 3235,
+          unreachableCellCount: 384,
+          holeCellCount: 0,
+          regionCount: 2,
+        },
+      },
+    },
+    preview: {
+      structuredContent: {
+        stats: {
+          waterCells: 564,
+          cliffCells: 469,
+          rampCells: 127,
+          overlays: {
+            entities: 94,
+            paths: 60,
+            towers: 10,
+            camps: 18,
+            objectives: 16,
+            spatialAssertions: 6,
+            failedSpatialAssertions: 0,
+          },
+        },
+      },
+    },
+  },
+};
+
+test("offline acceptance metric comparison stays quiet for an unchanged coherent run", () => {
+  const captured = captureOfflineAcceptanceMetrics(comparisonReport);
+  assert.equal(captured.ok, true);
+  assert.ok(captured.snapshot);
+  const comparison = compareOfflineAcceptanceMetrics(captured.snapshot, structuredClone(captured.snapshot));
+  assert.deepEqual(comparison.changedMetrics, []);
+  assert.deepEqual(comparison.attentionSignals, []);
+  assert.equal(comparison.requiresReview, false);
+});
+
+test("offline acceptance metric comparison flags risky deltas without rejecting design changes", () => {
+  const before = captureOfflineAcceptanceMetrics(comparisonReport).snapshot!;
+  const changedReport = structuredClone(comparisonReport);
+  changedReport.ok = false;
+  changedReport.stages.validation.structuredContent.findings.push({ severity: "error" });
+  changedReport.stages.validation.structuredContent.reachability.reachableCellCount = 3100;
+  changedReport.stages.validation.structuredContent.reachability.unreachableCellCount = 519;
+  changedReport.stages.validation.structuredContent.reachability.holeCellCount = 4;
+  changedReport.stages.preview.structuredContent.stats.overlays.towers = 8;
+  const after = captureOfflineAcceptanceMetrics(changedReport).snapshot!;
+  const comparison = compareOfflineAcceptanceMetrics(before, after);
+  assert.equal(comparison.requiresReview, true);
+  assert.equal(comparison.acceptanceChanged, true);
+  assert.equal(comparison.changedMetrics.some((delta) => delta.metric === "holeCells" && delta.delta === 4), true);
+  assert.equal(comparison.attentionSignals.some((signal) => signal.includes("pass to fail")), true);
+  assert.equal(comparison.attentionSignals.some((signal) => signal.includes("Unreachable cells")), true);
+  assert.equal(comparison.attentionSignals.some((signal) => signal.includes("Tower overlays")), true);
+});
+
+test("offline acceptance metric capture fails closed when evidence is incomplete", () => {
+  const captured = captureOfflineAcceptanceMetrics({ ok: true, stages: {} });
+  assert.equal(captured.ok, false);
+  assert.equal(captured.snapshot, null);
+  assert.equal(captured.findings.length > 10, true);
 });

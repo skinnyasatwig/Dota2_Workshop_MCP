@@ -556,10 +556,19 @@ Last updated: 2026-08-07
     missing metadata. The real read-only 3v3 run passed, saved a 22,970-byte PNG with SHA-256
     `6a199a037bf3938e37f595bf966c2579633fd50e07bd7843df02788253a49cfe`, and passed a separate verification-only run.
 
+82. This milestone - gave unattended acceptance runs a coherent previous-run comparison. A schema-4 report reduces the
+    large tool payloads to stable entity, requirement, validation, reachability, terrain, route, structure, and spatial-rule
+    metrics. Before replacing `latest`, the runner verifies and captures the prior report/PNG pair, lists every changed
+    metric, and calls out pass-to-fail changes, added warnings/errors/holes/unreachable cells/spatial failures, lost reachable
+    cells, or fewer paths/towers/camps/objectives as review signals. These signals are deliberately advisory because a user
+    may have requested the design change. Missing, corrupt, or incomplete baselines cannot masquerade as zero values and do
+    not block a healthy current run. Tests cover unchanged evidence, synthetic regressions, and incomplete input. The real
+    3v3 run found a coherent schema-3 predecessor, zero metric deltas, zero review signals, and remained accepted.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 378 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 381 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 208 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed palette-bound audit: 20 of 20 model CRCs and MDAT snapshots match the current Dota VPK.
 - Installed palette-gallery proof: the four-model `river-wetland` set passed exact CRC checks, decoded to textured GLBs,

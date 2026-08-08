@@ -11,6 +11,10 @@ import {
   describeOfflineAcceptanceArtifact,
   verifyOfflineAcceptanceArtifact,
 } from "../dist/dota/map-offline-acceptance-artifacts.js";
+import {
+  captureOfflineAcceptanceMetrics,
+  compareOfflineAcceptanceMetrics,
+} from "../dist/dota/map-offline-acceptance-comparison.js";
 import { writeFileAtomically } from "../dist/util/file-transaction.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -52,10 +56,21 @@ const reportPath = join(artifactDirectory, `mcp-offline-acceptance-${safeMapName
 const previewPath = join(artifactDirectory, `mcp-offline-acceptance-${safeMapName}-latest.png`);
 const verifyOnly = args.includes("--verify-only");
 
-async function verifySavedArtifacts() {
-  const saved = JSON.parse(await readFile(reportPath, "utf8"));
+async function inspectSavedArtifacts() {
+  let saved;
+  try {
+    saved = JSON.parse(await readFile(reportPath, "utf8"));
+  } catch (cause) {
+    return {
+      ok: false,
+      report: null,
+      findings: [`Latest report could not be read: ${cause instanceof Error ? cause.message : String(cause)}`],
+    };
+  }
   const findings = [];
-  if (saved.schemaVersion !== 3) findings.push(`Expected report schema 3, found ${saved.schemaVersion ?? "none"}.`);
+  if (saved.schemaVersion !== 3 && saved.schemaVersion !== 4) {
+    findings.push(`Expected report schema 3 or 4, found ${saved.schemaVersion ?? "none"}.`);
+  }
   if (typeof saved.artifactSetId !== "string" || saved.artifactSetId.length < 16) {
     findings.push("Report has no valid artifactSetId.");
   }
@@ -73,22 +88,39 @@ async function verifySavedArtifacts() {
   } else if (resolve(savedPreviewPath) !== resolve(previewPath)) {
     findings.push("Preview path does not identify this latest preview.");
   } else {
-    const previewBytes = await readFile(previewPath);
-    findings.push(...verifyOfflineAcceptanceArtifact(
-      previewBytes,
-      savedPreviewIntegrity,
-    ).findings);
+    try {
+      const previewBytes = await readFile(previewPath);
+      findings.push(...verifyOfflineAcceptanceArtifact(
+        previewBytes,
+        savedPreviewIntegrity,
+      ).findings);
+    } catch (cause) {
+      findings.push(`Latest preview could not be read: ${cause instanceof Error ? cause.message : String(cause)}`);
+    }
   }
-  if (findings.length > 0) throw new Error(`Acceptance artifact verification failed:\n- ${findings.join("\n- ")}`);
+  return { ok: findings.length === 0, report: saved, findings };
+}
+
+async function verifySavedArtifacts() {
+  const inspection = await inspectSavedArtifacts();
+  if (!inspection.ok) {
+    throw new Error(`Acceptance artifact verification failed:\n- ${inspection.findings.join("\n- ")}`);
+  }
+  const saved = inspection.report;
   console.log(`Acceptance artifacts verified: ${saved.artifactSetId}`);
   console.log(`Report: ${reportPath}`);
-  if (savedPreviewPath) console.log(`Preview: ${previewPath}`);
+  if (saved.artifacts?.preview) console.log(`Preview: ${previewPath}`);
+  return saved;
 }
 
 if (verifyOnly) {
   await verifySavedArtifacts();
   process.exit(0);
 }
+
+// Capture the coherent previous pair before the new PNG is installed. It is advisory
+// evidence only: a missing or corrupt baseline must not block a healthy current run.
+const previousArtifactInspection = await inspectSavedArtifacts();
 
 const transport = new StdioClientTransport({
   command: process.execPath,
@@ -210,8 +242,8 @@ try {
     preview: previewData,
     previewProduced: typeof previewImage === "string" && previewImage.length > 0,
   });
-  report = {
-    schemaVersion: 3,
+  const reportCore = {
+    schemaVersion: 4,
     artifactSetId,
     generatedAt: new Date().toISOString(),
     projectRoot,
@@ -225,6 +257,30 @@ try {
     ok: assessment.ok,
     criteria: assessment.criteria,
     stages: { sync, compilePreflight, validation, preview, compileExecution, postCompileValidation },
+  };
+  const metricCapture = captureOfflineAcceptanceMetrics(reportCore);
+  const previousMetricCapture = previousArtifactInspection.ok
+    ? captureOfflineAcceptanceMetrics(previousArtifactInspection.report)
+    : null;
+  const previousComparison = metricCapture.snapshot && previousMetricCapture?.snapshot
+    ? compareOfflineAcceptanceMetrics(previousMetricCapture.snapshot, metricCapture.snapshot)
+    : null;
+  report = {
+    ...reportCore,
+    ok: assessment.ok && metricCapture.ok,
+    criteria: { ...assessment.criteria, metricSnapshotProduced: metricCapture.ok },
+    metricSnapshot: metricCapture.snapshot,
+    metricFindings: metricCapture.findings,
+    previousRun: {
+      available: previousArtifactInspection.ok && previousMetricCapture?.ok === true,
+      artifactSetId: previousArtifactInspection.ok
+        ? previousArtifactInspection.report?.artifactSetId ?? null
+        : null,
+      comparison: previousComparison,
+      findings: previousArtifactInspection.ok
+        ? previousMetricCapture?.findings ?? []
+        : previousArtifactInspection.findings,
+    },
     artifacts: {
       report: reportPath,
       preview: previewImage ? previewPath : null,
@@ -252,6 +308,16 @@ for (const [name, stage] of Object.entries(report.stages)) {
   if (!stage) continue;
   const firstLine = stage.text.split(/\r?\n/, 1)[0] || "no text result";
   console.log(`[${stage.isError ? "FAIL" : "PASS"}] ${name}: ${firstLine}`);
+}
+const comparison = report.previousRun.comparison;
+if (comparison) {
+  console.log(
+    `Previous run: ${comparison.changedMetrics.length} metric change(s), ` +
+    `${comparison.attentionSignals.length} review signal(s).`,
+  );
+  for (const signal of comparison.attentionSignals) console.log(`  REVIEW: ${signal}`);
+} else {
+  console.log(`Previous run: no coherent comparable baseline (${report.previousRun.findings.join("; ") || "none saved"}).`);
 }
 console.log(`Acceptance: ${report.ok ? "PASS" : "FAIL"}`);
 console.log(`Report: ${reportPath}`);
