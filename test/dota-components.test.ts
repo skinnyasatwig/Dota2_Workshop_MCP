@@ -253,6 +253,10 @@ test("checked profile arches compose an irregular opening from sloped overhead s
       top: [0.25, 0.25],
       sides: [0.5, 1],
     },
+    faceTextureShifts: {
+      top: [0, 64],
+      sides: [16, -16],
+    },
   }]);
   const solids = expandDotaComponents([arch]).managedSolids;
 
@@ -278,6 +282,10 @@ test("checked profile arches compose an irregular opening from sloped overhead s
       top: [0.25, 0.25],
       sides: [0.5, 1],
     },
+    faceTextureShifts: {
+      top: [0, 64],
+      sides: [16, -16],
+    },
     extrusion: {
       points: [[-64, -128], [64, -128], [64, 128], [-64, 128]],
       height: 768,
@@ -295,6 +303,10 @@ test("checked profile arches compose an irregular opening from sloped overhead s
     faceTextureScales: {
       top: [0.25, 0.25],
       sides: [0.5, 1],
+    },
+    faceTextureShifts: {
+      top: [0, 64],
+      sides: [16, -16],
     },
     extrusion: {
       points: [[-96, -128], [96, -128], [96, 128], [-96, 128]],
@@ -523,6 +535,7 @@ test("checked multi-hole platforms emit only independently proven triangle pairs
     material: "materials/dev/reflectivity_30.vmat",
     faceMaterials: { top: "materials/dev/reflectivity_50.vmat" },
     faceTextureScales: { top: [0.25, 0.25], sides: [0.5, 1] },
+    faceTextureShifts: { top: [0, 64], sides: [16, -16] },
   }]);
   const expanded = expandDotaComponents([platform]);
 
@@ -535,7 +548,9 @@ test("checked multi-hole platforms emit only independently proven triangle pairs
     solid.extrusion.points.length === 3 &&
     solid.faceMaterials?.top === "materials/dev/reflectivity_50.vmat" &&
     solid.faceTextureScales?.top?.[0] === 0.25 &&
-    solid.faceTextureScales?.sides?.[0] === 0.5));
+    solid.faceTextureScales?.sides?.[0] === 0.5 &&
+    solid.faceTextureShifts?.top?.[1] === 64 &&
+    solid.faceTextureShifts?.sides?.[0] === 16));
   assert.deepEqual(
     expanded.managedNavSurfaces.map((surface) => surface.extrusion),
     expanded.managedSolids.map((solid) => solid.extrusion),

@@ -285,6 +285,16 @@ Last updated: 2026-08-07
     `0.25`, `0.5`, `1`, and negative mirrored scales survive `dmxconvert` and compile into a real VPK with Dota and
     Hammer closed. Texture shift, rotation, and alignment remain evidence-gated instead of being guessed.
 
+54. This milestone - added bounded role-based texture shift while keeping projection directions MCP-owned.
+    `faceTextureShifts` assigns finite U/V offsets to top, bottom, and/or side faces, expands them into the complete
+    generated axis streams, and rejects empty objects, non-finite values, out-of-range offsets, or mismatched face
+    counts before a write. Inspection recovers the fourth component of both Valve texture axes; reconciliation now
+    compares all four components of every U/V axis, so direction or shift drift causes a normal checked repair instead
+    of passing silently. Reusable solid components and mirrored placements preserve the role settings. The profile-arch
+    fixture proved zero, positive, and negative shifts survive `dmxconvert` and ResourceCompiler in a real disposable
+    addon with Dota and Hammer closed. Rotation and world-versus-face alignment remain intentionally unsupported until
+    their complete axis semantics have equally strong evidence.
+
 ## Current verification record
 
 - TypeScript build passes.

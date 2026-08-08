@@ -607,6 +607,13 @@ function expandComponent(
             ),
           }
         : {}),
+      ...(solid.faceTextureShifts
+        ? {
+            faceTextureShifts: Object.fromEntries(
+              Object.entries(solid.faceTextureShifts).map(([role, shift]) => [role, [...shift]]),
+            ),
+          }
+        : {}),
       extrusion,
       properties: localProperties(solid.properties, placement.name, deferLocalReferences),
     };

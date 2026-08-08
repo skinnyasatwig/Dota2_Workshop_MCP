@@ -239,7 +239,49 @@ export interface MapMeshNodeOptions {
   faceMaterialIndices?: readonly number[];
   /** One non-zero U/V projection scale for every face. Negative values mirror the texture. */
   faceTextureScales?: readonly (readonly [number, number])[];
+  /** One U/V projection shift for every face. Defaults to the generated axis offsets. */
+  faceTextureShifts?: readonly (readonly [number, number])[];
   physicsType?: "default" | "none";
+}
+
+export interface MapTextureAxes {
+  textureAxisU: string[];
+  textureAxisV: string[];
+}
+
+function axisWithShift(axis: string, shift: number): string {
+  const values = axis.trim().split(/\s+/).map(Number);
+  if (values.length !== 4 || values.some((value) => !Number.isFinite(value))) {
+    throw new Error("Generated texture axes must contain four finite values.");
+  }
+  values[3] = shift;
+  return vectorText(values);
+}
+
+/** Apply checked per-face U/V shifts without exposing or replacing the generated projection directions. */
+export function mapTextureAxesWithShifts(
+  mesh: Pick<MapMeshData, "textureAxisU" | "textureAxisV">,
+  faceTextureShifts?: readonly (readonly [number, number])[],
+): MapTextureAxes {
+  if (mesh.textureAxisU.length !== mesh.textureAxisV.length) {
+    throw new Error("Generated texture axis streams must have the same face count.");
+  }
+  if (faceTextureShifts === undefined) {
+    return { textureAxisU: [...mesh.textureAxisU], textureAxisV: [...mesh.textureAxisV] };
+  }
+  if (
+    faceTextureShifts.length !== mesh.textureAxisU.length ||
+    faceTextureShifts.some((shift) =>
+      shift.length !== 2 || shift.some((value) => !Number.isFinite(value) || Math.abs(value) > 32768))
+  ) {
+    throw new Error(
+      "faceTextureShifts must contain one finite U/V pair within +/-32768 for every mesh face.",
+    );
+  }
+  return {
+    textureAxisU: mesh.textureAxisU.map((axis, face) => axisWithShift(axis, faceTextureShifts[face][0])),
+    textureAxisV: mesh.textureAxisV.map((axis, face) => axisWithShift(axis, faceTextureShifts[face][1])),
+  };
 }
 
 /** Serialize checked half-edge data as a Valve-compatible CMapMesh node. */
@@ -288,11 +330,12 @@ export function buildMapMeshNode(mesh: MapMeshData, options: MapMeshNodeOptions)
       "faceTextureScales must contain one finite, non-zero U/V pair within +/-4096 for every mesh face.",
     );
   }
+  const textureAxes = mapTextureAxesWithShifts(mesh, options.faceTextureShifts);
   const edgeData = dataArray(edgeCount, [dataStream("flags", "flags", "int", Array(edgeCount).fill(0), 3)]);
   const faceData = dataArray(faceCount, [
     dataStream("textureScale", "textureScale", "vector2", faceTextureScales.map(vectorText), 0),
-    dataStream("textureAxisU", "textureAxisU", "vector4", mesh.textureAxisU, 0),
-    dataStream("textureAxisV", "textureAxisV", "vector4", mesh.textureAxisV, 0),
+    dataStream("textureAxisU", "textureAxisU", "vector4", textureAxes.textureAxisU, 0),
+    dataStream("textureAxisV", "textureAxisV", "vector4", textureAxes.textureAxisV, 0),
     dataStream("materialindex", "materialindex", "int", faceMaterialIndices, 8),
     dataStream("flags", "flags", "int", Array(faceCount).fill(0), 3),
   ]);

@@ -113,6 +113,11 @@ export function buildRepositoryCompileFixtureText(baseText: string): string {
               bottom: [-0.5, 0.5],
               sides: [0.5, 1],
             },
+            faceTextureShifts: {
+              top: [0, 64],
+              bottom: [-128, 256],
+              sides: [16, -16],
+            },
           },
           {
             kind: "bridge",

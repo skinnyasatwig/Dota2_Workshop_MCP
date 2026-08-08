@@ -5,6 +5,7 @@ import {
   buildMapMeshNode,
   MapMeshData,
   MeshPoint3,
+  mapTextureAxesWithShifts,
   numberText,
   vectorText,
 } from "./map-mesh.js";
@@ -42,6 +43,24 @@ export const managedMapSolidFaceTextureScalesInputSchema = z.object({
 );
 
 export interface ManagedMapSolidFaceTextureScales {
+  top?: [number, number];
+  bottom?: [number, number];
+  sides?: [number, number];
+}
+
+const textureShiftValue = z.number().finite().min(-32768).max(32768);
+const textureShiftPair = z.tuple([textureShiftValue, textureShiftValue]);
+
+export const managedMapSolidFaceTextureShiftsInputSchema = z.object({
+  top: textureShiftPair.optional(),
+  bottom: textureShiftPair.optional(),
+  sides: textureShiftPair.optional(),
+}).strict().refine(
+  (value) => value.top !== undefined || value.bottom !== undefined || value.sides !== undefined,
+  { message: "must override top, bottom, sides, or a combination of those roles" },
+);
+
+export interface ManagedMapSolidFaceTextureShifts {
   top?: [number, number];
   bottom?: [number, number];
   sides?: [number, number];
@@ -143,6 +162,7 @@ export const managedMapSolidInputSchema = z.object({
   material,
   faceMaterials: managedMapSolidFaceMaterialsInputSchema.optional(),
   faceTextureScales: managedMapSolidFaceTextureScalesInputSchema.optional(),
+  faceTextureShifts: managedMapSolidFaceTextureShiftsInputSchema.optional(),
   extrusion: solidExtrusionInputSchema,
   properties: z.record(scalar).optional(),
 }).strict().superRefine((solid, context) => {
@@ -206,6 +226,7 @@ export interface ManagedMapSolid {
   material: string;
   faceMaterials?: { top?: string; bottom?: string };
   faceTextureScales?: ManagedMapSolidFaceTextureScales;
+  faceTextureShifts?: ManagedMapSolidFaceTextureShifts;
   extrusion:
     | { points: [number, number][]; height: number; bottom?: never; top?: never }
     | { points: [number, number][]; height?: never; bottom: number[]; top: number[] };
@@ -219,6 +240,10 @@ export interface MapSolidFaceMaterialPlan {
 
 export interface MapSolidFaceTextureScalePlan {
   faceTextureScales: [number, number][];
+}
+
+export interface MapSolidFaceTextureShiftPlan {
+  faceTextureShifts: [number, number][];
 }
 
 /** Assign one checked material index to every generated top, bottom, and side triangle. */
@@ -251,6 +276,23 @@ export function mapSolidFaceTextureScalePlan(solid: ManagedMapSolid): MapSolidFa
   const sideFaceCount = solid.extrusion.points.length * 2;
   return {
     faceTextureScales: [
+      ...Array.from({ length: topFaceCount }, () => [...top] as [number, number]),
+      ...Array.from({ length: bottomFaceCount }, () => [...bottom] as [number, number]),
+      ...Array.from({ length: sideFaceCount }, () => [...sides] as [number, number]),
+    ],
+  };
+}
+
+/** Assign one checked texture shift pair to every generated top, bottom, and side triangle. */
+export function mapSolidFaceTextureShiftPlan(solid: ManagedMapSolid): MapSolidFaceTextureShiftPlan {
+  const top = solid.faceTextureShifts?.top ?? [32, 32];
+  const bottom = solid.faceTextureShifts?.bottom ?? [32, 32];
+  const sides = solid.faceTextureShifts?.sides ?? [32, 32];
+  const topFaceCount = solid.extrusion.points.length - 2;
+  const bottomFaceCount = topFaceCount;
+  const sideFaceCount = solid.extrusion.points.length * 2;
+  return {
+    faceTextureShifts: [
       ...Array.from({ length: topFaceCount }, () => [...top] as [number, number]),
       ...Array.from({ length: bottomFaceCount }, () => [...bottom] as [number, number]),
       ...Array.from({ length: sideFaceCount }, () => [...sides] as [number, number]),
@@ -291,6 +333,13 @@ export function parseManagedMapSolids(
             faceTextureScales: Object.fromEntries(
               Object.entries(solid.faceTextureScales).map(([role, scale]) => [role, [...scale]]),
             ) as ManagedMapSolidFaceTextureScales,
+          }
+        : {}),
+      ...(solid.faceTextureShifts
+        ? {
+            faceTextureShifts: Object.fromEntries(
+              Object.entries(solid.faceTextureShifts).map(([role, shift]) => [role, [...shift]]),
+            ) as ManagedMapSolidFaceTextureShifts,
           }
         : {}),
       extrusion,
@@ -397,6 +446,7 @@ export function buildMapSolidBlock(
   const mesh = buildExtrudedSolidMesh(parsed);
   const materialPlan = mapSolidFaceMaterialPlan(parsed);
   const textureScalePlan = mapSolidFaceTextureScalePlan(parsed);
+  const textureShiftPlan = mapSolidFaceTextureShiftPlan(parsed);
   const origin = vectorText(parsed.center);
   const yaw = numberText(((parsed.yaw ?? 0) % 360 + 360) % 360);
   const propertyLines = Object.entries({
@@ -411,6 +461,7 @@ export function buildMapSolidBlock(
     materials: materialPlan.materials,
     faceMaterialIndices: materialPlan.faceMaterialIndices,
     faceTextureScales: textureScalePlan.faceTextureScales,
+    faceTextureShifts: textureShiftPlan.faceTextureShifts,
   }).split("\n").map((line) => `\t\t${line}`).join("\n");
   return `"CMapEntity"
 {
@@ -498,6 +549,30 @@ function blockFaceTextureScales(block: string): [number, number][] | undefined {
     : undefined;
 }
 
+function blockFaceTextureAxes(
+  block: string,
+  attribute: "textureAxisU" | "textureAxisV",
+): [number, number, number, number][] | undefined {
+  const match = new RegExp(
+    `"standardAttributeName"\\s+"string"\\s+"${attribute}"[\\s\\S]*?` +
+      `"data"\\s+"vector4_array"\\s*\\[([\\s\\S]*?)\\]`,
+  ).exec(block);
+  if (!match) return undefined;
+  const axes = [...match[1].matchAll(/"([^"]+)"/g)].map((entry) =>
+    entry[1].trim().split(/\s+/).map(Number));
+  return axes.length && axes.every((axis) => axis.length === 4 && axis.every(Number.isFinite))
+    ? axes as [number, number, number, number][]
+    : undefined;
+}
+
+function blockFaceTextureShifts(block: string): [number, number][] | undefined {
+  const axisU = blockFaceTextureAxes(block, "textureAxisU");
+  const axisV = blockFaceTextureAxes(block, "textureAxisV");
+  return axisU && axisV && axisU.length === axisV.length
+    ? axisU.map((axis, face) => [axis[3], axisV[face][3]])
+    : undefined;
+}
+
 function sameNumbers(actual: readonly number[] | undefined, expected: readonly number[]): boolean {
   return !!actual && actual.length === expected.length && actual.every((value, index) => value === expected[index]);
 }
@@ -512,6 +587,17 @@ function sameTextureScales(
 ): boolean {
   return !!actual && actual.length === expected.length && actual.every((scale, index) =>
     scale.every((value, axis) => Math.abs(value - expected[index][axis]) <= 1e-4));
+}
+
+function sameTextureAxes(
+  actual: readonly (readonly number[])[] | undefined,
+  expected: readonly string[],
+): boolean {
+  return !!actual && actual.length === expected.length && actual.every((axis, index) => {
+    const expectedAxis = expected[index].trim().split(/\s+/).map(Number);
+    return expectedAxis.length === 4 && axis.length === 4 && axis.every((value, component) =>
+      Math.abs(value - expectedAxis[component]) <= 1e-4);
+  });
 }
 
 function sameVertices(
@@ -538,9 +624,13 @@ function solidBlockMatches(block: string, desired: ManagedMapSolid): boolean {
   const mesh = buildExtrudedSolidMesh(desired);
   const materialPlan = mapSolidFaceMaterialPlan(desired);
   const textureScalePlan = mapSolidFaceTextureScalePlan(desired);
+  const textureShiftPlan = mapSolidFaceTextureShiftPlan(desired);
+  const textureAxes = mapTextureAxesWithShifts(mesh, textureShiftPlan.faceTextureShifts);
   if (!sameStrings(blockMaterials(block), materialPlan.materials)) return false;
   if (!sameNumbers(blockFaceMaterialIndices(block), materialPlan.faceMaterialIndices)) return false;
   if (!sameTextureScales(blockFaceTextureScales(block), textureScalePlan.faceTextureScales)) return false;
+  if (!sameTextureAxes(blockFaceTextureAxes(block, "textureAxisU"), textureAxes.textureAxisU)) return false;
+  if (!sameTextureAxes(blockFaceTextureAxes(block, "textureAxisV"), textureAxes.textureAxisV)) return false;
   if (!sameVertices(positionVertices(block), mesh.vertices)) return false;
   for (const [name, expected] of Object.entries({
     vertexEdgeIndices: mesh.vertexEdgeIndices,
@@ -567,6 +657,7 @@ export interface ParsedMapSolid {
   material: string;
   faceMaterials?: { top?: string; bottom?: string };
   faceTextureScales?: ManagedMapSolidFaceTextureScales;
+  faceTextureShifts?: ManagedMapSolidFaceTextureShifts;
   footprint: [number, number][];
   height?: number;
   sloped?: { bottom: number[]; top: number[] };
@@ -640,6 +731,27 @@ export function parseMapSolids(text: string): ParsedMapSolid[] {
       ...(!defaultScale(bottomScale) ? { bottom: bottomScale } : {}),
       ...(!defaultScale(sideScale) ? { sides: sideScale } : {}),
     };
+    const shiftValues = blockFaceTextureShifts(range.block);
+    if (!shiftValues || shiftValues.length !== 4 * count - 4) continue;
+    const uniformRoleShift = (start: number, length: number): [number, number] | undefined => {
+      const role = shiftValues.slice(start, start + length);
+      const first = role[0];
+      return role.length === length && first && role.every((shift) =>
+        shift.every((value, axis) => Math.abs(value - first[axis]) <= 1e-4))
+        ? [...first]
+        : undefined;
+    };
+    const topShift = uniformRoleShift(0, topFaceCount);
+    const bottomShift = uniformRoleShift(topFaceCount, topFaceCount);
+    const sideShift = uniformRoleShift(topFaceCount * 2, count * 2);
+    if (!topShift || !bottomShift || !sideShift) continue;
+    const defaultShift = (shift: readonly number[]) =>
+      Math.abs(shift[0] - 32) <= 1e-4 && Math.abs(shift[1] - 32) <= 1e-4;
+    const faceTextureShifts = {
+      ...(!defaultShift(topShift) ? { top: topShift } : {}),
+      ...(!defaultShift(bottomShift) ? { bottom: bottomShift } : {}),
+      ...(!defaultShift(sideShift) ? { sides: sideShift } : {}),
+    };
     parsed.push({
       targetname: entity.targetname,
       center,
@@ -647,6 +759,7 @@ export function parseMapSolids(text: string): ParsedMapSolid[] {
       material: materialPath,
       ...(Object.keys(faceMaterials).length ? { faceMaterials } : {}),
       ...(Object.keys(faceTextureScales).length ? { faceTextureScales } : {}),
+      ...(Object.keys(faceTextureShifts).length ? { faceTextureShifts } : {}),
       footprint: top.map(([x, y]) => [x, y]),
       ...(flat
         ? { height: topHeights[0] - bottomHeights[0] }

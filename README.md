@@ -564,7 +564,9 @@ an explicit visible (non-`materials/tools`) `materials/...vmat` side/fallback as
 is available on `arch`, `profileArch`, `bridge`, `bridgeApproach`, `ringPlatform`, `holedPlatform`, and
 `multiHoledPlatform`. `faceTextureScales` similarly accepts checked `[u, v]` pairs for `top`, `bottom`, and/or `sides`.
 Values must be finite and non-zero within +/-4096; negative values intentionally mirror that texture axis. The MCP
-assigns these settings by generated face role, so callers never provide raw face indexes or arbitrary triangles. Use
+also accepts `faceTextureShifts` in the same three roles, with finite U/V offsets within +/-32768. It preserves the
+generated projection directions while replacing only their shift values. The MCP assigns all of these settings by
+generated face role, so callers never provide raw face indexes, axis vectors, or arbitrary triangles. Use
 `{ points: [[x,y],...], height }` for a flat centered extrusion, or provide one local height per outline corner with
 `{ points, bottom: [z,...], top: [z,...] }` for a sloped one. Every top height must remain above its matching bottom.
 The footprint may be convex
