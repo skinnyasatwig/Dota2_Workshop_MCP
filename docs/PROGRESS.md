@@ -265,10 +265,20 @@ Last updated: 2026-08-07
     fixture used three installed reflectivity materials on a six-piece profile arch, passed material preflight,
     round-tripped through `dmxconvert`, and compiled into a real VPK without launching Dota or Hammer.
 
+52. This milestone - added `multiHoledPlatform` for two to eight independent openings without accepting user-authored
+    faces. The exact-pinned, zero-dependency Earcut package proposes a triangulation; the MCP separately requires the
+    Euler-derived triangle count, every directed outer/hole boundary edge exactly once, every internal edge twice in
+    opposite directions, no crossings, overlaps, T-junctions, or degenerate pieces, one connected triangle graph, and
+    exact usable area. Outer and hole winding normalize deterministically while point-zero anchors remain stable. A
+    passing partition expands to matched checked solid/navigation triangle pairs, inheriting face materials, preview,
+    mirroring, drift repair, material preflight, and offline reachability. Tests prove two independent holes remain
+    open and intentionally reject a valid-looking aligned input whose candidate is nonconforming. Valve's converter
+    and ResourceCompiler accepted the two-hole, 14-triangle fixture without launching Dota or Hammer.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 304 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 311 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 203 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
@@ -279,7 +289,7 @@ Last updated: 2026-08-07
 - `npm run test:compiler-fixture` successfully round-tripped and compiled the repository-owned acceptance payload,
   including its sloped trigger, flat and sloped concave L-shaped world solids, checked rectangular arch, checked bridge
   deck/navigation twin, complete visible sloped bridge approach/navigation twin, three-material six-piece profile arch, eight-segment ring platform,
-  eight-segment unequal-outline holed platform, and explicit navigation obstruction,
+  eight-segment unequal-outline holed platform, 14-triangle two-hole platform, and explicit navigation obstruction,
   into a real VPK. The generated map uses Valve's installed blank template only as required hidden
   infrastructure, depends on no private 3v3 file, stores no copied Valve VMAP, and leaves no temporary addon trees.
   Its checked structures now originate inside one reusable component placement, proving the recipe path through

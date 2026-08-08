@@ -192,6 +192,19 @@
       "hole": [[-250, -150], [180, -220], [300, 20], [140, 240]],
       "height": 64,
       "material": "materials/dev/reflectivity_30.vmat"
+    },
+    {
+      "kind": "multiHoledPlatform",
+      "name": "twin_well_overlook",
+      "center": [3072, 2048, 352],
+      "yaw": -8,
+      "outer": [[-900, -700], [900, -700], [900, 700], [-900, 700]],
+      "holes": [
+        [[-700, -220], [-360, -180], [-380, 170], [-720, 140]],
+        [[300, -120], [680, -210], [720, 220], [330, 180]]
+      ],
+      "height": 64,
+      "material": "materials/dev/reflectivity_30.vmat"
     }
   ]
 }

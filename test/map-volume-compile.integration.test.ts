@@ -46,8 +46,10 @@ test(
       assert.match(roundTripped, /materials\/dev\/reflectivity_20\.vmat/);
       assert.match(roundTripped, /fixture_bridge_deck/);
       assert.match(roundTripped, /fixture_irregular_platform_segment_01_deck/);
+      assert.match(roundTripped, /fixture_multi_hole_platform_triangle_001_deck/);
       assert.match(roundTripped, /MCP Nav Surface: fixture_bridge_walkable/);
       assert.match(roundTripped, /MCP Nav Surface: fixture_irregular_platform_segment_01_walkable/);
+      assert.match(roundTripped, /MCP Nav Surface: fixture_multi_hole_platform_triangle_001_walkable/);
       assert.match(roundTripped, /materials\/editor\/dota_nav_walkable\.vmat/);
       const [dotaPak, corePak] = await Promise.all([
         Vpk.open(join(dotaRoot, "game", "dota", "pak01_dir.vpk")),

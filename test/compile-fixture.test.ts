@@ -41,6 +41,8 @@ test("repository compile fixture is self-contained and structurally inspectable"
       "fixture_irregular_platform_segment_06_deck",
       "fixture_irregular_platform_segment_07_deck",
       "fixture_irregular_platform_segment_08_deck",
+      ...Array.from({ length: 14 }, (_unused, index) =>
+        `fixture_multi_hole_platform_triangle_${String(index + 1).padStart(3, "0")}_deck`),
       "fixture_nav_obstruction",
       "fixture_polygon_no_wards",
       "fixture_profile_arch_arch_segment_01",
@@ -87,7 +89,7 @@ test("repository compile fixture is self-contained and structurally inspectable"
     fixture.entities.find((entity) => entity.targetname === "fixture_dire_team_core_start")?.classname,
     "info_player_start_badguys",
   );
-  assert.equal(fixture.solids.length, 29);
+  assert.equal(fixture.solids.length, 43);
   const concave = fixture.solids.find((solid) => solid.targetname === "fixture_concave_solid");
   assert.equal(concave?.footprint.length, 6);
   assert.equal(concave?.height, 256);
@@ -134,6 +136,8 @@ test("repository compile fixture is self-contained and structurally inspectable"
     "fixture_irregular_platform_segment_06_walkable",
     "fixture_irregular_platform_segment_07_walkable",
     "fixture_irregular_platform_segment_08_walkable",
+    ...Array.from({ length: 14 }, (_unused, index) =>
+      `fixture_multi_hole_platform_triangle_${String(index + 1).padStart(3, "0")}_walkable`),
     "fixture_ring_platform_segment_01_walkable",
     "fixture_ring_platform_segment_02_walkable",
     "fixture_ring_platform_segment_03_walkable",
@@ -154,6 +158,10 @@ test("repository compile fixture is self-contained and structurally inspectable"
     solid.targetname.startsWith("fixture_irregular_platform_segment_"));
   assert.equal(irregularSegments.length, 8);
   assert.ok(irregularSegments.every((solid) => solid.footprint.length === 4 && solid.height === 64));
+  const multiHoleTriangles = fixture.solids.filter((solid) =>
+    solid.targetname.startsWith("fixture_multi_hole_platform_triangle_"));
+  assert.equal(multiHoleTriangles.length, 14);
+  assert.ok(multiHoleTriangles.every((solid) => solid.footprint.length === 3 && solid.height === 64));
   assert.equal(fixture.solids.filter((solid) =>
     solid.targetname.startsWith("fixture_profile_arch_arch_segment_")).length, 4);
   assert.equal(fixture.volumes.length, 2);

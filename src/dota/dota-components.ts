@@ -11,6 +11,7 @@ import {
 import { ManagedMapNavSurface } from "./map-nav-surface.js";
 import { ManagedTerrainOperation } from "./map-terrain.js";
 import { ManagedMapVolume, regularPolygonFootprint } from "./map-volume.js";
+import { partitionPolygonWithHoles } from "./polygon-holes.js";
 
 const point2 = z.tuple([z.number().finite(), z.number().finite()]);
 const point3 = z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]);
@@ -526,6 +527,29 @@ const holedPlatformComponentSchema = z.object({
   }
 });
 
+const multiHoledPlatformComponentSchema = z.object({
+  kind: z.literal("multiHoledPlatform"),
+  name: nameSchema,
+  /** World-space center of the complete platform prism. Outlines are local XY coordinates. */
+  center: point3,
+  yaw: yawSchema,
+  outer: z.array(point2).min(3).max(64),
+  holes: z.array(z.array(point2).min(3).max(64)).min(2).max(8),
+  height: z.number().finite().min(1).max(4096),
+  material: visibleMaterialSchema,
+  faceMaterials: managedMapSolidFaceMaterialsInputSchema.optional(),
+}).strict().superRefine((platform, context) => {
+  try {
+    partitionPolygonWithHoles(platform.outer, platform.holes);
+  } catch (cause) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["holes"],
+      message: cause instanceof Error ? cause.message : String(cause),
+    });
+  }
+});
+
 const bossPitComponentSchema = z.object({
   kind: z.literal("bossPit"),
   name: nameSchema,
@@ -623,6 +647,7 @@ export const dotaComponentInputSchema = z.union([
   bridgeApproachComponentSchema,
   ringPlatformComponentSchema,
   holedPlatformComponentSchema,
+  multiHoledPlatformComponentSchema,
   bossPitComponentSchema,
   baseComponentSchema,
 ]);
@@ -682,6 +707,11 @@ export const WORLD_STRUCTURE_RECIPES = {
     parts: ["segment_*_deck", "segment_*_walkable"],
     purpose: "Irregular platform with a real paired-outline opening, composed from checked deck/navigation segments.",
     source: "MCP topology-validated composition of compiler-proven managedSolids and Valve navigation surfaces",
+  },
+  multiHoledPlatform: {
+    parts: ["triangle_*_deck", "triangle_*_walkable"],
+    purpose: "Platform with two to eight independent openings, emitted only after a conforming triangle partition is proven.",
+    source: "Earcut candidate generation plus MCP boundary, manifold, area, overlap, T-junction, and connectivity proofs",
   },
 } as const;
 
@@ -1163,6 +1193,37 @@ function holedPlatformParts(component: z.infer<typeof holedPlatformComponentSche
   return pairedOutlinePlatformParts(component);
 }
 
+function multiHoledPlatformParts(component: z.infer<typeof multiHoledPlatformComponentSchema>): {
+  solids: ManagedMapSolid[];
+  navSurfaces: ManagedMapNavSurface[];
+} {
+  const partition = partitionPolygonWithHoles(component.outer, component.holes);
+  const solids: ManagedMapSolid[] = [];
+  const navSurfaces: ManagedMapNavSurface[] = [];
+  for (const [index, triangle] of partition.triangles.entries()) {
+    const suffix = String(index + 1).padStart(3, "0");
+    const extrusion = {
+      points: triangle.map((vertex) => partition.points[vertex]) as [number, number][],
+      height: component.height,
+    };
+    solids.push({
+      targetname: `${component.name}_triangle_${suffix}_deck`,
+      center: component.center,
+      yaw: component.yaw,
+      material: component.material,
+      ...(component.faceMaterials ? { faceMaterials: component.faceMaterials } : {}),
+      extrusion,
+    });
+    navSurfaces.push({
+      targetname: `${component.name}_triangle_${suffix}_walkable`,
+      center: component.center,
+      yaw: component.yaw,
+      extrusion,
+    });
+  }
+  return { solids, navSurfaces };
+}
+
 function pitOperations(component: z.infer<typeof bossPitComponentSchema>): ExpandedDotaComponents {
   const [cx, cy] = component.tileCenter;
   const rimWidth = component.rimWidth ?? 1.5;
@@ -1404,6 +1465,12 @@ export function expandDotaComponents(components: DotaComponentInput[]): Expanded
       }
       case "holedPlatform": {
         const platform = holedPlatformParts(component);
+        managedSolids.push(...platform.solids);
+        managedNavSurfaces.push(...platform.navSurfaces);
+        break;
+      }
+      case "multiHoledPlatform": {
+        const platform = multiHoledPlatformParts(component);
         managedSolids.push(...platform.solids);
         managedNavSurfaces.push(...platform.navSurfaces);
         break;

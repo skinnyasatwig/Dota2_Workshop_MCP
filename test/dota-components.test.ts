@@ -492,6 +492,48 @@ test("checked holed platforms compose paired irregular outlines without raw mesh
   );
 });
 
+test("checked multi-hole platforms emit only independently proven triangle pairs", () => {
+  const outer: [number, number][] = [
+    [-900, -700], [900, -700], [900, 700], [-900, 700],
+  ];
+  const holes: [number, number][][] = [
+    [[-700, -220], [-360, -180], [-380, 170], [-720, 140]],
+    [[300, -120], [680, -210], [720, 220], [330, 180]],
+  ];
+  const [platform] = componentList.parse([{
+    kind: "multiHoledPlatform",
+    name: "twin_wells",
+    center: [0, -4096, 384],
+    yaw: -8,
+    outer,
+    holes,
+    height: 64,
+    material: "materials/dev/reflectivity_30.vmat",
+    faceMaterials: { top: "materials/dev/reflectivity_50.vmat" },
+  }]);
+  const expanded = expandDotaComponents([platform]);
+
+  assert.equal(expanded.managedSolids.length, 14);
+  assert.equal(expanded.managedNavSurfaces.length, 14);
+  assert.deepEqual(expanded.managedSolids.map((solid) => solid.targetname),
+    Array.from({ length: 14 }, (_unused, index) =>
+      `twin_wells_triangle_${String(index + 1).padStart(3, "0")}_deck`));
+  assert.ok(expanded.managedSolids.every((solid) =>
+    solid.extrusion.points.length === 3 && solid.faceMaterials?.top === "materials/dev/reflectivity_50.vmat"));
+  assert.deepEqual(
+    expanded.managedNavSurfaces.map((surface) => surface.extrusion),
+    expanded.managedSolids.map((solid) => solid.extrusion),
+  );
+  assert.throws(
+    () => componentList.parse([{ ...platform, holes: [holes[0]] }]),
+    /at least 2 element/,
+  );
+  assert.throws(
+    () => componentList.parse([{ ...platform, holes: [holes[0], holes[0]] }]),
+    /must not touch or overlap/,
+  );
+});
+
 test("boss pit components create structured terrain, entrances, and an official spawn", () => {
   const [pit] = componentList.parse([
     {
@@ -573,6 +615,6 @@ test("the documented Dota component assembly remains valid", async () => {
   assert.equal(specification.managedEntities?.filter((entity) => entity.classname === "npc_dota_fort").length, 2);
   assert.equal(specification.managedEntities?.filter((entity) => entity.classname === "npc_dota_tower").length, 5);
   assert.equal(specification.managedTerrain?.filter((operation) => operation.op === "ramp").length, 3);
-  assert.equal(specification.managedSolids?.length, 28);
-  assert.equal(specification.managedNavSurfaces?.length, 19);
+  assert.equal(specification.managedSolids?.length, 42);
+  assert.equal(specification.managedNavSurfaces?.length, 33);
 });

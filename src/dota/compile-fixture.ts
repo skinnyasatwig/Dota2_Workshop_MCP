@@ -149,6 +149,19 @@ export function buildRepositoryCompileFixtureText(baseText: string): string {
             height: 64,
             material: "materials/dev/reflectivity_30.vmat",
           },
+          {
+            kind: "multiHoledPlatform",
+            name: "multi_hole_platform",
+            center: [3072, 1536, 384],
+            yaw: -8,
+            outer: [[-900, -700], [900, -700], [900, 700], [-900, 700]],
+            holes: [
+              [[-700, -220], [-360, -180], [-380, 170], [-720, 140]],
+              [[300, -120], [680, -210], [720, 220], [330, 180]],
+            ],
+            height: 64,
+            material: "materials/dev/reflectivity_30.vmat",
+          },
         ],
       },
       team_pair: {

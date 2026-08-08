@@ -48,6 +48,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "earcut": "3.2.3",
     "zod": "^3.25.0"
   },
   "devDependencies": {

@@ -353,6 +353,43 @@ test("the checked irregular holed platform preserves its opening offline", () =>
   assert.equal(report.cells.find((cell) => cell.x === 8 && cell.y === 3)?.blockingVolume, undefined);
 });
 
+test("the checked multi-hole platform preserves two independent openings offline", () => {
+  const expanded = expandDotaComponents([{
+    kind: "multiHoledPlatform",
+    name: "test_twin_wells",
+    center: [1152, 896, 128],
+    outer: [[-900, -700], [900, -700], [900, 700], [-900, 700]],
+    holes: [
+      [[-700, -220], [-360, -180], [-380, 170], [-720, 140]],
+      [[300, -120], [680, -210], [720, 220], [330, 180]],
+    ],
+    height: 256,
+    material: "materials/dev/reflectivity_30.vmat",
+  }]);
+  const blockers: ParsedMapSolid[] = expanded.managedSolids.map((solid) => ({
+    targetname: solid.targetname,
+    center: solid.center,
+    yaw: solid.yaw ?? 0,
+    material: solid.material,
+    footprint: solid.extrusion.points,
+    height: solid.extrusion.height,
+    blocking: true,
+  }));
+  const report = analyzeTileGridReachability(
+    flatGrid(9, 7),
+    [entity("west_hole_probe", "info_target", 640, 896)],
+    { blockingVolumes: blockers },
+  );
+
+  assert.equal(report.cells.find((cell) => cell.x === 2 && cell.y === 3)?.blockingVolume, undefined);
+  assert.match(
+    report.cells.find((cell) => cell.x === 4 && cell.y === 3)?.blockingVolume ?? "",
+    /^test_twin_wells_triangle_\d+_deck$/,
+  );
+  assert.equal(report.cells.find((cell) => cell.x === 6 && cell.y === 3)?.blockingVolume, undefined);
+  assert.equal(report.cells.find((cell) => cell.x === 8 && cell.y === 3)?.blockingVolume, undefined);
+});
+
 test("creep routes warn when they cross explicit Valve obstruction classes", () => {
   const report = analyzeTileGridReachability(flatGrid(), [
     entity("path_test_1", "path_corner", 128, 384, "path_test_2"),
