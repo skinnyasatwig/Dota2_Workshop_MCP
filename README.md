@@ -308,7 +308,8 @@ targets with `@local:name`; it becomes the correct namespaced target for each co
 Team identity is deliberately separate from geometry: a placement may opt into `teamSwap: true` to exchange known
 stock Radiant/Dire player-start classes, team numbers 2/3, `direside`, goodguys/badguys unit names, and the exact
 stock Ancient/tower/fountain model pairs. Geometric mirroring never implies ownership, and neutral or custom values
-that are not one of those recognized pairs remain unchanged.
+that are not one of those recognized pairs remain unchanged. Reusable exact-absence selectors follow the same
+player-start class swap, so a placed cleanup rule cannot accidentally target the opposite team's spawn class.
 
 For common gameplay structure, `dotaComponents` provides strongly checked `base`, `ancient`, `tower`, `fountain`,
 `shop`, `camp`, `bossPit`, `playerStart`, `gate`, `baseBlocker`, `fowBlocker`, `wall`, `arch`, `bridge`,

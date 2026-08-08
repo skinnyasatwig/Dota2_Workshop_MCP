@@ -186,11 +186,16 @@ Last updated: 2026-08-07
     itself; neutral and custom values are retained. A whole Radiant base-kit test covers its Ancient, fountain, shop,
     player start, T2, gate, and blocker, while the repository fixture now sends both normal and mirrored/swapped team
     entities through Valve conversion and ResourceCompiler successfully.
+42. This follow-up - audited the team transformation across every team-bearing built-in component and reusable entity
+    selector. Exact absence rules now swap the two official player-start classes, `VisualTeam` 2/3 participates in
+    associated `direside` correction, and reverse Dire-to-Radiant conversion is covered. Regression tests prove that
+    neutral team 4, neutral absence selectors, and arbitrary custom labels remain byte-for-byte semantic values rather
+    than being guessed from words such as “dire”.
 
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 291 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 292 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 200 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.

@@ -402,12 +402,31 @@ test("teamSwap turns one reusable Radiant base kit into a checked Dire placement
   const specification = parseMapSpecification({
     components: {
       base_kit: {
+        managedAbsentEntities: [
+          {
+            targetname: "retired_start",
+            classname: "info_player_start_goodguys",
+            origin: "-1024 0 128",
+            angles: "0 0 0",
+          },
+          {
+            targetname: "neutral_absent",
+            classname: "info_target",
+            origin: "0 768 128",
+          },
+        ],
         managedEntities: [
           {
             targetname: "neutral_marker",
             classname: "info_target",
             origin: "0 1024 128",
-            properties: { teamnumber: 4, VisualTeam: 4, comment: "neutral" },
+            properties: { teamnumber: 4, VisualTeam: 4, direside: 0, comment: "neutral" },
+          },
+          {
+            targetname: "team_visual_marker",
+            classname: "info_target",
+            origin: "0 1152 128",
+            properties: { VisualTeam: 2, direside: 0 },
           },
         ],
         dotaComponents: [
@@ -498,8 +517,73 @@ test("teamSwap turns one reusable Radiant base kit into a checked Dire placement
   assert.deepEqual(entity("east_neutral_marker")?.properties, {
     teamnumber: "4",
     VisualTeam: "4",
+    direside: "0",
     comment: "neutral",
   });
+  assert.deepEqual(entity("east_team_visual_marker")?.properties, {
+    VisualTeam: "3",
+    direside: "1",
+  });
+  const absent = (targetname: string) =>
+    specification.managedAbsentEntities?.find((candidate) => candidate.targetname === targetname);
+  assert.deepEqual(absent("west_retired_start"), {
+    targetname: "west_retired_start",
+    classname: "info_player_start_goodguys",
+    origin: "-5120 0 128",
+    angles: "0 0 0",
+  });
+  assert.deepEqual(absent("east_retired_start"), {
+    targetname: "east_retired_start",
+    classname: "info_player_start_badguys",
+    origin: "5120 0 128",
+    angles: "0 180 0",
+  });
+  assert.equal(absent("east_neutral_absent")?.classname, "info_target");
+});
+
+test("teamSwap reverses recognized Dire identity without rewriting custom values", () => {
+  const specification = parseMapSpecification({
+    components: {
+      dire_piece: {
+        managedEntities: [
+          {
+            targetname: "tower",
+            classname: "npc_dota_tower",
+            origin: "0 0 128",
+            properties: {
+              teamnumber: 3,
+              direside: 1,
+              MapUnitName: "npc_dota_badguys_tower2_mid",
+              model: "models/props_structures/dire_tower002.vmdl",
+              customTeamLabel: "dire_art_direction",
+            },
+          },
+          {
+            targetname: "start",
+            classname: "info_player_start_badguys",
+            origin: "256 0 128",
+          },
+        ],
+      },
+    },
+    placements: [{ component: "dire_piece", name: "radiant_copy", teamSwap: true }],
+  });
+
+  const tower = specification.managedEntities?.find(
+    (entity) => entity.targetname === "radiant_copy_tower",
+  );
+  assert.deepEqual(tower?.properties, {
+    teamnumber: "2",
+    direside: "0",
+    MapUnitName: "npc_dota_goodguys_tower2_mid",
+    model: "models/props_structures/radiant_tower002.vmdl",
+    customTeamLabel: "dire_art_direction",
+  });
+  assert.equal(
+    specification.managedEntities?.find((entity) => entity.targetname === "radiant_copy_start")
+      ?.classname,
+    "info_player_start_goodguys",
+  );
 });
 
 test("component placements namespace and transform entities, paths, references, terrain, and volumes", () => {

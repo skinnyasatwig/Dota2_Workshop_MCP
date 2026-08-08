@@ -402,17 +402,22 @@ const DOTA_TEAM_MODEL_SWAP = new Map<string, string>([
   ["models/props_structures/bad_fountain001.vmdl", "models/props_structures/radiant_fountain002.vmdl"],
 ]);
 
+function swapDotaTeamClassname(classname: string): string {
+  return classname === "info_player_start_goodguys"
+    ? "info_player_start_badguys"
+    : classname === "info_player_start_badguys"
+      ? "info_player_start_goodguys"
+      : classname;
+}
+
 /** Swap only recognized stock Radiant/Dire identity; neutral and custom values remain untouched. */
 function swapDotaTeamEntity(entity: ManagedMapEntity): ManagedMapEntity {
-  const classname = entity.classname === "info_player_start_goodguys"
-    ? "info_player_start_badguys"
-    : entity.classname === "info_player_start_badguys"
-      ? "info_player_start_goodguys"
-      : entity.classname;
+  const classname = swapDotaTeamClassname(entity.classname);
   const entries = Object.entries(entity.properties ?? {});
   const teamAssociated = classname !== entity.classname || entries.some(([key, value]) => {
     const normalizedKey = key.toLowerCase();
-    return (normalizedKey === "teamnumber" && (value === "2" || value === "3")) ||
+    return ((normalizedKey === "teamnumber" || normalizedKey === "visualteam") &&
+        (value === "2" || value === "3")) ||
       (normalizedKey === "mapunitname" && /^npc_dota_(goodguys|badguys)_/i.test(value)) ||
       (normalizedKey === "model" && DOTA_TEAM_MODEL_SWAP.has(value.toLowerCase()));
   });
@@ -492,19 +497,24 @@ function expandComponent(
     };
     return placement.teamSwap ? swapDotaTeamEntity(transformed) : transformed;
   };
-  const transformAbsent = (entity: ManagedAbsentMapEntity): ManagedAbsentMapEntity => ({
-    ...entity,
-    targetname: entity.targetname ? localName(placement.name, entity.targetname) : undefined,
-    origin: entity.origin
-      ? transformOrigin(entity.origin, `${fieldPrefix(placement)}.managedAbsentEntities.origin`)
-      : undefined,
-    angles: transformAngles(
-      entity.angles,
-      placement.mirrorAxis,
-      `${fieldPrefix(placement)}.managedAbsentEntities.angles`,
-      path,
-    ),
-  });
+  const transformAbsent = (entity: ManagedAbsentMapEntity): ManagedAbsentMapEntity => {
+    const transformed: ManagedAbsentMapEntity = {
+      ...entity,
+      targetname: entity.targetname ? localName(placement.name, entity.targetname) : undefined,
+      origin: entity.origin
+        ? transformOrigin(entity.origin, `${fieldPrefix(placement)}.managedAbsentEntities.origin`)
+        : undefined,
+      angles: transformAngles(
+        entity.angles,
+        placement.mirrorAxis,
+        `${fieldPrefix(placement)}.managedAbsentEntities.angles`,
+        path,
+      ),
+    };
+    return placement.teamSwap
+      ? { ...transformed, classname: swapDotaTeamClassname(transformed.classname) }
+      : transformed;
+  };
   const transformPath = (managedPath: ManagedMapPath): ManagedMapPath => ({
     ...managedPath,
     name: localName(placement.name, managedPath.name),
