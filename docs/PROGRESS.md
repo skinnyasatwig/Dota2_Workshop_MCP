@@ -198,6 +198,13 @@ Last updated: 2026-08-07
     and rejects missing children, duplicate local instance names, dependency cycles, and depth beyond 32. Tests cover
     terrain, paths, volumes, generated camps, a mirrored team-aware base, and double team swaps. The documented example
     now nests its platform recipe, and Valve conversion/ResourceCompiler accepted a nested team-pair fixture.
+44. This acceptance follow-up - migrated the real 3v3 contract's six duplicated front-wall recipes to one three-segment
+    component, one nested base-shell wrapper, and mirrored Radiant/Dire placements. Expanded object counts stayed at
+    84 managed entities, 98 terrain operations, 10 volumes, and four paths. The only raw-contract numeric differences
+    were four mirrored yaw values below 0.0000005 degrees, beneath VMAP serialization precision. A real contract-sync
+    preview reported zero entity, volume, terrain, material, solid, or navigation changes. Offline validation remained
+    at zero errors/holes and the same deliberate 384-cell isolated strip; the diagnostic preview and reachability counts
+    were unchanged, and the existing compiled VPK passed required-freshness validation without launching Dota or Hammer.
 
 ## Current verification record
 
