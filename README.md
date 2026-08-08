@@ -279,7 +279,9 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
 - **`map_engine_visual_test`** proves that a minimap works rather than merely validating its files. One guarded
   launch discovers the native minimap rectangle through an invisible Panorama bridge, clicks normalized west/center/
   east/north/south points, compares the real camera position with the overview transform, optionally attaches checked
-  screenshots, and shuts down. It is dry-run-first and refuses to replace a running Dota session without explicit
+  screenshots, and shuts down. It waits for game state 7 by default so evidence comes from the rendered map rather than
+  Valve's state-6 team showcase; lower states require an explicit diagnostic override. It is dry-run-first and refuses
+  to replace a running Dota session without explicit
   permission. Valve's legacy overview `rotate` key is handled exactly as its client source does: `0` is north-up and
   any nonzero integer applies one clockwise quarter-turn; it is not a degree value. Set `screenshotMethod:"engine"`
   (or CLI flags `--screenshots --screenshot-method=engine`) for occlusion-proof Source 2 PNG evidence. Requested

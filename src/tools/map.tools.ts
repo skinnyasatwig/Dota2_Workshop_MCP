@@ -59,6 +59,7 @@ import { prepareAttachedEngineWindow, waitForEngineWindow } from "../dota/engine
 import { dotaWindowInfo, runWin32Spec } from "../dota/win32.js";
 import {
   cameraErrorDistance,
+  DOTA_GAME_STATE_HERO_SELECTION,
   DEFAULT_MINIMAP_PROBES,
   minimapProbePixel,
   minimapProbeWorld,
@@ -66,6 +67,7 @@ import {
   MinimapClientRect,
   MinimapProbe,
   requestCameraTelemetry,
+  resolveVisualReadyGameState,
   validateMinimapProbes,
 } from "../dota/engine-visual-test.js";
 import {
@@ -1140,7 +1142,9 @@ export function registerMapTools(server: McpServer) {
         compile: z.boolean().optional().describe("Compile all addon content, including the camera bridge (default true)."),
         forceCompile: z.boolean().optional(),
         ensureDebugSdk: z.boolean().optional().describe("Attach/update Lua and camera bridge before compiling (default true)."),
-        readyGameState: z.number().int().min(3).max(9).optional().describe("State required before clicking (default 6)."),
+        readyGameState: z.number().int().min(3).max(9).optional().describe(
+          "State required before clicking (default 7, when the actual map is rendered). Lower states are diagnostic overrides.",
+        ),
         hero: z.string().regex(/^npc_dota_hero_[a-z0-9_]+$/).optional().describe("Hero selected if the map waits at hero selection (default Axe)."),
         readyTimeoutMs: z.number().int().min(1000).max(180000).optional(),
         mapLoadGraceMs: z.number().int().min(0).max(30000).optional(),
@@ -1185,7 +1189,7 @@ export function registerMapTools(server: McpServer) {
       const allowedError = tolerance ?? 1000;
       const settleMs = cameraSettleMs ?? 750;
       const queryTimeout = cameraTimeoutMs ?? 5000;
-      const targetState = readyGameState ?? 6;
+      const targetState = resolveVisualReadyGameState(readyGameState);
       const selectedHero = hero ?? "npc_dota_hero_axe";
       const shouldCapture = captureScreenshots === true;
       const chosenScreenshotMethod = screenshotMethod ?? "window";
@@ -1324,12 +1328,12 @@ export function registerMapTools(server: McpServer) {
           vc,
           project.addonName,
           map,
-          Math.min(targetState, 3),
+          Math.min(targetState, DOTA_GAME_STATE_HERO_SELECTION),
           readyTimeoutMs ?? 120_000,
           mapLoadGraceMs ?? 5000,
         );
         if (!readiness.ready) throw new Error("The map did not reach hero selection before the readiness timeout.");
-        if (targetState > 3) {
+        if (targetState > DOTA_GAME_STATE_HERO_SELECTION) {
           vc.send(`dota_select_hero ${selectedHero}`);
           const inGame = await waitForEngineNavigationReady(vc, targetState, readyTimeoutMs ?? 120_000);
           if (!inGame.ready) throw new Error(`The map did not reach Dota game state ${targetState} after selecting ${selectedHero}.`);

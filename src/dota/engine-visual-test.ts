@@ -33,6 +33,22 @@ export interface CameraTelemetry {
   };
 }
 
+export const DOTA_GAME_STATE_HERO_SELECTION = 3;
+export const DEFAULT_VISUAL_READY_GAME_STATE = 7;
+
+/**
+ * State 6 (PRE_GAME) can still be Valve's full-screen team showcase. Visual
+ * evidence defaults to state 7 so renderer pixels and minimap input target the
+ * actual map. Lower states remain an explicit diagnostic override.
+ */
+export function resolveVisualReadyGameState(requested?: number): number {
+  const resolved = requested ?? DEFAULT_VISUAL_READY_GAME_STATE;
+  if (!Number.isInteger(resolved) || resolved < 3 || resolved > 9) {
+    throw new Error("Visual ready game state must be an integer from 3 through 9.");
+  }
+  return resolved;
+}
+
 const finite = z.number().finite();
 const telemetrySchema = z.object({
   camera: z.object({ x: finite, y: finite, z: finite }).strict(),

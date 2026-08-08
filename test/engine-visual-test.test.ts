@@ -2,12 +2,22 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   cameraErrorDistance,
+  DEFAULT_VISUAL_READY_GAME_STATE,
   minimapProbePixel,
   minimapProbeWorld,
   minimapRectFromTelemetry,
   parseCameraTelemetryResponse,
+  resolveVisualReadyGameState,
   validateMinimapProbes,
 } from "../src/dota/engine-visual-test.js";
+
+test("visual evidence defaults to the first actual map-render state", () => {
+  assert.equal(DEFAULT_VISUAL_READY_GAME_STATE, 7);
+  assert.equal(resolveVisualReadyGameState(), 7);
+  assert.equal(resolveVisualReadyGameState(6), 6, "an explicit diagnostic override is preserved");
+  assert.throws(() => resolveVisualReadyGameState(2), /3 through 9/);
+  assert.throws(() => resolveVisualReadyGameState(6.5), /integer/);
+});
 
 test("camera telemetry is correlated and strictly parsed", () => {
   const line = '[MCP] CAMERA_OK request_1 {"camera":{"x":10,"y":20,"z":30},"screen":{"width":1920,"height":1080},"minimap":{"id":"minimap","x":8,"y":816,"width":252,"height":252,"uiScaleX":1,"uiScaleY":1}}';

@@ -396,10 +396,17 @@ Last updated: 2026-08-07
     converter/compiler-clean and keeps the 6,000-warm-pixel gate unchanged; another live attempt was correctly stopped
     by the project's three-retry rule and now requires explicit future approval.
 
+64. This milestone - hardened every ordinary minimap visual run against a real false-readiness state found by the
+    animation fixture. `map_engine_visual_test` now defaults to Dota game state 7, the first actual map-render state,
+    rather than PRE_GAME state 6 where Valve can still display the full-screen team showcase. The readiness resolver is
+    bounded and unit-tested; explicit lower-state diagnostic overrides remain available and visible in the dry-run
+    report. The hero-selection setup gate now uses the shared state constant, and the user-facing tool/README/capability
+    text explains the distinction. This changes no map or gameplay and requires no Dota launch.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 346 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 347 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 207 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed palette-bound audit: 20 of 20 model CRCs and MDAT snapshots match the current Dota VPK.
 - Installed palette-gallery proof: the four-model `river-wetland` set passed exact CRC checks, decoded to textured GLBs,
