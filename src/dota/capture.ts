@@ -7,7 +7,7 @@
 //   "print"   — PrintWindow(PW_RENDERFULLCONTENT). Works even when the window is
 //               occluded/background, but a GPU 3D viewport often comes back BLACK.
 //
-// The in-game `jpeg`/`screenshot` console command (driven from debug.tools) is the
+// The in-game Source 2 screenshot commands (driven from debug.tools) are the
 // highest-fidelity path when a map is rendering; these OS captures are for the window
 // itself (tools mode, menus, panorama) and as a fallback.
 
@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "./process.js";
 import { dotaBlockerHint } from "./diagnose.js";
+import { decodePng } from "../util/imgmontage.js";
 
 export type WindowCaptureMode = "screen" | "print";
 
@@ -23,6 +24,90 @@ export interface WindowCaptureResult {
   buf?: Buffer;
   mode: WindowCaptureMode;
   error?: string;
+  quality?: WindowCaptureQuality;
+}
+
+export interface WindowCaptureQuality {
+  informative: boolean;
+  sampledPixels: number;
+  meanLuma: number;
+  lumaRange: number;
+  lumaStd: number;
+  nonBlackFraction: number;
+}
+
+const PS_IMAGE_TO_PNG = String.raw`param([string]$In, [string]$Out)
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Drawing
+$image = [System.Drawing.Image]::FromFile($In)
+try {
+  $image.Save($Out, [System.Drawing.Imaging.ImageFormat]::Png)
+} finally {
+  $image.Dispose()
+}
+`;
+
+/** Decode a Windows-supported image file and return a PNG suitable for pixel-level inspection. */
+export async function convertImageFileToPng(path: string): Promise<Buffer> {
+  if (process.platform !== "win32") {
+    throw new Error("Image conversion for engine screenshots is only supported on Windows.");
+  }
+  const dir = await mkdtemp(join(tmpdir(), "d2image-"));
+  const ps1 = join(dir, "convert.ps1");
+  const out = join(dir, "image.png");
+  try {
+    await writeFile(ps1, PS_IMAGE_TO_PNG, "utf8");
+    const result = await run(
+      "powershell",
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1, path, out],
+      { timeoutMs: 25_000 },
+    );
+    const png = await readFile(out).catch(() => undefined);
+    if (!png?.length) {
+      throw new Error(
+        `Image conversion produced no PNG. ${result.stderr.slice(-300) || result.stdout.slice(-300)}`.trim(),
+      );
+    }
+    return png;
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/** Reject uniform/black GPU capture frames before they can be presented as visual evidence. */
+export function inspectWindowCapturePng(buf: Buffer, maxSamples = 4096): WindowCaptureQuality {
+  const image = decodePng(buf);
+  const pixelCount = image.width * image.height;
+  const step = Math.max(1, Math.floor(pixelCount / Math.max(1, maxSamples)));
+  let sampledPixels = 0;
+  let min = 255;
+  let max = 0;
+  let sum = 0;
+  let sum2 = 0;
+  let nonBlack = 0;
+  for (let pixel = 0; pixel < pixelCount; pixel += step) {
+    const offset = pixel * 4;
+    const luma = (54 * image.rgba[offset] + 183 * image.rgba[offset + 1] + 19 * image.rgba[offset + 2]) >> 8;
+    min = Math.min(min, luma);
+    max = Math.max(max, luma);
+    sum += luma;
+    sum2 += luma * luma;
+    if (luma >= 8) nonBlack++;
+    sampledPixels++;
+  }
+  const count = Math.max(1, sampledPixels);
+  const meanLuma = sum / count;
+  const lumaStd = Math.sqrt(Math.max(0, sum2 / count - meanLuma * meanLuma));
+  const lumaRange = max - min;
+  const nonBlackFraction = nonBlack / count;
+  return {
+    informative: lumaRange >= 16 && lumaStd >= 4 && nonBlackFraction >= 0.01,
+    sampledPixels,
+    meanLuma,
+    lumaRange,
+    lumaStd,
+    nonBlackFraction,
+  };
 }
 
 const PS_SCRIPT = String.raw`param([string]$Out, [string]$Mode, [string]$Focus)
@@ -85,6 +170,9 @@ if ($Focus -eq 'true') {
   [void][WinCap]::AttachThreadInput($tCur, $tFg, $false)
   Start-Sleep -Milliseconds 250
 }
+if ($Mode -ne 'print' -and [WinCap]::GetForegroundWindow() -ne $h) {
+  throw 'Could not bring dota2 to the foreground; refusing screen capture to avoid capturing another application'
+}
 $r = New-Object WinCap+RECT
 [void][WinCap]::GetWindowRect($h, [ref]$r)
 $w = $r.Right - $r.Left; $ht = $r.Bottom - $r.Top
@@ -123,7 +211,17 @@ export async function captureWindowPng(
       const blocker = await dotaBlockerHint();
       return { mode, error: `Capture produced no image. ${res.stderr.slice(-300) || res.stdout.slice(-300)}`.trim() + blocker };
     }
-    return { buf, mode };
+    const quality = inspectWindowCapturePng(buf);
+    if (!quality.informative) {
+      return {
+        mode,
+        quality,
+        error:
+          `Capture produced an uninformative frame (luma range ${quality.lumaRange}, ` +
+          `standard deviation ${quality.lumaStd.toFixed(1)}, non-black ${(quality.nonBlackFraction * 100).toFixed(1)}%).`,
+      };
+    }
+    return { buf, mode, quality };
   } catch (err) {
     return { mode, error: err instanceof Error ? err.message : String(err) };
   } finally {

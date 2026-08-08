@@ -1,0 +1,202 @@
+{
+  "map": "example_arena",
+  "requiredEntities": [
+    {
+      "targetname": "radiant_fort",
+      "classname": "npc_dota_fort"
+    }
+  ],
+  "managedEntities": [
+    {
+      "targetname": "radiant_fort",
+      "classname": "npc_dota_fort",
+      "origin": "-2048 0 128",
+      "properties": {
+        "teamnumber": 2,
+        "MapUnitName": "npc_dota_goodguys_fort"
+      }
+    }
+  ],
+  "regions": {
+    "arena_highground": {
+      "shape": {
+        "kind": "polygon",
+        "points": [[16, 20], [48, 20], [52, 32], [48, 44], [16, 44], [12, 32]]
+      }
+    },
+    "arena_highground_mirror": {
+      "mirrorOf": "arena_highground",
+      "mirrorAxis": "x",
+      "around": [32, 32]
+    }
+  },
+  "components": {
+    "watch_marker": {
+      "managedEntities": [
+        {
+          "targetname": "marker",
+          "classname": "info_target",
+          "origin": "0 0 128",
+          "angles": "0 0 0",
+          "properties": {
+            "comment": "Reusable marker placed as @local:marker"
+          }
+        }
+      ],
+      "managedSolids": [
+        {
+          "targetname": "concave_wall",
+          "center": [0, 640, 128],
+          "material": "materials/dev/reflectivity_30.vmat",
+          "extrusion": {
+            "points": [[-384, -128], [384, -128], [384, 0], [0, 0], [0, 256], [-384, 256]],
+            "height": 256
+          }
+        },
+        {
+          "targetname": "sloped_concave_wall",
+          "center": [0, -640, 256],
+          "material": "materials/dev/reflectivity_30.vmat",
+          "extrusion": {
+            "points": [[-384, -128], [384, -128], [384, 0], [0, 0], [0, 256], [-384, 256]],
+            "bottom": [-192, -64, -64, -128, -256, -256],
+            "top": [64, 192, 192, 128, 0, 0]
+          }
+        }
+      ],
+      "managedVolumes": [
+        {
+          "targetname": "interaction_bounds",
+          "recipe": "heroTrigger",
+          "center": [0, 0, 128],
+          "size": [512, 512, 256]
+        },
+        {
+          "targetname": "asymmetric_no_wards",
+          "recipe": "noWards",
+          "center": [0, 0, 256],
+          "polygon": {
+            "points": [[-384, -256], [256, -320], [448, 64], [192, 384], [-320, 320]],
+            "height": 512
+          }
+        }
+      ],
+      "placements": [
+        {
+          "component": "watch_platform",
+          "name": "platform"
+        }
+      ]
+    },
+    "watch_platform": {
+      "dotaComponents": [
+        {
+          "kind": "playerStart",
+          "name": "start",
+          "team": "radiant",
+          "origin": [0, -768, 128]
+        },
+        {
+          "kind": "ringPlatform",
+          "name": "overlook",
+          "center": [0, 0, 384],
+          "outerRadius": 512,
+          "innerRadius": 256,
+          "height": 64,
+          "sides": 4,
+          "material": "materials/dev/reflectivity_30.vmat"
+        }
+      ]
+    }
+  },
+  "placements": [
+    {
+      "component": "watch_marker",
+      "name": "radiant_watch",
+      "worldOffset": [-1024, 1024, 0]
+    },
+    {
+      "component": "watch_marker",
+      "name": "dire_watch",
+      "worldOffset": [1024, 1024, 0],
+      "mirrorAxis": "x",
+      "teamSwap": true
+    }
+  ],
+  "managedPaths": [
+    {
+      "name": "radiant_north_route",
+      "classname": "path_corner",
+      "startIndex": 1,
+      "points": [
+        [-1536, 512, 128],
+        [0, 512, 128],
+        [1536, 512, 128]
+      ],
+      "maxSegmentLength": 1600
+    },
+    {
+      "name": "radiant_south_route",
+      "classname": "path_corner",
+      "startIndex": 1,
+      "mirrorOf": "radiant_north_route",
+      "mirrorAxis": "y",
+      "points": [
+        [-1536, -512, 128],
+        [0, -512, 128],
+        [1536, -512, 128]
+      ],
+      "maxSegmentLength": 1600
+    }
+  ],
+  "spatialAssertions": [
+    {
+      "kind": "pathSeparation",
+      "name": "radiant_wave_spacing",
+      "pathA": "radiant_north_route",
+      "pathB": "radiant_south_route",
+      "min": 1000
+    },
+    {
+      "kind": "entityDistance",
+      "name": "fort_to_first_waypoint",
+      "from": "radiant_fort",
+      "to": "radiant_north_route_1",
+      "max": 1200
+    },
+    {
+      "kind": "entityPathDistance",
+      "name": "fort_to_north_route",
+      "entity": "radiant_fort",
+      "path": "radiant_north_route",
+      "max": 800
+    }
+  ],
+  "managedTerrain": [
+    {
+      "op": "height",
+      "level": 1,
+      "shape": {
+        "kind": "region",
+        "name": "arena_highground"
+      }
+    },
+    {
+      "op": "tileset",
+      "tileset": 1,
+      "shape": {
+        "kind": "managedPath",
+        "name": "radiant_north_route",
+        "width": 2
+      }
+    },
+    {
+      "op": "ramp",
+      "shape": {
+        "kind": "managedPath",
+        "name": "radiant_south_route",
+        "width": 2
+      }
+    }
+  ]
+}

@@ -1,14 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { readdir, stat, readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { resolveProject } from "../config.js";
-import { requireDotaPaths, DotaPaths } from "../dota/paths.js";
+import { requireDotaPaths } from "../dota/paths.js";
 import { getVConsole, defaultVconPort, ConsoleLine } from "../dota/vconsole.js";
-import { buildLaunchArgs } from "../dota/launch.js";
-import { run, spawnDetached, killProcess, npmCommand } from "../dota/process.js";
-import { ensureDir } from "../util/fsx.js";
+import { buildDotaLaunchTarget, buildLaunchArgs } from "../dota/launch.js";
+import { run, npmCommand } from "../dota/process.js";
+import { restartGame } from "../dota/game-session.js";
 import { captureWindowPng } from "../dota/capture.js";
+import { captureEngineScreenshot } from "../dota/engine-screenshot.js";
 import { json, text, image, error, guard, ToolResult } from "../util/result.js";
 
 let sentinelCounter = 0;
@@ -33,33 +32,6 @@ function findErrors(lines: ConsoleLine[]): string[] {
 const VCON_HINT =
   "Could not reach the VConsole channel. Launch the game in tools mode first (addon_launch_custom_game), " +
   "and make sure it was started with -tools (and matching -vconport if you overrode it).";
-
-/** Full relaunch helper shared by dota_restart_game, dota_dev_cycle and dota_selftest. */
-export async function restartGame(
-  dota: DotaPaths,
-  addon: string,
-  map: string,
-  port: number,
-  cheats: boolean,
-  reconnect: boolean,
-): Promise<{ pid?: number; command: string; killed: boolean; reconnected: boolean }> {
-  const args = buildLaunchArgs({ addon, map, insecure: true, dev: true, cheats, vconPort: port });
-  const command = `"${dota.dota2Exe}" ${args.join(" ")}`;
-  getVConsole(port).disconnect();
-  const kill = await killProcess("dota2.exe");
-  await sleep(1500); // let the OS release file locks
-  const { pid } = spawnDetached(dota.dota2Exe, args, dota.binWin64);
-  let reconnected = false;
-  if (reconnect) {
-    try {
-      await getVConsole(port).connectWithRetry(60_000, 1000);
-      reconnected = true;
-    } catch {
-      /* still loading */
-    }
-  }
-  return { pid, command, killed: kill.code === 0, reconnected };
-}
 
 export function registerDebugTools(server: McpServer) {
   server.registerTool(
@@ -175,7 +147,8 @@ export function registerDebugTools(server: McpServer) {
       const port = vconPort ?? defaultVconPort();
       if (dryRun) {
         const args = buildLaunchArgs({ addon: name, map, insecure: true, dev: true, cheats: cheats !== false, vconPort: port });
-        return text(`[dry run]\ntaskkill /F /IM dota2.exe\n"${dota.dota2Exe}" ${args.join(" ")}`);
+        const target = buildDotaLaunchTarget(dota.root, dota.dota2Exe, args, { steamExe: dota.steamExe });
+        return text(`[dry run]\ntaskkill /F /IM dota2.exe\n"${target.executable}" ${target.args.join(" ")}`);
       }
       const r = await restartGame(dota, name, map, port, cheats !== false, reconnect !== false);
       return json(
@@ -259,28 +232,30 @@ export function registerDebugTools(server: McpServer) {
       title: "Capture a screenshot",
       description:
         "Screenshot the running game — two distinct variants:\n" +
-        "• method 'game' (a.k.a. 'console'): the in-game RENDER via the `jpeg` console command — the true rendered " +
-        "frame, highest fidelity, best when a map is actually rendering.\n" +
+        "• method 'game' (a.k.a. 'console'): the in-game RENDER via Source 2's `png_screenshot` by default. " +
+        "JPEG stays explicit because some Workshop sessions crash in its JPEG renderer.\n" +
         "• method 'window': the dota2 WINDOW via the OS, captured with real screen pixels (CopyFromScreen) so the 3D " +
         "viewport is NOT black; it is focused first by default (focus:false to skip). Works in menus/tools/Panorama too.\n" +
         "• method 'print': offscreen PrintWindow capture (grabs an occluded/background window, but a GPU 3D viewport " +
         "may come back black).\n" +
-        "• method 'auto' (default): tries the in-game render, then falls back to a window capture.",
+        "• method 'auto' (default): safely tries a focused window capture, then an offscreen PrintWindow fallback. " +
+        "It never sends an in-game screenshot command.",
       inputSchema: {
         method: z.enum(["auto", "game", "console", "window", "print"]).optional(),
-        quality: z.number().int().min(1).max(100).optional().describe("JPEG quality for the in-game render method (default 90)."),
+        format: z.enum(["png", "jpeg"]).optional().describe("Dota renderer format for game/console mode (default PNG)."),
+        quality: z.number().int().min(1).max(100).optional().describe("JPEG quality for game/console mode (default 90; ignored for PNG)."),
         focus: z.boolean().optional().describe("For the 'window' method: bring dota2 to the foreground first (default true)."),
         vconPort: z.number().int().min(1).max(65535).optional(),
       },
     },
-    guard(async ({ method, quality, focus, vconPort }): Promise<ToolResult> => {
+    guard(async ({ method, format, quality, focus, vconPort }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
       const raw = method ?? "auto";
       // Normalize aliases: 'game' === 'console' (in-game render); 'window' === screen capture.
       const mode = raw === "game" ? "console" : raw;
 
-      // In-game render: send `jpeg`, then read the new file from the screenshots dir.
-      if (mode === "console" || mode === "auto") {
+      // In-game render: ask Source 2 for an image, then verify the newly created file.
+      if (mode === "console") {
         const vc = getVConsole(vconPort);
         let connected = vc.isConnected();
         if (!connected) {
@@ -288,59 +263,43 @@ export function registerDebugTools(server: McpServer) {
             await vc.connect();
             connected = true;
           } catch {
-            /* fall through to window capture in auto mode */
+            /* handled below */
           }
         }
         if (connected) {
-          const dir = dota.screenshotsDir;
-          await ensureDir(dir);
-          const before = new Set(await readdir(dir).catch(() => []));
-          const sinceMs = Date.now() - 1000;
-          vc.send(`jpeg ${quality ?? 90}`);
-          const isImg = (n: string) => /\.(jpe?g|png|tga)$/i.test(n);
-          let found: string | undefined;
-          // Pick the NEWEST qualifying image (a brand-new name always beats an old file
-          // merely touched within the window) — not whatever readdir happens to list last.
-          for (let i = 0; i < 16 && !found; i++) {
-            await sleep(250);
-            let bestScore = -1;
-            for (const name of (await readdir(dir).catch(() => [])) as string[]) {
-              if (!isImg(name)) continue;
-              const st = await stat(join(dir, name)).catch(() => null);
-              if (!st) continue;
-              const isNew = !before.has(name);
-              if (!isNew && st.mtimeMs < sinceMs) continue;
-              const score = st.mtimeMs + (isNew ? 1e13 : 0);
-              if (score > bestScore) {
-                bestScore = score;
-                found = name;
-              }
-            }
+          const screenshot = await captureEngineScreenshot({
+            screenshotsDir: dota.screenshotsDir,
+            sendCommand: async (command) => (await vc.sendAndCapture(command, nextSentinel(), 1500)).map((line) => line.text),
+            format,
+            quality,
+          });
+          if (screenshot.buf) {
+            return image(
+              screenshot.buf.toString("base64"),
+              "image/png",
+              `Screenshot (Dota renderer): ${screenshot.sourcePath} ` +
+                `(${screenshot.dimensions?.width}x${screenshot.dimensions?.height}, ` +
+                `${Math.round((screenshot.sourceBytes ?? 0) / 1024)} KB source)`,
+            );
           }
-          if (found) {
-            await sleep(200);
-            const fp = join(dir, found);
-            const buf = await readFile(fp);
-            const mimeType = /\.png$/i.test(found) ? "image/png" : "image/jpeg";
-            return image(buf.toString("base64"), mimeType, `Screenshot (console): ${fp} (${Math.round(buf.length / 1024)} KB)`);
-          }
-          if (mode === "console") {
-            return error(`Sent 'jpeg' but no new screenshot appeared in ${dota.screenshotsDir}. Is a map rendering? Try method 'window'.`);
-          }
-        } else if (mode === "console") {
+          return error(`${screenshot.error ?? "Dota renderer capture failed."} Is a map rendering? Try method 'window'.`);
+        } else {
           return error(VCON_HINT);
         }
       }
 
-      // Window capture (and the auto fallback): grab the dota2 window via the OS.
+      // Safe OS capture. Auto never invokes Dota's crash-prone in-game JPEG path.
       const captureMode = raw === "print" ? "print" : "screen";
-      const res = await captureWindowPng(captureMode, focus !== false);
+      let res = await captureWindowPng(captureMode, focus !== false);
+      if ((!res.buf || !res.buf.length) && raw === "auto") {
+        res = await captureWindowPng("print", false);
+      }
       if (res.buf && res.buf.length) {
-        const label = captureMode === "print" ? "PrintWindow, may be black for 3D" : "real screen pixels";
+        const label = res.mode === "print" ? "PrintWindow, may be black for 3D" : "real screen pixels";
         return image(res.buf.toString("base64"), "image/png", `Screenshot (window: ${label}, ${Math.round(res.buf.length / 1024)} KB)`);
       }
       return error(
-        `Could not capture the dota2 window (${captureMode}). ${res.error ?? ""}`.trim() +
+        `Could not capture the dota2 window (${res.mode}). ${res.error ?? ""}`.trim() +
           " Is dota2.exe running with a visible window?",
       );
     }),

@@ -3,12 +3,14 @@ import { z } from "zod";
 import { join } from "node:path";
 import { resolveProject } from "../config.js";
 import { requireDotaPaths } from "../dota/paths.js";
-import { run, spawnDetached, npmCommand } from "../dota/process.js";
+import { run, spawnDetached, npmCommand, formatCommand } from "../dota/process.js";
 import { AddonProject } from "../dota/project.js";
-import { buildLaunchArgs } from "../dota/launch.js";
+import { buildDotaLaunchTarget, buildLaunchArgs } from "../dota/launch.js";
 import { defaultVconPort } from "../dota/vconsole.js";
 import { pathExists } from "../util/fsx.js";
+import { createProjectLink, inspectProjectLink } from "../dota/project-link.js";
 import { json, text, error, guard, ToolResult } from "../util/result.js";
+import { compileProjectContent } from "../dota/map-project.js";
 
 async function resolveAddonName(projectRoot: string | undefined, addon: string | undefined): Promise<{ name: string; project?: AddonProject }> {
   if (addon) return { name: addon };
@@ -64,7 +66,7 @@ export function registerBuildTools(server: McpServer) {
     },
     guard(async ({ projectRoot, addon, force, dryRun }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
-      const { name } = await resolveAddonName(projectRoot, addon);
+      const { name, project } = await resolveAddonName(projectRoot, addon);
       const contentPath = join(dota.contentDotaAddons, name);
       // -game must point at the folder containing gameinfo.gi (game/dota); the compiler
       // maps the content/ path back to the addon automatically.
@@ -75,7 +77,9 @@ export function registerBuildTools(server: McpServer) {
       if (!(await pathExists(contentPath))) {
         return error(`Content folder not found: ${contentPath}. Link the addon into Dota first (addon_link / scripts/install.js).`);
       }
-      const res = await run(dota.resourceCompilerExe, args, { timeoutMs: 600_000 });
+      const res = project
+        ? await compileProjectContent(dota, project, force === true)
+        : await run(dota.resourceCompilerExe, args, { timeoutMs: 600_000 });
       const ok = res.code === 0;
       return json(
         { command: res.command, exitCode: res.code, ok },
@@ -111,10 +115,14 @@ export function registerBuildTools(server: McpServer) {
         dev: true,
         vconPort: vconPort ?? defaultVconPort(),
       });
-      const cmd = `"${dota.dota2Exe}" ${args.join(" ")}`;
+      const target = buildDotaLaunchTarget(dota.root, dota.dota2Exe, args, { steamExe: dota.steamExe });
+      const cmd = formatCommand(target.executable, target.args);
       if (dryRun) return text(`[dry run]\n${cmd}`);
-      const { pid } = spawnDetached(dota.dota2Exe, args, dota.binWin64);
-      return json({ command: cmd, pid, addon: name }, `Launched Workshop Tools (pid ${pid}):\n${cmd}`);
+      const { pid } = spawnDetached(target.executable, target.args, target.cwd);
+      return json(
+        { command: cmd, pid, addon: name, launchMethod: target.method },
+        `Launched Workshop Tools via ${target.method} (pid ${pid}):\n${cmd}`,
+      );
     }),
   );
 
@@ -145,10 +153,14 @@ export function registerBuildTools(server: McpServer) {
         cheats: cheats !== false,
         vconPort: vconPort ?? defaultVconPort(),
       });
-      const cmd = `"${dota.dota2Exe}" ${args.join(" ")}`;
+      const target = buildDotaLaunchTarget(dota.root, dota.dota2Exe, args, { steamExe: dota.steamExe });
+      const cmd = formatCommand(target.executable, target.args);
       if (dryRun) return text(`[dry run]\n${cmd}`);
-      const { pid } = spawnDetached(dota.dota2Exe, args, dota.binWin64);
-      return json({ command: cmd, pid, addon: name, map }, `Launching custom game "${name}" on "${map}" (pid ${pid}):\n${cmd}`);
+      const { pid } = spawnDetached(target.executable, target.args, target.cwd);
+      return json(
+        { command: cmd, pid, addon: name, map, launchMethod: target.method },
+        `Launching custom game "${name}" on "${map}" via ${target.method} (pid ${pid}):\n${cmd}`,
+      );
     }),
   );
 
@@ -157,23 +169,43 @@ export function registerBuildTools(server: McpServer) {
     {
       title: "Link addon into Dota",
       description:
-        "Wire the addon's game/ and content/ folders into the Dota install's dota_addons via the template's " +
-        "scripts/install.js (creates junctions). Required before launching. Runs in the project root.",
+        "Safely link any supported addon's game/content folders into Dota's dota_addons trees. Existing unrelated " +
+        "folders are reported as conflicts and never overwritten. Use dryRun=true to review the exact paths first. " +
+        "Required before compiling or launching.",
       inputSchema: { projectRoot: z.string().optional(), dryRun: z.boolean().optional() },
     },
     guard(async ({ projectRoot, dryRun }): Promise<ToolResult> => {
+      const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
-      const installScript = join(project.root, "scripts", "install.js");
-      if (!(await pathExists(installScript))) {
-        return error(`No scripts/install.js in ${project.root}. This linking helper is specific to the ModDota TS template.`);
+      if (project.type === "repo" && project.contentDir === project.root) {
+        return error(
+          "This legacy repository keeps maps in root/maps, so linking would expose the entire repository as Dota " +
+            `content. Move maps to content/dota_addons/${project.addonName}/maps first, then rerun this tool.`,
+        );
       }
-      const cmd = `node scripts/install.js`;
-      if (dryRun) return text(`[dry run] (cwd: ${project.root})\n${cmd}`);
-      const res = await run("node", ["scripts/install.js"], { cwd: project.root, timeoutMs: 120_000 });
-      const ok = res.code === 0;
+      const plans = await Promise.all([
+        inspectProjectLink(project.gameDir, join(dota.gameDotaAddons, project.addonName)),
+        inspectProjectLink(project.contentDir, join(dota.contentDotaAddons, project.addonName)),
+      ]);
+      const blocked = plans.some((plan) => plan.state === "conflict" || plan.state === "source-missing");
+      const results = !dryRun && !blocked ? await Promise.all(plans.map((plan) => createProjectLink(plan))) : plans;
+      const conflicts = results.filter((plan) => plan.state === "conflict" || plan.state === "source-missing");
+      const pending = results.filter((plan) => plan.state === "ready");
+      const linked = results.filter((plan) => plan.state === "linked");
+      const header = dryRun
+        ? `Link plan: ${linked.length}/2 already linked, ${pending.length} ready, ${conflicts.length} conflict(s).`
+        : `Link result: ${linked.length}/2 linked, ${conflicts.length} conflict(s).`;
+      const body = results
+        .map((plan) => `  [${plan.state.toUpperCase()}] ${plan.destination}\n      source: ${plan.source}\n      ${plan.detail}`)
+        .join("\n");
       return json(
-        { command: res.command, exitCode: res.code, ok },
-        `${ok ? "LINKED" : "LINK FAILED"} (exit ${res.code})\n${res.stdout}\n${res.stderr}`.trim(),
+        {
+          addonName: project.addonName,
+          dryRun: !!dryRun,
+          ok: conflicts.length === 0 && (dryRun ? true : linked.length === 2),
+          links: results,
+        },
+        `${header}\n${body}${dryRun && pending.length ? "\nReview the paths, get permission, then call again with dryRun=false." : ""}`,
       );
     }),
   );

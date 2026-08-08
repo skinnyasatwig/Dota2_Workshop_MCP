@@ -10,7 +10,7 @@ import type { ParticleSpec } from "./vpcf.js";
 export interface GalleryData {
   title: string;
   particles: { id: string; name: string; game: string; sprite?: string; spec: ParticleSpec }[];
-  models: { id: string; name: string; game: string; glb: string }[];
+  models: { id: string; name: string; game: string; glb: string; animationName?: string }[];
   sounds: { id: string; name: string; game: string; src: string; fmt: string; dur: string }[];
   textures: { id: string; name: string; game: string; src: string }[];
   modelViewerSrc?: string; // local "model-viewer.min.js" (preferred) or a CDN fallback URL
@@ -119,7 +119,7 @@ export function buildGalleryHtml(d: GalleryData): string {
   const modelCards = d.models
     .map(
       (m) => `<div class="card mdl loading" data-id="${esc(m.id)}">${head(m.id)}<div class="view"><model-viewer src="${esc(m.glb)}"
-        camera-controls auto-rotate disable-zoom rotation-per-second="22deg" interaction-prompt="none" loading="lazy" reveal="auto"
+        camera-controls auto-rotate disable-zoom rotation-per-second="22deg" interaction-prompt="none" loading="lazy" reveal="auto"${m.animationName ? ` autoplay animation-name="${esc(m.animationName)}"` : ""}
         shadow-intensity="0.9" exposure="1.05"></model-viewer><div class="spin"></div></div>${foot(m.name, m.game)}</div>`,
     )
     .join("");

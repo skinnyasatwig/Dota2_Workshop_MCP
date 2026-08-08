@@ -1,0 +1,273 @@
+{
+  "map": "component_arena",
+  "dotaComponents": [
+    {
+      "kind": "base",
+      "name": "radiant_base",
+      "team": "radiant",
+      "origin": [-5000, 0, 256],
+      "yaw": 0,
+      "fountain": { "name": "fountain", "offset": [-768, 0, 0] },
+      "shop": { "name": "home_shop", "offset": [-640, 768, 0], "yaw": -45, "shopType": "home" },
+      "playerStarts": [
+        { "name": "start_1", "offset": [-512, 384, 0] },
+        { "name": "start_2", "offset": [-512, 0, 0] },
+        { "name": "start_3", "offset": [-512, -384, 0] }
+      ],
+      "towers": [
+        { "name": "t3_north", "offset": [512, 384, 0], "tier": 3, "lane": "mid" },
+        { "name": "t3_south", "offset": [512, -384, 0], "tier": 3, "lane": "mid" }
+      ],
+      "gates": [
+        { "name": "north_gate", "offset": [-256, 1280, 0] },
+        { "name": "south_gate", "offset": [-256, -1280, 0] }
+      ],
+      "blockers": [
+        { "name": "north_base_blocker", "offset": [-256, 1280, 0] },
+        { "name": "south_base_blocker", "offset": [-256, -1280, 0] }
+      ]
+    },
+    {
+      "kind": "base",
+      "name": "dire_base",
+      "team": "dire",
+      "origin": [5000, 0, 256],
+      "yaw": 180,
+      "fountain": { "name": "fountain", "offset": [-768, 0, 0] },
+      "shop": { "name": "home_shop", "offset": [-640, 768, 0], "yaw": -45, "shopType": "home" },
+      "playerStarts": [
+        { "name": "start_1", "offset": [-512, 384, 0] },
+        { "name": "start_2", "offset": [-512, 0, 0] },
+        { "name": "start_3", "offset": [-512, -384, 0] }
+      ],
+      "towers": [
+        { "name": "t3_north", "offset": [512, 384, 0], "tier": 3, "lane": "mid" },
+        { "name": "t3_south", "offset": [512, -384, 0], "tier": 3, "lane": "mid" }
+      ],
+      "gates": [
+        { "name": "north_gate", "offset": [-256, 1280, 0] },
+        { "name": "south_gate", "offset": [-256, -1280, 0] }
+      ],
+      "blockers": [
+        { "name": "north_base_blocker", "offset": [-256, 1280, 0] },
+        { "name": "south_base_blocker", "offset": [-256, -1280, 0] }
+      ]
+    },
+    {
+      "kind": "tower",
+      "name": "radiant_t1",
+      "team": "radiant",
+      "origin": [-1800, 0, 128],
+      "yaw": 0,
+      "tier": 1,
+      "lane": "mid"
+    },
+    {
+      "kind": "camp",
+      "name": "west_bog_camp",
+      "origin": [-2400, -2800, 0],
+      "size": "medium",
+      "forcedSubtype": 7,
+      "volumeName": "west_bog_camp_volume",
+      "volume": {
+        "size": [768, 640, 384],
+        "yaw": 10
+      }
+    },
+    {
+      "kind": "bossPit",
+      "name": "south_rosh",
+      "boss": "roshan",
+      "worldCenter": [0, -4608, 0],
+      "tileCenter": [32, 14],
+      "radius": 3.5,
+      "rimWidth": 1.5,
+      "floorLevel": -1,
+      "rimLevel": 0,
+      "tileset": 1,
+      "entrances": ["north", "east", "west"],
+      "entranceWidth": 2.5,
+      "noWardsRadius": 875,
+      "noWardsSides": 32,
+      "noWardsHeight": 1024
+    },
+    {
+      "kind": "fowBlocker",
+      "name": "south_rosh_fow",
+      "closed": true,
+      "points": [
+        [-896, -4608, 256],
+        [0, -5504, 256],
+        [896, -4608, 256],
+        [0, -3712, 256]
+      ]
+    },
+    {
+      "kind": "wall",
+      "name": "radiant_curved_base_wall",
+      "points": [
+        [-5120, -3072, 0],
+        [-4352, -2304, 64],
+        [-4096, -1024, 128],
+        [-4096, 1024, 128],
+        [-4352, 2304, 64],
+        [-5120, 3072, 0]
+      ],
+      "thickness": 192,
+      "height": 768,
+      "overlap": 48,
+      "material": "materials/dev/reflectivity_30.vmat",
+      "faceTextureAlignments": { "sides": "shared" }
+    },
+    {
+      "kind": "staticPropSet",
+      "name": "radiant_river_rocks",
+      "origin": [-3072, -2048, 128],
+      "yaw": 20,
+      "model": "models/props_debris/rock_debris001.vmdl",
+      "scale": 1.25,
+      "collision": "none",
+      "castShadows": true,
+      "placements": [
+        { "name": "west", "offset": [-192, 0, 0], "yaw": -10 },
+        { "name": "center", "offset": [0, 96, 0] },
+        { "name": "east", "offset": [192, 0, 0], "yaw": 15, "scale": [0.75, 1, 1.5] }
+      ]
+    },
+    {
+      "kind": "staticPropPalette",
+      "name": "south_bog_plants",
+      "origin": [-2048, -3072, 96],
+      "yaw": -10,
+      "palette": "river-wetland",
+      "scale": 1.1,
+      "castShadows": false,
+      "placements": [
+        { "name": "west_reeds", "variant": "cattails-a", "offset": [-256, 0, 0], "yaw": -20 },
+        { "name": "center_reeds", "variant": "cattails-c", "offset": [0, 96, 0] },
+        { "name": "east_lilies", "variant": "lily-pads", "offset": [256, -32, 0], "scale": [1.25, 0.9, 1] }
+      ]
+    },
+    {
+      "kind": "animatedPropSet",
+      "name": "radiant_gate_banners",
+      "origin": [-4352, 0, 256],
+      "yaw": 90,
+      "recipe": "radiant-team-banner",
+      "randomizeCycle": true,
+      "placements": [
+        { "name": "north", "offset": [0, 384, 0] },
+        { "name": "south", "offset": [0, -384, 0], "sequence": "banner_radiant_idle2" }
+      ]
+    },
+    {
+      "kind": "arch",
+      "name": "radiant_north_arch",
+      "origin": [-4352, 2304, 128],
+      "yaw": 45,
+      "width": 1024,
+      "depth": 256,
+      "height": 768,
+      "openingWidth": 512,
+      "openingHeight": 512,
+      "material": "materials/dev/reflectivity_30.vmat"
+    },
+    {
+      "kind": "profileArch",
+      "name": "dragon_profile_arch",
+      "origin": [0, 3072, 128],
+      "yaw": 0,
+      "width": 1024,
+      "depth": 256,
+      "height": 768,
+      "profile": [[-384, 384], [-192, 600], [0, 704], [192, 600], [384, 384]],
+      "material": "materials/dev/reflectivity_30.vmat",
+      "faceMaterials": {
+        "top": "materials/dev/reflectivity_50.vmat",
+        "bottom": "materials/dev/reflectivity_20.vmat"
+      },
+      "faceTextureScales": {
+        "top": [0.25, 0.25],
+        "bottom": [-0.5, 0.5],
+        "sides": [0.5, 1]
+      },
+      "faceTextureShifts": {
+        "top": [0, 64],
+        "bottom": [-128, 256],
+        "sides": [16, -16]
+      },
+      "faceTextureRotations": {
+        "top": 45,
+        "bottom": -90,
+        "sides": 180
+      },
+      "faceTextureAlignments": {
+        "top": "shared",
+        "bottom": "shared",
+        "sides": "shared"
+      }
+    },
+    {
+      "kind": "bridgeApproach",
+      "name": "center_river_bridge_west_approach",
+      "start": [-1280, 0, 128],
+      "end": [-768, 0, 384],
+      "width": 512,
+      "thickness": 64,
+      "material": "materials/dev/reflectivity_30.vmat"
+    },
+    {
+      "kind": "bridge",
+      "name": "center_river_bridge",
+      "center": [0, 0, 352],
+      "yaw": 0,
+      "length": 1536,
+      "width": 512,
+      "thickness": 64,
+      "material": "materials/dev/reflectivity_30.vmat"
+    },
+    {
+      "kind": "bridgeApproach",
+      "name": "center_river_bridge_east_approach",
+      "start": [768, 0, 384],
+      "end": [1280, 0, 128],
+      "width": 512,
+      "thickness": 64,
+      "material": "materials/dev/reflectivity_30.vmat"
+    },
+    {
+      "kind": "ringPlatform",
+      "name": "dragon_overlook_ring",
+      "center": [0, 4608, 352],
+      "yaw": 22.5,
+      "outerRadius": 768,
+      "innerRadius": 384,
+      "height": 64,
+      "sides": 8,
+      "material": "materials/dev/reflectivity_30.vmat"
+    },
+    {
+      "kind": "holedPlatform",
+      "name": "irregular_side_overlook",
+      "center": [3072, 0, 352],
+      "yaw": 12,
+      "outer": [[-600, -400], [400, -500], [700, 0], [350, 550], [-550, 450]],
+      "hole": [[-250, -150], [180, -220], [300, 20], [140, 240]],
+      "height": 64,
+      "material": "materials/dev/reflectivity_30.vmat"
+    },
+    {
+      "kind": "multiHoledPlatform",
+      "name": "twin_well_overlook",
+      "center": [3072, 2048, 352],
+      "yaw": -8,
+      "outer": [[-900, -700], [900, -700], [900, 700], [-900, 700]],
+      "holes": [
+        [[-700, -220], [-360, -180], [-380, 170], [-720, 140]],
+        [[300, -120], [680, -210], [720, 220], [330, 180]]
+      ],
+      "height": 64,
+      "material": "materials/dev/reflectivity_30.vmat"
+    }
+  ]
+}

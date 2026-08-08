@@ -285,6 +285,15 @@ export interface DismissResult {
   error?: string;
 }
 
+export interface CloseStallResult {
+  closed: boolean;
+  hwnd?: string;
+  error?: string;
+}
+
+type StallWindow = Pick<DiagWindow, "hwnd" | "role" | "className" | "title">;
+type StallWindowCloser = (hwnd: string) => Promise<CloseStallResult>;
+
 const PS_CLICK = String.raw`param([string]$Hwnd, [string]$Label)
 $ErrorActionPreference = 'Stop'
 Add-Type @"
@@ -316,6 +325,22 @@ if ($target -eq [IntPtr]::Zero) { Write-Output (ConvertTo-Json @{ error = "butto
 $BM_CLICK = 0x00F5
 [void][Click]::SendMessage($target, $BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero)
 Write-Output (ConvertTo-Json @{ clicked = $Label; hwnd = "$([int64]$target)" } -Compress)
+`;
+
+const PS_CLOSE_STALL = String.raw`param([string]$Hwnd)
+$ErrorActionPreference = 'Stop'
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class CloseStall {
+  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+}
+"@
+$h = [IntPtr][int64]$Hwnd
+if (-not [CloseStall]::IsWindow($h)) { Write-Output (ConvertTo-Json @{ closed = $false; error = 'window no longer exists' } -Compress); exit 0 }
+$posted = [CloseStall]::PostMessage($h, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
+Write-Output (ConvertTo-Json @{ closed = [bool]$posted; hwnd = "$([int64]$h)"; error = $(if ($posted) { $null } else { 'WM_CLOSE was rejected' }) } -Compress)
 `;
 
 const PS_SHOT = String.raw`param([string]$Hwnd, [string]$Out)
@@ -373,4 +398,41 @@ export async function clickDialogButton(dialogHwnd: string, label: string): Prom
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+async function postCloseToStall(hwnd: string): Promise<CloseStallResult> {
+  if (process.platform !== "win32") return { closed: false, error: "Windows-only." };
+  const dir = await mkdtemp(join(tmpdir(), "d2stall-"));
+  const ps1 = join(dir, "close-stall.ps1");
+  try {
+    await writeFile(ps1, PS_CLOSE_STALL, "utf8");
+    const res = await run("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1, hwnd], {
+      timeoutMs: 15_000,
+    });
+    const match = res.stdout.match(/\{[^}]*\}/);
+    if (!match) return { closed: false, error: `no result from close (${(res.stderr || res.stdout).slice(-200)})` };
+    return JSON.parse(match[0]) as CloseStallResult;
+  } catch (error) {
+    return { closed: false, error: error instanceof Error ? error.message : String(error) };
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Close only Source 2's exact watchdog stall window. This never targets
+ * asserts, crash dialogs, generic dialogs, or the Dota render window.
+ */
+export async function closeTransientStallDialog(
+  window: StallWindow,
+  closer: StallWindowCloser = postCloseToStall,
+): Promise<CloseStallResult> {
+  const exactWatchdog =
+    window.role === "stall" &&
+    (window.className === "WatchdogThreadWndClass" || /^Stall Detected$/i.test(window.title));
+  if (!exactWatchdog) {
+    return { closed: false, error: "Refused to close a window that is not Dota's watchdog stall dialog." };
+  }
+  if (!/^\d+$/.test(window.hwnd)) return { closed: false, error: "Invalid watchdog window handle." };
+  return closer(window.hwnd);
 }

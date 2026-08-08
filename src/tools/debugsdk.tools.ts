@@ -27,7 +27,10 @@ export function registerDebugSdkTools(server: McpServer) {
         "Install the MCP DebugSDK (a self-contained Lua module) into the addon: copies mcp_debug.lua into the addon's " +
         "vscripts and wires require(\"mcp_debug\") into the game-mode bootstrap (addon_game_mode.ts for tstl, or the " +
         "compiled .lua otherwise). It registers mcp_* console commands (mcp_ping/state/dump/eval/assert/spawn/gold/" +
-        "level/item/event/hud/pause) that dota_lua_eval, dota_debug_dump and dota_selftest drive. Idempotent. After " +
+        "level/item/event/nav/anim/focus/frame/camera/hud/pause) that the MCP's live inspection and self-test tools drive. " +
+        "The correlated animation, focus, and bounded Panorama-frame commands can verify an exact named prop and place " +
+        "its chosen focus point on-screen before renderer evidence. " +
+        "Idempotent. After " +
         "attaching: addon_build (tstl) then dota_restart_game.",
       inputSchema: { projectRoot: z.string().optional(), dryRun: z.boolean().optional() },
     },

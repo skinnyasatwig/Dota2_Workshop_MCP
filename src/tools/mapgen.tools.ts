@@ -1,89 +1,199 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { join } from "node:path";
-import { readFile } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { readFile, realpath } from "node:fs/promises";
 import { resolveProject } from "../config.js";
-import { requireDotaPaths, DotaPaths } from "../dota/paths.js";
-import { AddonProject } from "../dota/project.js";
-import { vmapToText, textToVmap, cloneVmap, compileVmap, buildEntityBlock, insertEntity, maxNodeId } from "../dota/vmap.js";
-import { parseTileGrid, applyTileGrid, setHeight, setWater, setTileset, fill, tileToWorld, vIndex, cIndex, Shape } from "../dota/tilegrid.js";
-import { parseKV, serializeKV, getWrapperBlock, findPair, upsertPair, objectToBlock, isBlock } from "../kv/index.js";
+import { requireDotaPaths, resolveDotaPaths } from "../dota/paths.js";
+import { vmapToText, textToVmap, buildEntityBlock, insertEntity, maxNodeId, parseMapEntities } from "../dota/vmap.js";
+import { categoryForFgdEntity, parseFgdEntities } from "../dota/fgd.js";
+import { buildFgdDefinitionCatalog } from "../dota/fgd-validation.js";
+import { parseTileGrid, tileToWorld } from "../dota/tilegrid.js";
+import { registerMapFile } from "../dota/addoninfo.js";
+import { compileProjectMap, projectMapPaths } from "../dota/map-project.js";
+import { loadMapContract } from "../dota/map-contract.js";
+import { parseManagedTerrain, reconcileMapTerrain } from "../dota/map-terrain.js";
+import {
+  managedMapPathInputSchema,
+  mapSpecificationInputSchema,
+  parseMapSpecification,
+  reconcileMapSpecification,
+  regionDefinitionInputSchema,
+  terrainOperationInputSchema,
+} from "../dota/map-spec.js";
+import { compareMapSpecifications } from "../dota/map-spec-compare.js";
+import { evaluateSpatialAssertions, evaluateSpatialAssertionsAgainstMap } from "../dota/map-spatial.js";
 import { resolveDataPath } from "../util/datapath.js";
-import { encodeRgbaPng } from "../util/png.js";
-import { readTextFile, writeTextFile, pathExists } from "../util/fsx.js";
+import { runMapTransaction } from "../dota/map-transaction.js";
+import { renderMapPreview } from "../dota/map-preview.js";
+import { resolveMapCollisionObstacles } from "../dota/map-collision.js";
+import {
+  curatedVisualPropCandidateCount,
+  emptyMapVisualPropReport,
+  resolveProjectCuratedVisualPropFootprints,
+} from "../dota/map-visual-props.js";
+import { inspectProjectMapMaterials } from "../dota/map-material.js";
+import { inspectProjectMapModels } from "../dota/map-model.js";
+import { inspectProjectManagedModelPhysics } from "../dota/map-model-physics.js";
+import { MAP_VOLUME_RECIPES } from "../dota/map-volume.js";
+import { POINT_BLOCKER_RECIPES, WORLD_STRUCTURE_RECIPES } from "../dota/dota-components.js";
+import {
+  CLIFF_RECIPE_SETS,
+  CORE_TERRAIN_RECIPES,
+  VALVE_PREFAB_RECIPES,
+  validateTerrainRecipeLibrary,
+} from "../dota/terrain-recipes.js";
+import {
+  RECIPE_VERIFICATION_BASELINE,
+  verifyInstalledRecipeVersion,
+} from "../dota/recipe-version.js";
+import {
+  inspectStaticPropPaletteInstallation,
+  STATIC_PROP_PALETTES,
+  validateStaticPropPaletteLibrary,
+} from "../dota/static-prop-palettes.js";
+import {
+  ANIMATED_PROP_RECIPES,
+  inspectAnimatedPropRecipeInstallation,
+  validateAnimatedPropRecipeLibrary,
+} from "../dota/animated-prop-recipes.js";
+import { openDotaVpk } from "../dota/vpk.js";
+import {
+  buildRecipeRefreshReport,
+  RECIPE_REFRESH_EVIDENCE_IDS,
+} from "../dota/recipe-refresh.js";
+import { writeTextFile, pathExists } from "../util/fsx.js";
 import { json, text, image, error, guard, ToolResult } from "../util/result.js";
 
 const NAME_RE = /^[a-z][a-z0-9_]+$/;
 
-function paths(dota: DotaPaths, project: AddonProject, name: string) {
-  return {
-    base: join(dota.contentDotaAddons, "addon_template", "maps", "template_map.vmap"),
-    contentVmap: join(dota.contentDotaAddons, project.addonName, "maps", `${name}.vmap`),
-    gameVpk: join(dota.gameDotaAddons, project.addonName, "maps", `${name}.vpk`),
-    addoninfo: join(project.gameDir, "addoninfo.txt"),
-  };
-}
+const scalar = z.union([z.string(), z.number(), z.boolean()]);
+const legacyEntityInputSchema = z.object({
+  classname: z.string().min(1),
+  origin: z.string().min(1).optional(),
+  angles: z.string().min(1).optional(),
+  properties: z.record(scalar).optional(),
+}).strict();
+const legacyPathInputSchema = managedMapPathInputSchema.extend({
+  speed: scalar.optional(),
+});
+type LegacyEntityInput = z.infer<typeof legacyEntityInputSchema>;
+type WaypointPathInput = z.infer<typeof legacyPathInputSchema>;
 
-async function registerMap(addoninfoPath: string, name: string, maxPlayers: number): Promise<void> {
-  const doc = (await pathExists(addoninfoPath))
-    ? parseKV((await readTextFile(addoninfoPath)).text)
-    : parseKV(`"AddonInfo"\n{\n\t"maps" ""\n\t"IsPlayable" "1"\n}\n`);
-  const wrapper = getWrapperBlock(doc)!;
-  const mapsPair = findPair(wrapper, "maps");
-  const list = (mapsPair && !isBlock(mapsPair.value) ? (mapsPair.value as string) : "").split(/\s+/).filter(Boolean);
-  if (!list.includes(name)) list.push(name);
-  upsertPair(wrapper, "maps", list.join(" "));
-  if (!findPair(wrapper, name)) upsertPair(wrapper, name, objectToBlock({ MaxPlayers: String(maxPlayers) }));
-  await writeTextFile(addoninfoPath, serializeKV(doc), { encoding: "utf8" });
-}
-
-// Build a Shape from a loose JSON object.
-function toShape(s: any): Shape {
-  if (!s || typeof s !== "object") throw new Error("shape must be an object");
-  switch (s.kind) {
-    case "rect": return { kind: "rect", x0: +s.x0, y0: +s.y0, x1: +s.x1, y1: +s.y1 };
-    case "circle": return { kind: "circle", cx: +s.cx, cy: +s.cy, r: +s.r };
-    case "ring": return { kind: "ring", cx: +s.cx, cy: +s.cy, rInner: +s.rInner, rOuter: +s.rOuter };
-    case "path": return { kind: "path", points: (s.points || []).map((p: number[]) => [+p[0], +p[1]] as [number, number]), width: +s.width };
-    default: throw new Error(`unknown shape kind "${s.kind}" (rect|circle|ring|path)`);
+async function loadProjectLocalMapSpecification(projectRoot: string, file: string, label: string) {
+  if (!file.toLowerCase().endsWith(".json")) {
+    throw new Error(`${label} must be a JSON file.`);
   }
+  const canonicalRoot = await realpath(projectRoot);
+  const requested = resolve(canonicalRoot, file);
+  const requestedRelative = relative(canonicalRoot, requested);
+  if (
+    requestedRelative === ".." ||
+    requestedRelative.startsWith(`..${sep}`) ||
+    isAbsolute(requestedRelative)
+  ) {
+    throw new Error(`${label} must stay inside the addon project: ${canonicalRoot}`);
+  }
+  const canonicalFile = await realpath(requested);
+  const rel = relative(canonicalRoot, canonicalFile);
+  if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    throw new Error(`${label} must stay inside the addon project: ${canonicalRoot}`);
+  }
+  return parseMapSpecification(JSON.parse(await readFile(canonicalFile, "utf8")), canonicalFile);
 }
 
-function applyTerrainOps(textIn: string, ops: any[], log: string[]): string {
-  const g = parseTileGrid(textIn);
-  log.push(`tile grid ${g.width}x${g.height} (origin ${g.origin.join(",")}, ${g.tileSize}u/tile)`);
-  for (const op of ops) {
-    if (op.op === "fill") {
-      fill(g, { height: op.level, water: op.water, tileset: op.tileset });
-      log.push(`fill height=${op.level ?? "-"} water=${op.water ?? "-"} tileset=${op.tileset ?? "-"}`);
-      continue;
+function mapSpecificationComparisonSummary(
+  report: ReturnType<typeof compareMapSpecifications>,
+): string {
+  const lines = [
+    report.equivalent
+      ? report.exactEquivalent
+        ? "Map specifications are exactly semantically equivalent after expansion."
+        : "Map specifications are semantically equivalent within the requested numeric tolerance."
+      : "Map specifications are not semantically equivalent.",
+    `${report.differenceCount} object-level difference(s); ${report.fieldDifferenceCount} field-level difference(s).`,
+  ];
+  if (report.toleratedNumericDriftCount) {
+    lines.push(
+      `${report.toleratedNumericDriftCount} numeric drift(s) tolerated; maximum absolute drift ` +
+        `${report.maximumToleratedNumericDrift}.`,
+    );
+  }
+  if (!report.map.equivalent) {
+    lines.push(`map: ${report.map.baseline ?? "(unset)"} -> ${report.map.candidate ?? "(unset)"}`);
+  }
+  for (const [name, family] of Object.entries(report.families)) {
+    if (family.addedCount || family.removedCount || family.changedCount) {
+      lines.push(
+        `${name}: +${family.addedCount}, -${family.removedCount}, ` +
+          `~${family.changedCount}, =${family.unchangedCount}`,
+      );
     }
-    const shape = toShape(op.shape);
-    if (op.op === "height") log.push(`height ${op.level} (${op.dome ? "dome" : "flat"}) -> ${setHeight(g, shape, +op.level, !!op.dome)} verts`);
-    else if (op.op === "water") log.push(`water=${op.on !== false} (invert=${!!op.invert}) -> ${setWater(g, shape, op.on !== false, !!op.invert)} verts`);
-    else if (op.op === "tileset") log.push(`tileset=${op.tileset} -> ${setTileset(g, shape, +op.tileset)} cells`);
-    else throw new Error(`unknown terrain op "${op.op}" (height|water|tileset|fill)`);
   }
-  return applyTileGrid(textIn, g);
+  if (report.truncated) lines.push("Detailed examples were truncated; aggregate counts remain complete.");
+  return lines.join("\n");
 }
 
-function placeEntities(textIn: string, entities: any[], paths_: any[], log: string[]): string {
+export interface WaypointEntity {
+  classname: string;
+  origin: string;
+  properties: Record<string, string>;
+}
+
+export function expandWaypointPath(path: WaypointPathInput): WaypointEntity[] {
+  const points = path.points ?? [];
+  const startIndex = Number.isInteger(path.startIndex) ? path.startIndex! : 0;
+  const classname = path.classname ?? "path_track";
+  return points.map((point, offset) => {
+    const index = startIndex + offset;
+    const properties: Record<string, string> = {
+      ...Object.fromEntries(
+        Object.entries(path.properties ?? {}).map(([key, value]) => [key, String(value)]),
+      ),
+      targetname: `${path.name}_${index}`,
+    };
+    if (offset < points.length - 1) properties.target = `${path.name}_${index + 1}`;
+    else if (path.loop && points.length) properties.target = `${path.name}_${startIndex}`;
+    if (path.speed !== undefined) properties.speed = String(path.speed);
+    return { classname, origin: point.join(" "), properties };
+  });
+}
+
+function placeEntities(
+  textIn: string,
+  entities: LegacyEntityInput[],
+  paths_: WaypointPathInput[],
+  log: string[],
+): string {
   let txt = textIn;
   let node = maxNodeId(txt);
   for (const e of entities ?? []) {
-    txt = insertEntity(txt, buildEntityBlock({ classname: e.classname, origin: e.origin, angles: e.angles, properties: e.properties }, ++node));
+    const normalizedProperties = e.properties
+      ? Object.fromEntries(Object.entries(e.properties).map(([key, value]) => [key, String(value)]))
+      : undefined;
+    txt = insertEntity(
+      txt,
+      buildEntityBlock(
+        {
+          classname: e.classname,
+          origin: e.origin,
+          angles: e.angles,
+          properties: normalizedProperties,
+        },
+        ++node,
+      ),
+    );
     log.push(`entity ${e.classname} @ ${e.origin ?? "0 0 0"}`);
   }
   for (const p of paths_ ?? []) {
-    const pts: number[][] = p.points || [];
-    for (let i = 0; i < pts.length; i++) {
-      const origin = pts[i].join(" ");
-      const props: Record<string, string> = { targetname: `${p.name}_${i}` };
-      if (i < pts.length - 1) props.target = `${p.name}_${i + 1}`;
-      if (p.speed) props.speed = String(p.speed);
-      txt = insertEntity(txt, buildEntityBlock({ classname: "path_track", origin, properties: props }, ++node));
+    const waypoints = expandWaypointPath(p);
+    for (const waypoint of waypoints) {
+      txt = insertEntity(txt, buildEntityBlock(waypoint, ++node));
     }
-    log.push(`path "${p.name}": ${pts.length} waypoints (first node ${p.name}_0)`);
+    const startIndex = Number.isInteger(p.startIndex) ? p.startIndex : 0;
+    log.push(
+      `path "${p.name}": ${waypoints.length} ${p.classname ?? "path_track"} waypoints ` +
+        `(first node ${p.name}_${startIndex}${p.loop ? ", looped" : ""})`,
+    );
   }
   return txt;
 }
@@ -280,26 +390,315 @@ function leak(this: void, unit: CDOTA_BaseNPC): void {
 
 export function registerMapGenTools(server: McpServer) {
   server.registerTool(
+    "map_compare_specifications",
+    {
+      title: "Compare expanded map specifications",
+      description:
+        "Read-only semantic comparison of two validated map specifications without opening Hammer or Dota. Each " +
+        "side may be supplied inline or as a project-local JSON file. Reusable components and Dota components are " +
+        "expanded first; named families compare independent of order while terrain operations preserve order. " +
+        "Optional numeric tolerance is explicit and tolerated drift remains visible in the report.",
+      inputSchema: {
+        projectRoot: z
+          .string()
+          .optional()
+          .describe("Addon root required when either side is loaded from a file."),
+        baselineSpecification: mapSpecificationInputSchema
+          .optional()
+          .describe("Inline baseline. Supply exactly one baseline source."),
+        baselineFile: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Project-local baseline JSON file. Supply exactly one baseline source."),
+        candidateSpecification: mapSpecificationInputSchema
+          .optional()
+          .describe("Inline candidate. Supply exactly one candidate source."),
+        candidateFile: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Project-local candidate JSON file. Supply exactly one candidate source."),
+        numericTolerance: z
+          .number()
+          .min(0)
+          .max(1)
+          .optional()
+          .describe("Maximum absolute numeric drift treated as equivalent (default 0)."),
+        maxDifferences: z
+          .number()
+          .int()
+          .min(1)
+          .max(1000)
+          .optional()
+          .describe("Maximum detailed examples retained in the report (default 100)."),
+      },
+    },
+    guard(async ({
+      projectRoot,
+      baselineSpecification,
+      baselineFile,
+      candidateSpecification,
+      candidateFile,
+      numericTolerance,
+      maxDifferences,
+    }): Promise<ToolResult> => {
+      if ((baselineSpecification === undefined) === (baselineFile === undefined)) {
+        return error("Supply exactly one baseline source: baselineSpecification or baselineFile.");
+      }
+      if ((candidateSpecification === undefined) === (candidateFile === undefined)) {
+        return error("Supply exactly one candidate source: candidateSpecification or candidateFile.");
+      }
+      const project = baselineFile || candidateFile ? await resolveProject(projectRoot) : undefined;
+      const baseline = baselineSpecification !== undefined
+        ? parseMapSpecification(baselineSpecification, "inline baseline specification")
+        : await loadProjectLocalMapSpecification(project!.root, baselineFile!, "baselineFile");
+      const candidate = candidateSpecification !== undefined
+        ? parseMapSpecification(candidateSpecification, "inline candidate specification")
+        : await loadProjectLocalMapSpecification(project!.root, candidateFile!, "candidateFile");
+      const report = compareMapSpecifications(baseline, candidate, {
+        numericTolerance,
+        maxDifferences,
+      });
+      return json(
+        report as unknown as Record<string, unknown>,
+        mapSpecificationComparisonSummary(report),
+      );
+    }),
+  );
+
+  server.registerTool(
+    "map_recipe_catalog",
+    {
+      title: "Known-good Dota map recipes",
+      description:
+        "List the MCP's validated Valve-derived terrain core, cliff decoration, ramp-safe fallback, and official " +
+        "prefab references plus checked solid-volume recipes and deterministic visual-dressing palettes. Optionally " +
+        "verify that referenced Valve prefabs and curated models are present in the installed game.",
+      inputSchema: {
+        category: z
+          .enum(["base", "ancient", "tower", "fountain", "shop", "camp", "boss", "volume", "structure", "dressing"])
+          .optional(),
+        verifyInstalled: z.boolean().optional().describe("Check prefab paths under the installed Dota content tree."),
+      },
+    },
+    guard(async ({ category, verifyInstalled }): Promise<ToolResult> => {
+      const errors = [
+        ...validateTerrainRecipeLibrary(),
+        ...validateStaticPropPaletteLibrary(),
+        ...validateAnimatedPropRecipeLibrary(),
+      ];
+      const dota = verifyInstalled ? await resolveDotaPaths() : undefined;
+      const recipeVerification = dota ? await verifyInstalledRecipeVersion(dota) : null;
+      const showDressing = !category || category === "dressing";
+      const vpkEntries = showDressing && verifyInstalled && dota
+        ? (await openDotaVpk(dota.pak01DirVpk)).entries
+        : null;
+      const paletteInstallation = vpkEntries
+        ? inspectStaticPropPaletteInstallation(vpkEntries)
+        : null;
+      const animatedInstallation = vpkEntries
+        ? inspectAnimatedPropRecipeInstallation(vpkEntries)
+        : null;
+      const prefabs = await Promise.all(
+        VALVE_PREFAB_RECIPES
+          .filter((recipe) => !category || (category !== "volume" && recipe.category === category))
+          .map(async (recipe) => ({
+            ...recipe,
+            installed:
+              !verifyInstalled || !dota
+                ? null
+                : await pathExists(join(dota.root, "content", "dota", recipe.source)),
+          })),
+      );
+      return json(
+        {
+          valid: errors.length === 0,
+          validationErrors: errors,
+          coreTerrain: CORE_TERRAIN_RECIPES,
+          cliffSets: CLIFF_RECIPE_SETS,
+          rampFallback: "Ramp cells use the matching core corner tile without decorative cliff layers.",
+          volumeRecipes: !category || category === "volume" ? MAP_VOLUME_RECIPES : {},
+          pointBlockerRecipes: !category || category === "base" ? POINT_BLOCKER_RECIPES : {},
+          worldStructureRecipes: !category || category === "structure" ? WORLD_STRUCTURE_RECIPES : {},
+          staticPropPalettes: showDressing ? STATIC_PROP_PALETTES : {},
+          staticPropPaletteInstallation: paletteInstallation,
+          animatedPropRecipes: showDressing ? ANIMATED_PROP_RECIPES : {},
+          animatedPropRecipeInstallation: animatedInstallation,
+          prefabs,
+          installVerified: verifyInstalled === true && Boolean(dota),
+          recipeVerificationBaseline: RECIPE_VERIFICATION_BASELINE,
+          recipeVerification,
+        },
+        `Recipe library ${errors.length ? `has ${errors.length} validation error(s)` : "is valid"}: ` +
+          `${CORE_TERRAIN_RECIPES.length} terrain cores, ${CLIFF_RECIPE_SETS.length} cliff sets, ` +
+          `${prefabs.length} Valve prefab references, ` +
+          `${!category || category === "volume" ? Object.keys(MAP_VOLUME_RECIPES).length : 0} checked volume recipes. ` +
+          `${!category || category === "structure" ? Object.keys(WORLD_STRUCTURE_RECIPES).length : 0} checked structure recipes. ` +
+          `${showDressing ? Object.keys(STATIC_PROP_PALETTES).length : 0} static-prop palettes` +
+          `${paletteInstallation ? ` (${paletteInstallation.installedCount}/${paletteInstallation.modelCount} models installed). ` : ". "}` +
+          `${paletteInstallation?.visualBoundsVerified ? `${paletteInstallation.currentVisualBoundsCount}/${paletteInstallation.modelCount} visual bounds current. ` : ""}` +
+          `${showDressing ? Object.keys(ANIMATED_PROP_RECIPES).length : 0} animated-prop recipes` +
+          `${animatedInstallation ? ` (${animatedInstallation.installedCount}/${animatedInstallation.modelCount} models installed; ${animatedInstallation.currentCount}/${animatedInstallation.modelCount} metadata current). ` : ". "}` +
+          `Baseline Dota build ${RECIPE_VERIFICATION_BASELINE.appBuildId}` +
+          `${recipeVerification ? `; installed recipe status: ${recipeVerification.status}` : ""}.`,
+      );
+    }),
+  );
+
+  server.registerTool(
+    "map_recipe_refresh_report",
+    {
+      title: "Plan a safe Valve recipe baseline refresh",
+      description:
+        "Read-only maintenance report for Valve/Workshop Tools updates. It compares authoritative files and metadata, " +
+        "identifies affected recipe families, prepares a candidate fingerprint, and gates manual recording on explicit " +
+        "build/test/compiler/acceptance evidence. It never edits or automatically blesses the trusted baseline.",
+      inputSchema: {
+        evidence: z.array(z.object({
+          id: z.enum(RECIPE_REFRESH_EVIDENCE_IDS),
+          status: z.enum(["passed", "failed", "skipped"]),
+          command: z.string().optional(),
+          detail: z.string().optional(),
+          observedAt: z.string().optional(),
+        }).strict()).optional().describe("Optional results from the guided checks; omitted checks remain pending."),
+      },
+    },
+    guard(async ({ evidence }): Promise<ToolResult> => {
+      const dota = await requireDotaPaths();
+      const verification = await verifyInstalledRecipeVersion(dota);
+      const report = buildRecipeRefreshReport(verification, evidence);
+      const pending = report.checks.filter((check) => check.required && check.status !== "passed").length;
+      return json(
+        report as unknown as Record<string, unknown>,
+        report.disposition === "no-refresh-needed"
+          ? `Recipe baseline remains trustworthy (${verification.status}); no refresh should be recorded.`
+          : `Recipe refresh status: ${report.disposition}. ${report.changedFamilies.length} affected family/families; ` +
+            `${pending} required check(s) are not passing. Automatic baseline recording is disabled.`,
+      );
+    }),
+  );
+
+  server.registerTool(
     "entity_catalog",
     {
       title: "Dota map entity catalog",
       description:
-        "List the catalog of placeable Dota map entities (classname + purpose + key keyvalues), so you know what " +
-        "objects exist for map_add_entity / map_build. Filter by query or category (spawn, marker, path, trigger, " +
-        "logic, light, env, prop, dota, fx, vision, world).",
-      inputSchema: { query: z.string().optional(), category: z.string().optional() },
+        "List placeable Dota map entities (classname + purpose + key keyvalues). Text searches also consult the " +
+        "installed official dota.fgd, so engine entities missing from the curated catalog can still be discovered. " +
+        "Filter by query or category (spawn, marker, path, trigger, logic, light, env, prop, dota, fx, vision, world).",
+      inputSchema: {
+        query: z.string().optional(),
+        category: z.string().optional(),
+        includeOfficial: z
+          .boolean()
+          .optional()
+          .describe("Include all installed dota.fgd classes even without a text query (default false)."),
+        limit: z.number().int().positive().max(500).optional(),
+      },
     },
-    guard(async ({ query, category }): Promise<ToolResult> => {
+    guard(async ({ query, category, includeOfficial, limit }): Promise<ToolResult> => {
       const data = JSON.parse(await readFile(await resolveDataPath("entity-catalog.json"), "utf8"));
-      let list = data.entities as { name: string; category: string; purpose: string; keyValues?: string }[];
+      type CatalogEntry = {
+        name: string;
+        category: string;
+        purpose: string;
+        keyValues?: string;
+        source?: "curated" | "official-fgd";
+        classType?: string;
+        bases?: string[];
+        propertyRules?: {
+          name: string;
+          type: string;
+          kind: "keyvalue" | "input" | "output";
+          choices?: { value: string; label: string }[];
+          minimum?: number;
+          maximum?: number;
+        }[];
+      };
+      let list: CatalogEntry[] = (data.entities as CatalogEntry[]).map((entry) => ({
+        ...entry,
+        source: "curated",
+      }));
+      if (query || includeOfficial) {
+        const dota = await resolveDotaPaths();
+        const fgdPath = dota ? join(dota.dotaGameDir, "dota.fgd") : undefined;
+        if (fgdPath && (await pathExists(fgdPath))) {
+          const coreFgdPath = join(dota!.dotaGameDir, "..", "core", "base.fgd");
+          const dotaDefinitions = parseFgdEntities(await readFile(fgdPath, "utf8"));
+          const definitions = (await pathExists(coreFgdPath))
+            ? [
+                ...parseFgdEntities(await readFile(coreFgdPath, "utf8")),
+                ...dotaDefinitions,
+              ]
+            : dotaDefinitions;
+          const definitionCatalog = buildFgdDefinitionCatalog(definitions);
+          const constrainedRules = (classname: string): NonNullable<CatalogEntry["propertyRules"]> =>
+            [...(definitionCatalog.propertiesFor(classname)?.values() ?? [])]
+              .filter((property) =>
+                property.kind === "keyvalue" &&
+                (property.choiceMode === "enum" ||
+                  property.minimum !== undefined ||
+                  property.maximum !== undefined ||
+                  property.type.trim().toLowerCase() === "target_destination"),
+              )
+              .map((property) => ({
+                name: property.name,
+                type: property.type,
+                kind: property.kind,
+                ...(property.choices?.length ? { choices: property.choices } : {}),
+                ...(property.minimum !== undefined ? { minimum: property.minimum } : {}),
+                ...(property.maximum !== undefined ? { maximum: property.maximum } : {}),
+              }));
+          list = list.map((entry) => {
+            const propertyRules = constrainedRules(entry.name);
+            return propertyRules.length ? { ...entry, propertyRules } : entry;
+          });
+          const known = new Set(list.map((entry) => entry.name));
+          const official = dotaDefinitions
+            .filter((entry) => !known.has(entry.name))
+            .map<CatalogEntry>((entry) => ({
+              name: entry.name,
+              category: categoryForFgdEntity(entry.name),
+              purpose: entry.description || `Official ${entry.classType} from dota.fgd.`,
+              keyValues: entry.properties
+                .map((property) => {
+                  const kind = property.kind === "keyvalue" ? "" : `${property.kind} `;
+                  const choiceSummary = property.choiceMode === "enum" && property.choices?.length
+                    ? `: ${property.choices.slice(0, 12).map((choice) => choice.value).join("|")}` +
+                      (property.choices.length > 12 ? "|..." : "")
+                    : "";
+                  const rangeSummary = property.minimum !== undefined || property.maximum !== undefined
+                    ? `: ${property.minimum ?? "-inf"}..${property.maximum ?? "+inf"}`
+                    : "";
+                  return `${kind}${property.name} (${property.type}${choiceSummary}${rangeSummary})`;
+                })
+                .join(", "),
+              source: "official-fgd",
+              classType: entry.classType,
+              bases: entry.bases,
+              ...(constrainedRules(entry.name).length
+                ? { propertyRules: constrainedRules(entry.name) }
+                : {}),
+            }));
+          list.push(...official);
+        }
+      }
       if (category) list = list.filter((e) => e.category.toLowerCase() === category.toLowerCase());
       if (query) {
         const q = query.toLowerCase();
         list = list.filter((e) => e.name.toLowerCase().includes(q) || e.purpose.toLowerCase().includes(q) || (e.keyValues ?? "").toLowerCase().includes(q));
       }
+      list = list.slice(0, limit ?? 100);
       return json(
         { count: list.length, entities: list },
-        list.map((e) => `[${e.category}] ${e.name}\n    ${e.purpose}\n    keys: ${e.keyValues ?? "(position only)"}`).join("\n") || "No entities match.",
+        list
+          .map(
+            (e) =>
+              `[${e.category}] ${e.name}${e.source === "official-fgd" ? " (official FGD)" : ""}\n` +
+              `    ${e.purpose}\n    keys: ${e.keyValues || "(position only)"}`,
+          )
+          .join("\n") || "No entities match.",
       );
     }),
   );
@@ -309,79 +708,369 @@ export function registerMapGenTools(server: McpServer) {
     {
       title: "Shape map terrain",
       description:
-        "Apply terrain operations to a map's Dota tile grid. Coordinates are in TILE units (0..gridWidth, default grid " +
-        "64x64; world = origin + tile*256). Ops: {op:'height', shape, level, dome?}, {op:'water', shape, on?, invert?}, " +
-        "{op:'tileset', shape, tileset}, {op:'fill', level?, water?, tileset?}. Shapes: {kind:'rect',x0,y0,x1,y1}, " +
-        "{kind:'circle',cx,cy,r}, {kind:'ring',cx,cy,rInner,rOuter}, {kind:'path',points:[[x,y]...],width}. heights are " +
-        "integer levels (~0-3 typical). Recompile after (or pass recompile=true).",
+        "Apply the same validated terrain operations used by map specifications and map_sync_contract. Coordinates " +
+        "are in tile units. Supports fill, height, water, tileset, and ramp operations over rect, circle, ring, path, " +
+        "polygon, named region, or managedPath shapes. Pass reusable region definitions alongside the operations; " +
+        "managedPath shapes resolve against the project's map contract. Valid cliff orientation and tile recipes are " +
+        "regenerated automatically. Recompile after (or pass recompile=true).",
       inputSchema: {
         projectRoot: z.string().optional(),
         map: z.string(),
-        ops: z.array(z.any()).describe("Array of terrain ops (see description)."),
-        recompile: z.boolean().optional(),
+        ops: z.array(terrainOperationInputSchema).min(1).describe("Validated terrain operations."),
+        regions: z
+          .record(regionDefinitionInputSchema)
+          .optional()
+          .describe("Optional reusable named terrain shapes referenced by region operations."),
+        contractFile: z
+          .string()
+          .optional()
+          .describe("Contract used to resolve managedPath shapes. Defaults to .dota-workshop/map-contract.json."),
+        apply: z.boolean().optional().describe("Write the planned terrain changes (default false)."),
+        recompile: z.boolean().optional().describe("Compile after applying; requires apply=true."),
       },
     },
-    guard(async ({ projectRoot, map, ops, recompile }): Promise<ToolResult> => {
+    guard(async ({ projectRoot, map, ops, regions, contractFile, apply, recompile }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
-      const p = paths(dota, project, map);
+      const p = projectMapPaths(dota, project, map);
       if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}. Create it with map_create or map_build.`);
+      if (recompile && !apply) return error("recompile=true requires apply=true; preview mode never compiles or writes files.");
       const log: string[] = [];
-      const txt = applyTerrainOps(await vmapToText(dota.dmxconvertExe, p.contentVmap), ops, log);
-      await textToVmap(dota.dmxconvertExe, txt, p.contentVmap);
-      if (recompile) {
-        const res = await compileVmap(dota.resourceCompilerExe, dota.dotaGameDir, p.contentVmap, p.gameVpk);
-        log.push(res.code === 0 ? `recompiled -> ${p.gameVpk}` : `recompile FAILED (${res.code})`);
+      const needsManagedPaths = ops.some(
+        (operation) => operation.op !== "fill" && operation.shape.kind === "managedPath",
+      );
+      const contract = needsManagedPaths
+        ? await loadMapContract(project.root, map, contractFile, parseMapSpecification)
+        : undefined;
+      if (needsManagedPaths && !contract) {
+        return error(`Terrain operations reference managedPath shapes, but no map contract was found under ${project.root}.`);
       }
-      return json({ map, ops: ops.length }, log.join("\n"));
+      const operations = parseMapSpecification(
+        {
+          regions,
+          managedPaths: contract?.contract.managedPaths ?? [],
+          managedTerrain: ops,
+        },
+        `map_terrain(${map})`,
+      ).managedTerrain ?? [];
+      const current = await vmapToText(dota.dmxconvertExe, p.contentVmap);
+      const result = reconcileMapTerrain(current, operations, contract?.contract.managedPaths ?? []);
+      const transaction = apply && (result.changed || recompile)
+        ? await runMapTransaction({
+            projectRoot: project.root,
+            label: `${map}-terrain`,
+            trackedPaths: [p.contentVmap, ...(recompile ? [p.gameVpk] : [])],
+            action: async () => {
+              if (result.changed) await textToVmap(dota.dmxconvertExe, result.text, p.contentVmap);
+              if (recompile) {
+                const res = await compileProjectMap(dota, project, map);
+                const compiled = res.code === 0 && (await pathExists(p.installedGameVpk));
+                if (!compiled) {
+                  throw new Error(
+                    `Compilation failed (exit ${res.code ?? "unknown"}).\n${(res.stderr || res.stdout).slice(-1600)}`,
+                  );
+                }
+              }
+              return { recompiled: recompile === true };
+            },
+          })
+        : undefined;
+      if (transaction && !transaction.committed) {
+        const failure = json(
+          {
+            map,
+            applied: false,
+            rolledBack: transaction.rolledBack,
+            backupDirectory: transaction.backupDirectory,
+            error: transaction.error,
+            rollbackErrors: transaction.rollbackErrors,
+          },
+          `Terrain update failed and ${transaction.rolledBack ? "was rolled back safely" : "the rollback needs attention"}.\n` +
+            `Backup: ${transaction.backupDirectory}\n${transaction.error ?? "Unknown transaction failure."}`,
+        );
+        failure.isError = true;
+        return failure;
+      }
+      log.push(
+        `terrain ${apply ? (result.changed ? "updated" : "unchanged") : "preview"}: ` +
+          `${result.changedHeightVertices} height, ${result.changedWaterVertices} water, ` +
+          `${result.changedTilesetCells} tileset, ${result.changedOrientationCells} orientation, ` +
+          `${result.changedConfigurationCells} recipe, ${result.changedPathEdges} path-edge cells`,
+      );
+      if (!apply && result.changed) log.push("No files changed. Pass apply=true to write this plan.");
+      if (apply && recompile) log.push(`recompiled -> ${p.gameVpk}`);
+      if (transaction) log.push(`recovery backup -> ${transaction.backupDirectory}`);
+      return json(
+        {
+          map,
+          changed: result.changed,
+          applied: apply === true,
+          recompiled: apply === true && recompile === true,
+          backupDirectory: transaction?.backupDirectory,
+          rolledBack: false,
+          operations: result.operations,
+          changedHeightVertices: result.changedHeightVertices,
+          changedWaterVertices: result.changedWaterVertices,
+          changedTilesetCells: result.changedTilesetCells,
+          changedOrientationCells: result.changedOrientationCells,
+          changedConfigurationCells: result.changedConfigurationCells,
+          changedPathEdges: result.changedPathEdges,
+        },
+        log.join("\n"),
+      );
     }),
   );
 
   server.registerTool(
     "map_build",
     {
-      title: "Build a map from a spec",
+      title: "Build a map from a validated specification",
       description:
-        "Generate a whole playable map in one call: clone the template, shape terrain, place entities, lay waypoint " +
-        "paths, register it, and (optionally) compile. This is what a natural-language map request compiles down to. " +
-        "Terrain coords are TILE units; entity/path coords are WORLD units (use map_tile_to_world math: world = -8192 + " +
-        "tile*256). See map_terrain for terrain op/shape forms.",
+        "Generate a whole playable map in one call. Prefer specification, which uses the same validated desired-state " +
+        "format as map_sync_contract: managedTerrain, managedEntities, managedAbsentEntities, managedPaths, checked " +
+        "managedSolids, managedNavSurfaces, managedVolumes, spatialAssertions, and " +
+        "requiredEntities, plus reusable regions, components, and transformed placements. Legacy terrain/entities/paths " +
+        "remain supported. Dry runs report missing/unsafe materials and models, and writes refuse those blockers before conversion. " +
+        "Collision-enabled checked props must also prove real compiled Valve PHYS data before any write. " +
+        "Declared entity-distance, entity-to-path, and path-separation assertions must pass before reconciliation. " +
+        "Terrain coordinates are tile units; entity/path coordinates are world units.",
       inputSchema: {
         projectRoot: z.string().optional(),
         name: z.string(),
         maxPlayers: z.number().int().min(1).max(24).optional(),
-        terrain: z.array(z.any()).optional().describe("Terrain ops (tile coords)."),
-        entities: z.array(z.any()).optional().describe("[{classname, origin:'x y z', angles?, properties?}] (world coords)."),
-        paths: z.array(z.any()).optional().describe("[{name, points:[[x,y,z]...], speed?}] -> chained path_track waypoints (world coords)."),
+        specification: mapSpecificationInputSchema
+          .optional()
+          .describe("Preferred desired-state map specification; uses the map contract format."),
+        terrain: z.array(terrainOperationInputSchema).optional().describe("Legacy terrain operations (tile coords)."),
+        entities: z.array(legacyEntityInputSchema).optional().describe("Legacy entity list (world coords)."),
+        paths: z.array(legacyPathInputSchema).optional().describe(
+          "[{name, points:[[x,y,z]...], classname?, startIndex?, loop?, speed?, properties?}] -> chained waypoints. " +
+            "Defaults to path_track starting at _0; Dota creep routes usually use classname:'path_corner', startIndex:1.",
+        ),
         compile: z.boolean().optional(),
         overwrite: z.boolean().optional(),
+        dryRun: z.boolean().optional().describe("Report the generated changes without writing, registering, or compiling."),
       },
     },
-    guard(async ({ projectRoot, name, maxPlayers, terrain, entities, paths: paths_, compile, overwrite }): Promise<ToolResult> => {
+    guard(async ({ projectRoot, name, maxPlayers, specification, terrain, entities, paths: paths_, compile, overwrite, dryRun }): Promise<ToolResult> => {
       if (!NAME_RE.test(name)) return error(`Invalid map name "${name}".`);
+      if (specification && ((terrain?.length ?? 0) || (entities?.length ?? 0) || (paths_?.length ?? 0))) {
+        return error("Use specification or legacy terrain/entities/paths, not both.");
+      }
+      const parsedSpecification = specification
+        ? parseMapSpecification(specification, `map_build specification for "${name}"`)
+        : undefined;
+      if (parsedSpecification?.map && parsedSpecification.map !== name) {
+        return error(`Map specification is for "${parsedSpecification.map}", not "${name}".`);
+      }
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
-      const p = paths(dota, project, name);
-      if (!(await pathExists(p.base))) return error(`Template base map not found: ${p.base}`);
-      if ((await pathExists(p.contentVmap)) && !overwrite) return error(`Map "${name}" exists (pass overwrite=true).`);
+      const p = projectMapPaths(dota, project, name);
+      if (!(await pathExists(p.baseTemplate))) return error(`Template base map not found: ${p.baseTemplate}`);
+      const mapExists = await pathExists(p.contentVmap);
+      if (mapExists && !overwrite && !dryRun) return error(`Map "${name}" exists (pass overwrite=true).`);
 
-      await cloneVmap(p.base, p.contentVmap);
-      await registerMap(p.addoninfo, name, maxPlayers ?? 10);
+      const log: string[] = [`prepared "${name}" from the template`];
+      let txt = await vmapToText(dota.dmxconvertExe, p.baseTemplate);
+      let specificationChangeReport: unknown;
+      let spatialAssertions: ReturnType<typeof evaluateSpatialAssertions> = [];
+      if (parsedSpecification) {
+        spatialAssertions = evaluateSpatialAssertions(parsedSpecification);
+        const result = reconcileMapSpecification(txt, parsedSpecification);
+        if (result.entities.conflicts.length) {
+          return error(`Map specification has ambiguous duplicate targetnames: ${result.entities.conflicts.join(", ")}`);
+        }
+        txt = result.text;
+        specificationChangeReport = {
+          entities: {
+            added: result.entities.added,
+            updated: result.entities.updated,
+            removed: result.entities.removed,
+            unchanged: result.entities.unchanged,
+          },
+          solids: {
+            added: result.solids.added,
+            updated: result.solids.updated,
+            unchanged: result.solids.unchanged,
+          },
+          navSurfaces: {
+            added: result.navSurfaces.added,
+            updated: result.navSurfaces.updated,
+            unchanged: result.navSurfaces.unchanged,
+          },
+          volumes: {
+            added: result.volumes.added,
+            updated: result.volumes.updated,
+            unchanged: result.volumes.unchanged,
+          },
+          terrain: {
+            changed: result.terrain.changed,
+            changedHeightVertices: result.terrain.changedHeightVertices,
+            changedWaterVertices: result.terrain.changedWaterVertices,
+            changedTilesetCells: result.terrain.changedTilesetCells,
+            changedOrientationCells: result.terrain.changedOrientationCells,
+            changedConfigurationCells: result.terrain.changedConfigurationCells,
+            changedPathEdges: result.terrain.changedPathEdges,
+          },
+          spatialAssertions,
+        };
+        log.push(
+          `specification: add ${result.entities.added.length}, update ${result.entities.updated.length}, ` +
+            `remove ${result.entities.removed.length}; solids add ${result.solids.added.length}, ` +
+            `update ${result.solids.updated.length}; navigation surfaces add ${result.navSurfaces.added.length}, ` +
+            `update ${result.navSurfaces.updated.length}; volumes add ${result.volumes.added.length}, ` +
+            `update ${result.volumes.updated.length}; terrain ${result.terrain.changed ? "changed" : "unchanged"}`,
+        );
+        if (spatialAssertions.length) {
+          log.push(
+            `spatial assertions: ${spatialAssertions.length} passed; ` +
+              spatialAssertions.map((assertion) => `${assertion.name}=${assertion.actualDistance?.toFixed(2) ?? "unresolved"}`).join(", "),
+          );
+        }
+      } else {
+        if (terrain?.length) {
+          const operations = parseManagedTerrain(terrain, "terrain", `map_build(${name})`) ?? [];
+          const pathReferences = (paths_ ?? []).map((managedPath) => ({
+            name: managedPath.name,
+            points: managedPath.points,
+          }));
+          const result = reconcileMapTerrain(txt, operations, pathReferences);
+          txt = result.text;
+          log.push(
+            `terrain: ${operations.length} operations; ${result.changedHeightVertices} height, ` +
+              `${result.changedConfigurationCells} recipe, ${result.changedPathEdges} path-edge changes`,
+          );
+        }
+        if (entities?.length || paths_?.length) {
+          txt = placeEntities(txt, entities ?? [], paths_ ?? [], log);
+        }
+      }
+      const materialValidation = await inspectProjectMapMaterials(txt, dota, project, false);
+      const modelValidation = await inspectProjectMapModels(txt, dota, project, false);
+      const modelPhysicsValidation = parsedSpecification
+        ? await inspectProjectManagedModelPhysics(txt, dota, project, parsedSpecification)
+        : undefined;
+      const safeToApply = materialValidation.safeToWrite && modelValidation.safeToWrite &&
+        (modelPhysicsValidation?.safeToWrite ?? true);
+      log.push(
+        `materials: ${materialValidation.resolvedCount} resolved, ` +
+        `${materialValidation.sourceOnlyCount} awaiting compilation, ` +
+        `${materialValidation.missingCount + materialValidation.invalidCount} blocker(s)`,
+      );
+      log.push(
+        `models: ${modelValidation.resolvedCount} resolved, ` +
+        `${modelValidation.sourceOnlyCount} awaiting compilation, ` +
+        `${modelValidation.missingCount + modelValidation.invalidCount} blocker(s)`,
+      );
+      if (modelPhysicsValidation?.requirementCount) {
+        log.push(
+          `model physics: ${modelPhysicsValidation.resolvedCount} proven, ` +
+          `${modelPhysicsValidation.invalidCount + modelPhysicsValidation.unresolvedCount} blocker(s)`,
+        );
+      }
+      if (dryRun) {
+        log.push(
+          `Dry run only: would ${mapExists ? "replace" : "create"} ${p.contentVmap}, register it in addoninfo, ` +
+            `and ${compile ? "compile it" : "leave compilation for later"}.`,
+        );
+        return json(
+          {
+            name,
+            dryRun: true,
+            wouldOverwrite: mapExists,
+            wouldCompile: compile === true,
+            vmap: p.contentVmap,
+            changes: specificationChangeReport,
+            safeToApply,
+            materialValidation,
+            modelValidation,
+            modelPhysicsValidation,
+          },
+          log.join("\n"),
+        );
+      }
+      if (!safeToApply) {
+        const failure = json(
+          {
+            name,
+            applied: false,
+            safeToApply: false,
+            materialValidation,
+            modelValidation,
+            modelPhysicsValidation,
+          },
+          `Map build was not started because preflight found ` +
+            `${materialValidation.missingCount + materialValidation.invalidCount} material blocker(s) and ` +
+            `${modelValidation.missingCount + modelValidation.invalidCount} model blocker(s) and ` +
+            `${(modelPhysicsValidation?.invalidCount ?? 0) + (modelPhysicsValidation?.unresolvedCount ?? 0)} ` +
+            `model-physics blocker(s).\n` +
+            [...materialValidation.findings, ...modelValidation.findings, ...(modelPhysicsValidation?.findings ?? [])]
+              .map((finding) => `[${finding.severity.toUpperCase()}] ${finding.detail}`)
+              .join("\n"),
+        );
+        failure.isError = true;
+        return failure;
+      }
 
-      const log: string[] = [`cloned + registered "${name}"`];
-      let txt = await vmapToText(dota.dmxconvertExe, p.contentVmap);
-      if (terrain && terrain.length) txt = applyTerrainOps(txt, terrain, log);
-      if ((entities && entities.length) || (paths_ && paths_.length)) txt = placeEntities(txt, entities ?? [], paths_ ?? [], log);
-      await textToVmap(dota.dmxconvertExe, txt, p.contentVmap);
+      const transaction = await runMapTransaction({
+        projectRoot: project.root,
+        label: `${name}-build`,
+        trackedPaths: [p.contentVmap, p.addoninfo, ...(compile ? [p.gameVpk] : [])],
+        action: async () => {
+          await textToVmap(dota.dmxconvertExe, txt, p.contentVmap);
+          await registerMapFile(p.addoninfo, name, maxPlayers ?? 10);
+          if (compile) {
+            const res = await compileProjectMap(dota, project, name);
+            const compiled = res.code === 0 && (await pathExists(p.installedGameVpk));
+            if (!compiled) {
+              throw new Error(
+                `Compilation failed (exit ${res.code ?? "unknown"}).\n${(res.stderr || res.stdout).slice(-1600)}`,
+              );
+            }
+          }
+          return { compiled: compile === true };
+        },
+      });
+      if (!transaction.committed) {
+        const failure = json(
+          {
+            name,
+            applied: false,
+            rolledBack: transaction.rolledBack,
+            backupDirectory: transaction.backupDirectory,
+            error: transaction.error,
+            rollbackErrors: transaction.rollbackErrors,
+          },
+          `Map build failed and ${transaction.rolledBack ? "was rolled back safely" : "the rollback needs attention"}.\n` +
+            `Backup: ${transaction.backupDirectory}\n${transaction.error ?? "Unknown transaction failure."}`,
+        );
+        failure.isError = true;
+        return failure;
+      }
 
+      log.push(`${mapExists ? "replaced" : "created"} + registered "${name}"`);
       if (compile) {
-        const res = await compileVmap(dota.resourceCompilerExe, dota.dotaGameDir, p.contentVmap, p.gameVpk);
-        const ok = res.code === 0 && (await pathExists(p.gameVpk));
-        log.push(ok ? `compiled -> ${p.gameVpk}` : `compile FAILED (exit ${res.code})\n${res.stdout.slice(-1200)}`);
+        log.push(`compiled -> ${p.installedGameVpk}`);
       } else {
         log.push(`Next: map_compile name="${name}", then addon_launch_custom_game map="${name}".`);
       }
-      return json({ name, vmap: p.contentVmap }, log.join("\n"));
+      log.push(`recovery backup -> ${transaction.backupDirectory}`);
+      return json(
+        {
+          name,
+          dryRun: false,
+          applied: true,
+          compiled: compile === true,
+          vmap: p.contentVmap,
+          materialValidation,
+          modelValidation,
+          modelPhysicsValidation,
+          changes: specificationChangeReport,
+          backupDirectory: transaction.backupDirectory,
+          rolledBack: false,
+        },
+        log.join("\n"),
+      );
     }),
   );
 
@@ -390,47 +1079,158 @@ export function registerMapGenTools(server: McpServer) {
     {
       title: "Preview a map (top-down image)",
       description:
-        "Render a top-down image of a map's terrain straight from the tile grid (water = blue, road/other tilesets = " +
-        "tan, grass = green, shaded by height) — no game launch needed. The fast way to see how a generated layout looks.",
-      inputSchema: { projectRoot: z.string().optional(), map: z.string(), scale: z.number().int().min(2).max(16).optional() },
+        "Render a diagnostic top-down image without launching Dota: terrain contours, cliffs, ramps, water, currents, " +
+        "entities, waypoint paths, tower ranges, camps, objectives, minimap bounds, checked trigger/blocker volumes, " +
+        "cached model PHYS bounds, CRC-current curated visual-prop bounds, explicit Valve tree/obstruction proximity, " +
+        "unresolved solid props, terrain holes, unreachable regions, safe candidate ramp corridors, and bounded " +
+        "nearby placement repairs for gameplay entities on blocked terrain, and measured contract spatial assertions.",
+      inputSchema: {
+        projectRoot: z.string().optional(),
+        map: z.string(),
+        scale: z.number().int().min(2).max(16).optional(),
+        showContours: z.boolean().optional(),
+        showCliffs: z.boolean().optional(),
+        showRamps: z.boolean().optional(),
+        showEntities: z.boolean().optional(),
+        showPaths: z.boolean().optional(),
+        showTowerRanges: z.boolean().optional(),
+        showCamps: z.boolean().optional(),
+        showObjectives: z.boolean().optional(),
+        showCurrents: z.boolean().optional(),
+        showMinimapBounds: z.boolean().optional(),
+        showReachability: z.boolean().optional(),
+        showRampSuggestions: z.boolean().optional().describe(
+          "Show safe candidate ramp corridors and the neutral recommended cell (default true with reachability).",
+        ),
+        showPlacementSuggestions: z.boolean().optional().describe(
+          "Show bounded nearby candidate positions for gameplay entities on blocked terrain (default true with reachability).",
+        ),
+        showVolumes: z.boolean().optional(),
+        showVisionBlockers: z.boolean().optional(),
+        showCollisionObstacles: z.boolean().optional(),
+        showVisualProps: z.boolean().optional().describe(
+          "Show CRC-current render-only bounds for curated palette models (default true; never affects pathing).",
+        ),
+        showSpatialAssertions: z.boolean().optional().describe(
+          "Show passing/failing entity-distance, entity-to-path, and path-separation rules from the map contract (default true).",
+        ),
+        resolveModelCollision: z.boolean().optional().describe(
+          "Resolve and cache real model PHYS bounds through VRF (default true; no Dota launch).",
+        ),
+      },
     },
-    guard(async ({ projectRoot, map, scale }): Promise<ToolResult> => {
+    guard(async ({
+      projectRoot,
+      map,
+      scale,
+      showContours,
+      showCliffs,
+      showRamps,
+      showEntities,
+      showPaths,
+      showTowerRanges,
+      showCamps,
+      showObjectives,
+      showCurrents,
+      showMinimapBounds,
+      showReachability,
+      showRampSuggestions,
+      showPlacementSuggestions,
+      showVolumes,
+      showVisionBlockers,
+      showCollisionObstacles,
+      showVisualProps,
+      showSpatialAssertions,
+      resolveModelCollision,
+    }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
-      const p = paths(dota, project, map);
+      const p = projectMapPaths(dota, project, map);
       if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}.`);
-      const g = parseTileGrid(await vmapToText(dota.dmxconvertExe, p.contentVmap));
-      const px = Math.max(2, Math.min(16, scale ?? 8));
-      const W = g.width * px, H = g.height * px;
-      const img = Buffer.alloc(W * H * 4);
-      const put = (x: number, y: number, r: number, gg: number, b: number) => {
-        const i = (y * W + x) * 4;
-        img[i] = r; img[i + 1] = gg; img[i + 2] = b; img[i + 3] = 255;
-      };
-      for (let cy = 0; cy < g.height; cy++) {
-        for (let cx = 0; cx < g.width; cx++) {
-          const corners = [vIndex(g, cx, cy), vIndex(g, cx + 1, cy), vIndex(g, cx, cy + 1), vIndex(g, cx + 1, cy + 1)];
-          const waterN = corners.reduce((n, i) => n + g.water[i], 0);
-          const hAvg = corners.reduce((s, i) => s + g.heights[i], 0) / 4;
-          const tile = g.tileset[cIndex(g, cx, cy)];
-          let r: number, gg: number, b: number;
-          if (waterN >= 2) {
-            r = 36; gg = 86; b = 140; // water
-          } else if (tile !== 0) {
-            r = 170; gg = 150; b = 110; // road / alt tileset
-          } else {
-            r = 70; gg = 120; b = 55; // grass
-          }
-          const shade = 1 + Math.max(-0.3, Math.min(0.6, hAvg * 0.18)); // height shading
-          r = Math.min(255, r * shade) | 0; gg = Math.min(255, gg * shade) | 0; b = Math.min(255, b * shade) | 0;
-          const oy = (g.height - 1 - cy) * px; // +y up
-          const ox = cx * px;
-          for (let yy = 0; yy < px; yy++) for (let xx = 0; xx < px; xx++) put(ox + xx, oy + yy, r, gg, b);
-        }
+      const mapText = await vmapToText(dota.dmxconvertExe, p.contentVmap);
+      const parsedEntities = parseMapEntities(mapText);
+      const resolvedContract = await loadMapContract(project.root, map, undefined, parseMapSpecification);
+      const spatialAssertions = resolvedContract
+        ? evaluateSpatialAssertionsAgainstMap(resolvedContract.contract, parsedEntities)
+        : [];
+      let visualPropReport = emptyMapVisualPropReport();
+      if (showVisualProps !== false && curatedVisualPropCandidateCount(parsedEntities) > 0) {
+        visualPropReport = await resolveProjectCuratedVisualPropFootprints(
+          parsedEntities,
+          (await openDotaVpk(dota.pak01DirVpk)).entries,
+          project.gameDir,
+        );
       }
-      const png = encodeRgbaPng(W, H, img);
-      const stats = { width: W, height: H, grid: [g.width, g.height], waterVerts: g.water.filter((w) => w).length, raised: g.heights.filter((h) => h > 0).length, roadCells: g.tileset.filter((t) => t !== 0).length };
-      return image(png.toString("base64"), "image/png", `Top-down preview of "${map}" (${W}x${H}). water=${stats.waterVerts} verts, raised=${stats.raised} verts, road=${stats.roadCells} cells.`);
+      const collisionObstacles = resolveModelCollision === false
+        ? undefined
+        : await resolveMapCollisionObstacles(parsedEntities, dota.pak01DirVpk, undefined, {
+            compiledModelRoots: [project.gameDir],
+            compiledModelVpks: [join(project.gameDir, "pak01_dir.vpk")],
+          });
+      const rendered = renderMapPreview(mapText, {
+        scale,
+        showContours,
+        showCliffs,
+        showRamps,
+        showEntities,
+        showPaths,
+        showTowerRanges,
+        showCamps,
+        showObjectives,
+        showCurrents,
+        showMinimapBounds,
+        showReachability,
+        showRampSuggestions,
+        showPlacementSuggestions,
+        showVolumes,
+        showVisionBlockers,
+        showCollisionObstacles,
+        showVisualProps,
+        showSpatialAssertions,
+        collisionObstacles,
+        visualPropFootprints: visualPropReport.footprints,
+        spatialAssertions,
+      });
+      const reachability = {
+        walkableCellCount: rendered.reachability.walkableCellCount,
+        reachableCellCount: rendered.reachability.reachableCellCount,
+        unreachableCellCount: rendered.reachability.unreachableCellCount,
+        holeCellCount: rendered.reachability.holeCellCount,
+        volumeBlockedCellCount: rendered.reachability.volumeBlockedCellCount,
+        collisionObstacleCount: rendered.reachability.collisionObstacleCount,
+        physicalBoundsCollisionObstacleCount: rendered.reachability.physicalBoundsCollisionObstacleCount,
+        exactHullProjectionCount: rendered.reachability.exactHullProjectionCount,
+        meshVertexHullProjectionCount: rendered.reachability.meshVertexHullProjectionCount,
+        curvedPrimitiveProjectionCount: rendered.reachability.curvedPrimitiveProjectionCount,
+        boundsProjectionCount: rendered.reachability.boundsProjectionCount,
+        approximatedCollisionObstacleCount: rendered.reachability.approximatedCollisionObstacleCount,
+        unknownBoundsCollisionObstacleCount: rendered.reachability.unknownBoundsCollisionObstacleCount,
+        modelCollisionBlockedCellCount: rendered.reachability.modelCollisionBlockedCellCount,
+        rampSuggestions: rendered.reachability.rampSuggestions,
+        placementSuggestions: rendered.reachability.placementSuggestions,
+        regions: rendered.reachability.regions,
+        findings: rendered.reachability.findings,
+      };
+      const caption =
+        `Diagnostic preview of "${map}" (${rendered.stats.width}x${rendered.stats.height}). ` +
+        `${rendered.stats.cliffCells} cliff, ${rendered.stats.rampCells} ramp, ` +
+        `${rendered.stats.suggestedRamps} suggested ramp corridor(s), ` +
+        `${rendered.stats.suggestedPlacements} suggested entity placement(s), ` +
+        `${rendered.stats.unreachableCells} unreachable, ${rendered.stats.holeCells} hole cells, ` +
+        `${rendered.stats.overlays.spatialAssertions} spatial assertion(s) shown ` +
+        `(${rendered.stats.overlays.failedSpatialAssertions} failing), ` +
+        `${visualPropReport.footprintCount} CRC-current visual-prop footprint(s)` +
+        `${visualPropReport.staleModelCount ? `; ${visualPropReport.staleModelCount} stale model snapshot(s) omitted` : ""}. ` +
+        `${visualPropReport.shadowedModelCount ? `${visualPropReport.shadowedModelCount} addon-shadowed model(s) omitted. ` : ""}` +
+        `${visualPropReport.shadowingWarnings.length ? `${visualPropReport.shadowingWarnings.length} addon-package warning(s). ` : ""}` +
+        `Legend: ${Object.entries(rendered.stats.legend).map(([name, value]) => `${name}=${value}`).join("; ")}.`;
+      return {
+        content: [
+          { type: "text", text: caption },
+          { type: "image", data: rendered.png.toString("base64"), mimeType: "image/png" },
+        ],
+        structuredContent: { map, stats: rendered.stats, reachability, spatialAssertions, visualProps: visualPropReport },
+      };
     }),
   );
 
@@ -559,7 +1359,7 @@ function leak(this: void, unit: CDOTA_BaseNPC): void {
     guard(async ({ projectRoot, map, tx, ty }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
-      const p = paths(dota, project, map);
+      const p = projectMapPaths(dota, project, map);
       if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}.`);
       const g = parseTileGrid(await vmapToText(dota.dmxconvertExe, p.contentVmap));
       const [wx, wy] = tileToWorld(g, tx, ty);

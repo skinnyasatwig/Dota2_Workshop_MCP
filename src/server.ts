@@ -7,6 +7,7 @@ import { registerBuildTools } from "./tools/build.tools.js";
 import { registerDebugTools } from "./tools/debug.tools.js";
 import { registerDocsTools } from "./tools/docs.tools.js";
 import { registerMapTools } from "./tools/map.tools.js";
+import { registerMapAnimationTools } from "./tools/map-animation.tools.js";
 import { registerSoundeventsTools } from "./tools/soundevents.tools.js";
 import { registerAssetTools } from "./tools/assets.tools.js";
 import { registerEventTools } from "./tools/events.tools.js";
@@ -38,6 +39,7 @@ export function createServer(): McpServer {
   registerDebugTools(server);
   registerDocsTools(server);
   registerMapTools(server);
+  registerMapAnimationTools(server);
   registerSoundeventsTools(server);
   registerAssetTools(server);
   registerEventTools(server);

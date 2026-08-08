@@ -15,11 +15,16 @@
   your addon by hand — re-attach to update.
 ]]
 
-local SDK_VERSION = "1.0.0"
+local SDK_VERSION = "1.7.0"
 
 ----------------------------------------------------------------------
 -- Tiny JSON encoder (no dependencies; handles the shapes we emit).
 ----------------------------------------------------------------------
+local JSON_ARRAY_MT = {}
+local function jsonArray(values)
+  return setmetatable(values or {}, JSON_ARRAY_MT)
+end
+
 local function jsonEncode(v, seen)
   seen = seen or {}
   local t = type(v)
@@ -40,12 +45,14 @@ local function jsonEncode(v, seen)
     seen[v] = true
     -- array?
     local n, isArray = 0, true
+    local forcedArray = getmetatable(v) == JSON_ARRAY_MT
     for k, _ in pairs(v) do
       n = n + 1
       if type(k) ~= "number" then isArray = false end
     end
+    if n == 0 and not forcedArray then isArray = false end
     local parts = {}
-    if isArray and n > 0 then
+    if isArray then
       for i = 1, #v do parts[#parts + 1] = jsonEncode(v[i], seen) end
       seen[v] = nil
       return "[" .. table.concat(parts, ",") .. "]"
@@ -74,6 +81,7 @@ end
 -- Game-state helpers.
 ----------------------------------------------------------------------
 local function firstHero()
+  if PlayerResource == nil then return nil, nil end
   for pid = 0, 23 do
     if PlayerResource:IsValidPlayerID(pid) then
       local h = PlayerResource:GetSelectedHeroEntity(pid)
@@ -84,6 +92,7 @@ local function firstHero()
 end
 
 local function heroForPid(pid)
+  if PlayerResource == nil then return nil, nil end
   if pid == nil then return firstHero() end
   pid = tonumber(pid)
   if pid == nil or not PlayerResource:IsValidPlayerID(pid) then return nil, nil end
@@ -92,18 +101,20 @@ end
 
 local function snapshotState()
   local players = {}
-  for pid = 0, 23 do
-    if PlayerResource:IsValidPlayerID(pid) then
-      local h = PlayerResource:GetSelectedHeroEntity(pid)
-      players[#players + 1] = {
-        pid = pid,
-        team = PlayerResource:GetTeam(pid),
-        gold = PlayerResource:GetGold(pid),
-        hero = (h and not h:IsNull()) and h:GetUnitName() or nil,
-        level = (h and not h:IsNull()) and h:GetLevel() or nil,
-        alive = (h and not h:IsNull()) and h:IsAlive() or false,
-        hp = (h and not h:IsNull()) and h:GetHealth() or nil,
-      }
+  if PlayerResource ~= nil then
+    for pid = 0, 23 do
+      if PlayerResource:IsValidPlayerID(pid) then
+        local h = PlayerResource:GetSelectedHeroEntity(pid)
+        players[#players + 1] = {
+          pid = pid,
+          team = PlayerResource:GetTeam(pid),
+          gold = PlayerResource:GetGold(pid),
+          hero = (h and not h:IsNull()) and h:GetUnitName() or nil,
+          level = (h and not h:IsNull()) and h:GetLevel() or nil,
+          alive = (h and not h:IsNull()) and h:IsAlive() or false,
+          hp = (h and not h:IsNull()) and h:GetHealth() or nil,
+        }
+      end
     end
   end
   local unitCount = 0
@@ -125,8 +136,15 @@ end
 ----------------------------------------------------------------------
 -- Command implementations.
 ----------------------------------------------------------------------
-local function cmd_ping()
-  out("PONG", "v=" .. SDK_VERSION, "t=" .. string.format("%.2f", GameRules:GetGameTime()), "state=" .. tostring(GameRules:State_Get()))
+local function cmd_ping(_, requestId)
+  local version = "v=" .. SDK_VERSION
+  local gameTime = "t=" .. string.format("%.2f", GameRules:GetGameTime())
+  local state = "state=" .. tostring(GameRules:State_Get())
+  if requestId then
+    out("PONG", version, gameTime, state, "request=" .. tostring(requestId))
+  else
+    out("PONG", version, gameTime, state)
+  end
 end
 
 local function cmd_state()
@@ -171,6 +189,167 @@ local function cmd_eval(args)
   local ok, res = pcall(fn)
   if not ok then out("EVAL_ERR", tostring(res)); return end
   out("EVAL_OK", jsonEncode(res))
+end
+
+-- Compact real-engine path query. Keeping the GridNav program inside the SDK
+-- avoids Source 2's short console-command limit; callers send only coordinates.
+-- Usage: mcp_nav <request-id> <route-name> <endpoints|segments|both> x,y,z:x,y,z
+local function cmd_nav(_, requestId, routeName, mode, encodedPoints)
+  requestId = tostring(requestId or "unknown")
+  if not routeName or not mode or not encodedPoints then
+    out("NAV_ERR", requestId, "usage: mcp_nav <request-id> <route-name> <endpoints|segments|both> x,y,z:x,y,z")
+    return
+  end
+  if mode ~= "endpoints" and mode ~= "segments" and mode ~= "both" then
+    out("NAV_ERR", requestId, "invalid mode '" .. tostring(mode) .. "'")
+    return
+  end
+
+  local points = {}
+  for encodedPoint in string.gmatch(encodedPoints, "[^:]+") do
+    local sx, sy, sz = string.match(encodedPoint, "^([^,]+),([^,]+),([^,]+)$")
+    local x, y, z = tonumber(sx), tonumber(sy), tonumber(sz)
+    if not x or not y or not z then
+      out("NAV_ERR", requestId, "invalid point '" .. tostring(encodedPoint) .. "'")
+      return
+    end
+    points[#points + 1] = Vector(x, y, z)
+  end
+  if #points < 2 then
+    out("NAV_ERR", requestId, "at least two points are required")
+    return
+  end
+
+  local ok, result = pcall(function()
+    local function nearestReachable(point, anchor)
+      local gridX = GridNav:WorldToGridPosX(point.x)
+      local gridY = GridNav:WorldToGridPosY(point.y)
+      for radius = 1, 8 do
+        local best = nil
+        for dx = -radius, radius do
+          for dy = -radius, radius do
+            if math.abs(dx) == radius or math.abs(dy) == radius then
+              local candidate = Vector(
+                GridNav:GridPosToWorldCenterX(gridX + dx),
+                GridNav:GridPosToWorldCenterY(gridY + dy),
+                point.z
+              )
+              if GridNav:IsTraversable(candidate) and GridNav:CanFindPath(candidate, anchor) then
+                local distance = math.sqrt((candidate.x - point.x) ^ 2 + (candidate.y - point.y) ^ 2)
+                if not best or distance < best.distance then
+                  best = {
+                    point = { candidate.x, candidate.y, candidate.z },
+                    gridOffset = { dx, dy },
+                    distance = distance,
+                  }
+                end
+              end
+            end
+          end
+        end
+        if best then return best end
+      end
+      return nil
+    end
+
+    local function check(a, b, index)
+      local canFindPath = GridNav:CanFindPath(a, b)
+      local pathLength = GridNav:FindPathLength(a, b)
+      local startTraversable = GridNav:IsTraversable(a)
+      local endTraversable = GridNav:IsTraversable(b)
+      return {
+        index = index,
+        from = { a.x, a.y, a.z },
+        to = { b.x, b.y, b.z },
+        startTraversable = startTraversable,
+        endTraversable = endTraversable,
+        canFindPath = canFindPath,
+        pathLength = pathLength,
+        passed = canFindPath and startTraversable and endTraversable and pathLength >= 0,
+        -- A point can be individually traversable while isolated by an
+        -- obstruction. Search around disconnected endpoints too, so callers
+        -- receive a useful repair for sealed gates and cut-off regions.
+        nearestStart = (not startTraversable or not canFindPath) and nearestReachable(a, b) or nil,
+        nearestEnd = (not endTraversable or not canFindPath) and nearestReachable(b, a) or nil,
+      }
+    end
+
+    local endpoint = nil
+    local segments = jsonArray()
+    local passed = true
+    if mode ~= "segments" then
+      endpoint = check(points[1], points[#points], nil)
+      if not endpoint.passed then passed = false end
+    end
+    if mode ~= "endpoints" then
+      for i = 1, #points - 1 do
+        local row = check(points[i], points[i + 1], i)
+        segments[#segments + 1] = row
+        if not row.passed then passed = false end
+      end
+    end
+    return {
+      name = routeName,
+      mode = mode,
+      pointCount = #points,
+      endpoint = endpoint,
+      segments = segments,
+      passed = passed,
+    }
+  end)
+
+  if not ok then
+    out("NAV_ERR", requestId, tostring(result))
+    return
+  end
+  out("NAV_OK", requestId, jsonEncode(result))
+end
+
+-- Correlated animation-state query for a named map entity. This keeps the Lua
+-- expression out of the console command and lets automated tests reject stale
+-- responses from an earlier launch.
+-- Usage: mcp_anim <request-id> <targetname>
+local function cmd_anim(_, requestId, targetName)
+  requestId = tostring(requestId or "")
+  targetName = tostring(targetName or "")
+  if requestId == "" or not string.match(requestId, "^[A-Za-z0-9_.:-]+$") then
+    out("ANIM_ERR", requestId ~= "" and requestId or "unknown", "invalid or missing request id")
+    return
+  end
+  if targetName == "" or not string.match(targetName, "^[A-Za-z0-9_.:-]+$") then
+    out("ANIM_ERR", requestId, "invalid or missing targetname")
+    return
+  end
+
+  local ok, result = pcall(function()
+    local entity = Entities:FindByName(nil, targetName)
+    if not entity or entity:IsNull() then
+      return {
+        targetName = targetName,
+        found = false,
+        gameTime = GameRules:GetGameTime(),
+      }
+    end
+    if not entity.GetCycle or not entity.GetSequence then
+      error("entity does not expose CBaseAnimatingActivity")
+    end
+    return {
+      targetName = targetName,
+      found = true,
+      classname = entity:GetClassname(),
+      model = entity.GetModelName and entity:GetModelName() or nil,
+      sequence = entity:GetSequence(),
+      cycle = entity:GetCycle(),
+      duration = entity.ActiveSequenceDuration and entity:ActiveSequenceDuration() or nil,
+      finished = entity.IsSequenceFinished and entity:IsSequenceFinished() or nil,
+      gameTime = GameRules:GetGameTime(),
+    }
+  end)
+  if not ok then
+    out("ANIM_ERR", requestId, tostring(result))
+    return
+  end
+  out("ANIM_OK", requestId, jsonEncode(result))
 end
 
 local function cmd_assert(args)
@@ -239,6 +418,239 @@ local function cmd_event(args)
   out("EVENT", name, jsonEncode(data))
 end
 
+local function firstPlayer()
+  if PlayerResource == nil then return nil, nil end
+  for pid = 0, 23 do
+    if PlayerResource:IsValidPlayerID(pid) then
+      local player = PlayerResource:GetPlayer(pid)
+      if player then return player, pid end
+    end
+  end
+  return nil, nil
+end
+
+-- Point the local player's camera at a named map entity. This is intentionally
+-- narrow: it cannot execute arbitrary Lua, and its correlated response lets a
+-- renderer test prove that framing completed before taking evidence screenshots.
+-- Usage: mcp_focus <request-id> <targetname> [hide-hero:0|1]
+local function cmd_focus(_, requestId, targetName, hideHero)
+  requestId = tostring(requestId or "")
+  targetName = tostring(targetName or "")
+  if requestId == "" or not string.match(requestId, "^[A-Za-z0-9_.:-]+$") then
+    out("FOCUS_ERR", requestId ~= "" and requestId or "unknown", "invalid or missing request id")
+    return
+  end
+  if targetName == "" or not string.match(targetName, "^[A-Za-z0-9_.:-]+$") then
+    out("FOCUS_ERR", requestId, "invalid or missing targetname")
+    return
+  end
+  local _, pid = firstPlayer()
+  if pid == nil then
+    out("FOCUS_ERR", requestId, "no connected player")
+    return
+  end
+  local entity = Entities:FindByName(nil, targetName)
+  if not entity or entity:IsNull() then
+    out("FOCUS_ERR", requestId, "target entity was not found")
+    return
+  end
+  local hero = PlayerResource:GetSelectedHeroEntity(pid)
+  local hidden = false
+  if tostring(hideHero) == "1" and hero and not hero:IsNull() and hero.AddNoDraw then
+    hero:AddNoDraw()
+    hidden = true
+  end
+  PlayerResource:SetCameraTarget(pid, entity)
+  local origin = entity:GetAbsOrigin()
+  out("FOCUS_OK", requestId, jsonEncode({
+    targetName = targetName,
+    pid = pid,
+    heroHidden = hidden,
+    origin = { origin.x, origin.y, origin.z },
+  }))
+end
+
+local function boundedNumber(value, minimum, maximum)
+  local number = tonumber(value)
+  if number == nil or number ~= number or number < minimum or number > maximum then return nil end
+  return number
+end
+
+-- Deterministically frame one named entity through the optional Panorama camera
+-- bridge. Every camera parameter is numeric and bounded; no arbitrary script or
+-- console text crosses the bridge.
+-- Usage: mcp_frame <request-id> <targetname> <distance> <yaw> <pitch> <height-offset> [hide-hero:0|1]
+local function cmd_frame(_, requestId, targetName, distanceValue, yawValue, pitchValue, heightValue, hideHero)
+  requestId = tostring(requestId or "")
+  targetName = tostring(targetName or "")
+  if requestId == "" or not string.match(requestId, "^[A-Za-z0-9_.:-]+$") then
+    out("FRAME_ERR", requestId ~= "" and requestId or "unknown", "invalid or missing request id")
+    return
+  end
+  if targetName == "" or not string.match(targetName, "^[A-Za-z0-9_.:-]+$") then
+    out("FRAME_ERR", requestId, "invalid or missing targetname")
+    return
+  end
+  local distance = boundedNumber(distanceValue, 400, 5000)
+  local yaw = boundedNumber(yawValue, -360, 360)
+  local pitch = boundedNumber(pitchValue, 20, 89)
+  local heightOffset = boundedNumber(heightValue, -2048, 2048)
+  if distance == nil or yaw == nil or pitch == nil or heightOffset == nil then
+    out("FRAME_ERR", requestId, "camera settings are missing or outside their safe bounds")
+    return
+  end
+  local hideValue = tostring(hideHero or "0")
+  if hideValue ~= "0" and hideValue ~= "1" then
+    out("FRAME_ERR", requestId, "hide-hero must be 0 or 1")
+    return
+  end
+  local player, pid = firstPlayer()
+  if not player then
+    out("FRAME_ERR", requestId, "no connected player")
+    return
+  end
+  local entity = Entities:FindByName(nil, targetName)
+  if not entity or entity:IsNull() then
+    out("FRAME_ERR", requestId, "target entity was not found")
+    return
+  end
+  _G.__MCP_FRAME_REQUESTS = _G.__MCP_FRAME_REQUESTS or {}
+  if _G.__MCP_FRAME_REQUESTS[requestId] ~= nil then
+    out("FRAME_ERR", requestId, "duplicate pending request id")
+    return
+  end
+  local hero = PlayerResource:GetSelectedHeroEntity(pid)
+  local hidden = false
+  if hideValue == "1" and hero and not hero:IsNull() and hero.AddNoDraw then
+    hero:AddNoDraw()
+    hidden = true
+  end
+  local origin = entity:GetAbsOrigin()
+  _G.__MCP_FRAME_REQUESTS[requestId] = {
+    targetName = targetName,
+    pid = pid,
+    heroHidden = hidden,
+    origin = { origin.x, origin.y, origin.z },
+    distance = distance,
+    yaw = yaw,
+    pitch = pitch,
+    heightOffset = heightOffset,
+  }
+  CustomGameEventManager:Send_ServerToPlayer(player, "mcp_camera_frame_request", {
+    request_id = requestId,
+    target_name = targetName,
+    player_id = pid,
+    hero_hidden = hidden and 1 or 0,
+    origin_x = origin.x,
+    origin_y = origin.y,
+    origin_z = origin.z,
+    distance = distance,
+    yaw = yaw,
+    pitch = pitch,
+    height_offset = heightOffset,
+  })
+  out("FRAME_SENT", requestId, "target=" .. targetName)
+end
+
+if CustomGameEventManager and not _G.__MCP_CAMERA_FRAME_REPORT_LISTENER then
+  _G.__MCP_CAMERA_FRAME_REPORT_LISTENER = CustomGameEventManager:RegisterListener("mcp_camera_frame_report", function(_, payload)
+    local requestId = tostring(payload and payload.request_id or "unknown")
+    local pending = _G.__MCP_FRAME_REQUESTS and _G.__MCP_FRAME_REQUESTS[requestId] or nil
+    if pending == nil then
+      out("FRAME_ERR", requestId, "unexpected or expired camera-frame report")
+      return
+    end
+    _G.__MCP_FRAME_REQUESTS[requestId] = nil
+    if tostring(payload and payload.target_name or "") ~= pending.targetName then
+      out("FRAME_ERR", requestId, "camera-frame target did not match the pending request")
+      return
+    end
+    out("FRAME_OK", requestId, jsonEncode({
+      targetName = pending.targetName,
+      pid = pending.pid,
+      heroHidden = pending.heroHidden,
+      origin = pending.origin,
+      focusPoint = {
+        tonumber(payload and payload.focus_x),
+        tonumber(payload and payload.focus_y),
+        tonumber(payload and payload.focus_z),
+      },
+      lookAt = {
+        tonumber(payload and payload.look_at_x),
+        tonumber(payload and payload.look_at_y),
+        tonumber(payload and payload.look_at_z),
+      },
+      camera = {
+        tonumber(payload and payload.camera_x),
+        tonumber(payload and payload.camera_y),
+        tonumber(payload and payload.camera_z),
+      },
+      screenUv = {
+        tonumber(payload and payload.screen_u),
+        tonumber(payload and payload.screen_v),
+      },
+      settings = {
+        distance = pending.distance,
+        yaw = pending.yaw,
+        pitch = pending.pitch,
+        heightOffset = pending.heightOffset,
+      },
+    }))
+  end)
+end
+
+-- Ask the optional Panorama bridge for the local camera and minimap geometry.
+-- Usage: mcp_camera <request-id> [player-id]
+local function cmd_camera(_, requestId, requestedPid)
+  requestId = tostring(requestId or "")
+  if requestId == "" or not string.match(requestId, "^[A-Za-z0-9_.:-]+$") then
+    out("CAMERA_ERR", requestId ~= "" and requestId or "unknown", "invalid or missing request id")
+    return
+  end
+  local player, pid
+  if requestedPid ~= nil then
+    pid = tonumber(requestedPid)
+    if pid ~= nil and PlayerResource and PlayerResource:IsValidPlayerID(pid) then
+      player = PlayerResource:GetPlayer(pid)
+    end
+  else
+    player, pid = firstPlayer()
+  end
+  if not player then
+    out("CAMERA_ERR", requestId, "no connected player")
+    return
+  end
+  CustomGameEventManager:Send_ServerToPlayer(player, "mcp_camera_request", { request_id = requestId })
+  out("CAMERA_SENT", requestId, "pid=" .. tostring(pid))
+end
+
+if CustomGameEventManager and not _G.__MCP_CAMERA_REPORT_LISTENER then
+  _G.__MCP_CAMERA_REPORT_LISTENER = CustomGameEventManager:RegisterListener("mcp_camera_report", function(_, payload)
+    local requestId = tostring(payload and payload.request_id or "unknown")
+    local response = {
+      camera = {
+        x = tonumber(payload and payload.camera_x),
+        y = tonumber(payload and payload.camera_y),
+        z = tonumber(payload and payload.camera_z),
+      },
+      screen = {
+        width = tonumber(payload and payload.screen_width),
+        height = tonumber(payload and payload.screen_height),
+      },
+      minimap = {
+        id = payload and payload.minimap_id or nil,
+        x = tonumber(payload and payload.minimap_x),
+        y = tonumber(payload and payload.minimap_y),
+        width = tonumber(payload and payload.minimap_width),
+        height = tonumber(payload and payload.minimap_height),
+        uiScaleX = tonumber(payload and payload.minimap_scale_x),
+        uiScaleY = tonumber(payload and payload.minimap_scale_y),
+      },
+    }
+    out("CAMERA_OK", requestId, jsonEncode(response))
+  end)
+end
+
 local function cmd_hud(_, on)
   -- Toggle HUD/cursor for clean screenshots (client-side conveniences via convars).
   local v = (tostring(on) == "0") and 0 or 1
@@ -258,24 +670,29 @@ end
 local function reg(name, fn, help)
   -- Wrap so a thrown error never kills the console command.
   local ok = pcall(function()
-    Convars:RegisterCommand(name, function(...) local a = { ... }; local ok2, e = pcall(fn, a, a[2], a[3], a[4]); if not ok2 then out(name .. "_ERR", tostring(e)) end end, help or name, 0)
+    Convars:RegisterCommand(name, function(...) local a = { ... }; local ok2, e = pcall(fn, a, a[2], a[3], a[4], a[5]); if not ok2 then out(name .. "_ERR", tostring(e)) end end, help or name, 0)
   end)
   return ok
 end
 
-reg("mcp_ping", function() cmd_ping() end, "MCP: health check")
+reg("mcp_ping", cmd_ping, "MCP: health check (optional request id is echoed)")
 reg("mcp_state", function() cmd_state() end, "MCP: dump high-level game state as JSON")
 reg("mcp_dump", cmd_dump, "MCP: dump a section (state|heroes|units|nettables) as JSON")
 reg("mcp_eval", cmd_eval, "MCP: eval Lua and print the JSON-encoded result")
+reg("mcp_nav", cmd_nav, "MCP: run a compact, correlated GridNav route query")
+reg("mcp_anim", cmd_anim, "MCP: query a named animated entity with a correlated response")
 reg("mcp_assert", cmd_assert, "MCP: evaluate a boolean Lua expression; prints PASS/FAIL")
 reg("mcp_spawn", cmd_spawn, "MCP: spawn units near a hero (mcp_spawn <unit> [count] [team])")
 reg("mcp_gold", cmd_gold, "MCP: grant gold (mcp_gold <amount> [pid])")
 reg("mcp_level", cmd_level, "MCP: level a hero up to N (mcp_level <level> [pid])")
 reg("mcp_item", cmd_item, "MCP: give an item (mcp_item <item> [pid])")
 reg("mcp_event", cmd_event, "MCP: fire a custom game event to clients (mcp_event <name> [json])")
+reg("mcp_focus", cmd_focus, "MCP: focus a player's camera on a named map entity")
+reg("mcp_frame", cmd_frame, "MCP: deterministically frame a named entity through the optional Panorama bridge")
+reg("mcp_camera", cmd_camera, "MCP: query local camera/minimap geometry through the optional Panorama bridge")
 reg("mcp_hud", cmd_hud, "MCP: toggle HUD visibility (mcp_hud <0|1>) for clean shots")
 reg("mcp_pause", cmd_pause, "MCP: pause/unpause (mcp_pause <0|1>)")
 
-out("DebugSDK", "loaded", "v=" .. SDK_VERSION, "(commands: mcp_ping mcp_state mcp_dump mcp_eval mcp_assert mcp_spawn mcp_gold mcp_level mcp_item mcp_event mcp_hud mcp_pause)")
+out("DebugSDK", "loaded", "v=" .. SDK_VERSION, "(commands: mcp_ping mcp_state mcp_dump mcp_eval mcp_nav mcp_anim mcp_assert mcp_spawn mcp_gold mcp_level mcp_item mcp_event mcp_focus mcp_frame mcp_camera mcp_hud mcp_pause)")
 
 return { version = SDK_VERSION }

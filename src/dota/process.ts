@@ -20,7 +20,7 @@ export interface RunOptions {
 /** Run a process to completion, capturing output. */
 export function run(exe: string, args: string[], opts: RunOptions = {}): Promise<RunResult> {
   const { cwd, timeoutMs = 600_000, maxOutputChars = 20_000 } = opts;
-  const command = quoteCommand(exe, args);
+  const command = formatCommand(exe, args);
 
   return new Promise((resolve) => {
     const child = spawn(exe, args, { cwd, windowsHide: true });
@@ -56,7 +56,7 @@ export function run(exe: string, args: string[], opts: RunOptions = {}): Promise
 export function spawnDetached(exe: string, args: string[], cwd?: string): { command: string; pid?: number } {
   const child = spawn(exe, args, { cwd, detached: true, stdio: "ignore", windowsHide: false });
   child.unref();
-  return { command: quoteCommand(exe, args), pid: child.pid };
+  return { command: formatCommand(exe, args), pid: child.pid };
 }
 
 /** The platform-appropriate npm executable. */
@@ -70,7 +70,26 @@ export async function killProcess(image: string): Promise<RunResult> {
   return run("pkill", ["-f", image], { timeoutMs: 15_000 });
 }
 
-function quoteCommand(exe: string, args: string[]): string {
+/** Test task-list output without depending on its localized "no tasks" message. */
+export function processListContains(output: string, image: string): boolean {
+  const escaped = image.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^\\s*${escaped}\\s`, "im").test(output);
+}
+
+/** Cheap process-presence check used by guarded engine sessions. */
+export async function isProcessRunning(image: string): Promise<boolean> {
+  if (process.platform === "win32") {
+    const result = await run("tasklist", ["/FI", `IMAGENAME eq ${image}`, "/NH"], {
+      timeoutMs: 10_000,
+      maxOutputChars: 20_000,
+    });
+    return result.code === 0 && processListContains(result.stdout, image);
+  }
+  const result = await run("pgrep", ["-f", image], { timeoutMs: 10_000 });
+  return result.code === 0 && result.stdout.trim().length > 0;
+}
+
+export function formatCommand(exe: string, args: string[]): string {
   const q = (s: string) => (/\s/.test(s) ? `"${s}"` : s);
   return [q(exe), ...args.map(q)].join(" ");
 }
