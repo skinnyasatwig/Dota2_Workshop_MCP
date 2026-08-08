@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ManagedMapEntity, ManagedMapPath, MapContract } from "./map-contract.js";
+import type { ParsedMapEntity } from "./vmap.js";
 
 const assertionName = z.string().regex(
   /^[A-Za-z_][A-Za-z0-9_.-]*$/,
@@ -50,9 +51,17 @@ export interface SpatialAssertionResult {
 
 export type Point2 = [number, number];
 
+function vector3(value: string | undefined): [number, number, number] | undefined {
+  if (!value) return undefined;
+  const values = value.trim().split(/\s+/).map(Number);
+  return values.length === 3 && values.every(Number.isFinite)
+    ? values as [number, number, number]
+    : undefined;
+}
+
 function parseOrigin(entity: ManagedMapEntity): Point2 | undefined {
-  const values = entity.origin.trim().split(/\s+/).map(Number);
-  return values.length === 3 && values.every(Number.isFinite) ? [values[0], values[1]] : undefined;
+  const values = vector3(entity.origin);
+  return values ? [values[0], values[1]] : undefined;
 }
 
 function closestPointOnSegment(point: Point2, from: Point2, to: Point2): Point2 {
@@ -301,6 +310,45 @@ export function evaluateSpatialAssertions(contract: MapContract): SpatialAsserti
       closestPoints: witness.points,
       detail: `Minimum planar polyline separation ${actualDistance.toFixed(2)}; required minimum ${assertion.min}.`,
     };
+  });
+}
+
+/**
+ * Evaluate a contract's declared rules using coordinates serialized in a converted VMAP.
+ * The contract still defines path membership and limits; actual named entities supply every measured point.
+ */
+export function evaluateSpatialAssertionsAgainstMap(
+  contract: MapContract,
+  actualEntities: readonly ParsedMapEntity[],
+): SpatialAssertionResult[] {
+  const counts = new Map<string, number>();
+  for (const entity of actualEntities) {
+    if (entity.targetname) counts.set(entity.targetname, (counts.get(entity.targetname) ?? 0) + 1);
+  }
+  const unique = new Map<string, ParsedMapEntity>();
+  for (const entity of actualEntities) {
+    if (!entity.targetname || counts.get(entity.targetname) !== 1 || !vector3(entity.origin)) continue;
+    unique.set(entity.targetname, entity);
+  }
+  const managedEntities: ManagedMapEntity[] = [...unique.values()].map((entity) => ({
+    targetname: entity.targetname!,
+    classname: entity.classname,
+    origin: entity.origin!,
+  }));
+  const managedPaths: ManagedMapPath[] = [];
+  for (const declared of contract.managedPaths ?? []) {
+    const startIndex = declared.startIndex ?? 1;
+    const points = declared.points.map((_, offset) => {
+      const entity = unique.get(`${declared.name}_${startIndex + offset}`);
+      return vector3(entity?.origin);
+    });
+    if (points.some((point) => !point)) continue;
+    managedPaths.push({ ...declared, points: points as [number, number, number][] });
+  }
+  return evaluateSpatialAssertions({
+    ...contract,
+    managedEntities,
+    managedPaths,
   });
 }
 

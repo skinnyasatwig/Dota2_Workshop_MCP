@@ -502,10 +502,18 @@ Last updated: 2026-08-07
     450-to-600-unit band, both route pairs remain 1,024 units apart, and the VMAP acceptance sync remains at zero drift.
     The regenerated preview shows six passing measurement bars and zero failures without launching Dota or Hammer.
 
+75. This milestone - corrected spatial diagnostics to measure the map on disk instead of merely re-measuring its desired
+    JSON. Build/sync still validate intended geometry before reconciliation, but map validation and preview now rebuild
+    each declared route from unique named waypoint coordinates in the converted VMAP and substitute actual named-entity
+    origins. A focused drift fixture moves the serialized routes from 1,024 to 600 units apart and a tower clearance from
+    512 to 300; both rules turn into measured failures even though the source contract still passes. Missing or duplicate
+    actual nodes produce unresolved failures rather than borrowing desired positions. The real converted 3v3 map passes
+    all six actual measurements, has zero validation errors, and retains only its known isolated off-map-strip warning.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 372 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 373 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 208 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed palette-bound audit: 20 of 20 model CRCs and MDAT snapshots match the current Dota VPK.
 - Installed palette-gallery proof: the four-model `river-wetland` set passed exact CRC checks, decoded to textured GLBs,

@@ -4,9 +4,20 @@ import { parseMapSpecification } from "../src/dota/map-spec.js";
 import {
   assertSpatialAssertions,
   evaluateSpatialAssertions,
+  evaluateSpatialAssertionsAgainstMap,
   minimumPathSeparation,
   minimumPathSeparationWitness,
 } from "../src/dota/map-spatial.js";
+import type { ParsedMapEntity } from "../src/dota/vmap.js";
+
+function actualEntity(targetname: string, origin: string): ParsedMapEntity {
+  return {
+    targetname,
+    classname: targetname.startsWith("path_") ? "path_corner" : "info_target",
+    origin,
+    properties: { targetname, origin },
+  };
+}
 
 test("spatial assertions measure entity distance and true polyline separation", () => {
   const contract = parseMapSpecification({
@@ -50,6 +61,45 @@ test("path separation checks segment interiors rather than waypoint pairs only",
     distance: 0,
     points: [[0, 0], [0, 0]],
   });
+});
+
+test("actual-map spatial evaluation measures serialized VMAP positions and fails closed on duplicates", () => {
+  const contract = parseMapSpecification({
+    requiredEntities: [],
+    managedEntities: [{ targetname: "tower", classname: "npc_dota_tower", origin: "0 0 128" }],
+    managedPaths: [
+      { name: "path_north", points: [[-1000, 512, 128], [1000, 512, 128]] },
+      { name: "path_south", points: [[-1000, -512, 128], [1000, -512, 128]] },
+    ],
+    spatialAssertions: [
+      { kind: "pathSeparation", name: "spacing", pathA: "path_north", pathB: "path_south", min: 1000 },
+      { kind: "entityPathDistance", name: "tower_clearance", entity: "tower", path: "path_north", min: 450 },
+    ],
+  });
+  assert.ok(evaluateSpatialAssertions(contract).every((result) => result.passed));
+
+  const actual = [
+    actualEntity("tower", "0 0 128"),
+    actualEntity("path_north_1", "-1000 300 128"),
+    actualEntity("path_north_2", "1000 300 128"),
+    actualEntity("path_south_1", "-1000 -300 128"),
+    actualEntity("path_south_2", "1000 -300 128"),
+  ];
+  assert.deepEqual(evaluateSpatialAssertionsAgainstMap(contract, actual).map((result) => ({
+    name: result.name,
+    passed: result.passed,
+    actualDistance: result.actualDistance,
+  })), [
+    { name: "spacing", passed: false, actualDistance: 600 },
+    { name: "tower_clearance", passed: false, actualDistance: 300 },
+  ]);
+
+  const duplicate = evaluateSpatialAssertionsAgainstMap(contract, [
+    ...actual,
+    actualEntity("path_north_1", "-900 300 128"),
+  ]);
+  assert.equal(duplicate[0].actualDistance, undefined);
+  assert.match(duplicate[0].detail, /Missing managed path reference.*path_north/);
 });
 
 test("violated spatial assertions fail before map reconciliation", () => {

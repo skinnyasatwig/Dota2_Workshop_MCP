@@ -29,7 +29,7 @@ import { resolveMapCollisionObstacles } from "../dota/map-collision.js";
 import { reconcileMapVolumes } from "../dota/map-volume.js";
 import { reconcileMapSolids } from "../dota/map-solid.js";
 import { reconcileMapNavSurfaces } from "../dota/map-nav-surface.js";
-import { evaluateSpatialAssertions } from "../dota/map-spatial.js";
+import { evaluateSpatialAssertions, evaluateSpatialAssertionsAgainstMap } from "../dota/map-spatial.js";
 import { inspectProjectMapMaterials, MapMaterialReport } from "../dota/map-material.js";
 import { inspectProjectMapModels, MapModelReport } from "../dota/map-model.js";
 import {
@@ -2052,7 +2052,7 @@ export function registerMapTools(server: McpServer) {
         "all VMAP material and model references across addon/base loose assets and VPKs, overview source/compiled material and " +
         "texture assets, image dimensions, and the world-to-minimap transform. When a project contract declares managedTerrain or " +
         "managedSolids, managedNavSurfaces, or managedVolumes, validation also reports tile-grid, checked-solid, navigation-surface, or checked-volume drift without writing it. Whole-map " +
-        "Contract spatial assertions continuously check declared entity distances and minimum path separation. " +
+        "Contract spatial assertions measure actual converted-VMAP entity/route distances and minimum path separation. " +
         "offline reachability checks detect terrain holes, " +
         "trapped spawns, blocked entrances/path segments, and inaccessible objectives or camps. Known entity keyvalues " +
         "are checked against the installed official Valve FGD definitions.",
@@ -2115,16 +2115,7 @@ export function registerMapTools(server: McpServer) {
       const requirements = requiredEntities
         ? requiredEntities
         : [...new Map(contractRequirements.map((requirement) => [requirement.targetname, requirement])).values()];
-      const spatialAssertions = resolvedContract
-        ? evaluateSpatialAssertions(resolvedContract.contract)
-        : [];
-      for (const assertion of spatialAssertions.filter((result) => !result.passed)) {
-        findings.push({
-          severity: "error",
-          code: "spatial-assertion-failed",
-          message: `${assertion.name}: ${assertion.detail}`,
-        });
-      }
+      let spatialAssertions: ReturnType<typeof evaluateSpatialAssertions> = [];
 
       const source = await pathExists(p.contentVmap);
       const compiled = await pathExists(p.gameVpk);
@@ -2220,6 +2211,16 @@ export function registerMapTools(server: McpServer) {
       if (source) {
         const mapText = await vmapToText(dota.dmxconvertExe, p.contentVmap);
         entities = parseMapEntities(mapText);
+        if (resolvedContract) {
+          spatialAssertions = evaluateSpatialAssertionsAgainstMap(resolvedContract.contract, entities);
+          for (const assertion of spatialAssertions.filter((result) => !result.passed)) {
+            findings.push({
+              severity: "error",
+              code: "spatial-assertion-failed",
+              message: `${assertion.name}: ${assertion.detail}`,
+            });
+          }
+        }
         materialReport = await inspectProjectMapMaterials(
           mapText,
           dota,

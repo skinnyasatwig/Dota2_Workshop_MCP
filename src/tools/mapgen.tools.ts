@@ -21,7 +21,7 @@ import {
   terrainOperationInputSchema,
 } from "../dota/map-spec.js";
 import { compareMapSpecifications } from "../dota/map-spec-compare.js";
-import { evaluateSpatialAssertions } from "../dota/map-spatial.js";
+import { evaluateSpatialAssertions, evaluateSpatialAssertionsAgainstMap } from "../dota/map-spatial.js";
 import { resolveDataPath } from "../util/datapath.js";
 import { runMapTransaction } from "../dota/map-transaction.js";
 import { renderMapPreview } from "../dota/map-preview.js";
@@ -1151,7 +1151,7 @@ export function registerMapGenTools(server: McpServer) {
       const parsedEntities = parseMapEntities(mapText);
       const resolvedContract = await loadMapContract(project.root, map, undefined, parseMapSpecification);
       const spatialAssertions = resolvedContract
-        ? evaluateSpatialAssertions(resolvedContract.contract)
+        ? evaluateSpatialAssertionsAgainstMap(resolvedContract.contract, parsedEntities)
         : [];
       let visualPropReport = emptyMapVisualPropReport();
       if (showVisualProps !== false && curatedVisualPropCandidateCount(parsedEntities) > 0) {
