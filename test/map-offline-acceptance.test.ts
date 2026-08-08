@@ -15,6 +15,11 @@ const passingInput = {
     modelValidation: { safeToWrite: true },
     modelPhysicsValidation: null,
   },
+  compileRequested: false,
+  compileExecutionError: false,
+  compileExecution: null,
+  postCompileValidationError: false,
+  postCompileValidation: null,
   validation: { ok: true },
   preview: { stats: { overlays: { failedSpatialAssertions: 0 } } },
   previewProduced: true,
@@ -29,6 +34,8 @@ test("offline acceptance passes only when every no-engine criterion is proven", 
       currentSpatialRulesPass: true,
       desiredSpatialRulesPass: true,
       compilePreflightPasses: true,
+      compileExecutionPasses: true,
+      postCompileValidationPasses: true,
       staticValidationPasses: true,
       previewSpatialRulesPass: true,
       previewProduced: true,
@@ -55,6 +62,11 @@ test("offline acceptance fails closed on drift, unresolved rules, stage errors, 
     stageErrors: { sync: false, compile: false, validation: false, preview: false },
     sync: {},
     compilePreflight: {},
+    compileRequested: false,
+    compileExecutionError: false,
+    compileExecution: null,
+    postCompileValidationError: false,
+    postCompileValidation: null,
     validation: {},
     preview: {},
     previewProduced: true,
@@ -64,4 +76,24 @@ test("offline acceptance fails closed on drift, unresolved rules, stage errors, 
   assert.equal(missing.criteria.desiredSpatialRulesPass, false);
   assert.equal(missing.criteria.compilePreflightPasses, false);
   assert.equal(missing.criteria.previewSpatialRulesPass, false);
+});
+
+test("requested compilation requires a committed VPK and fresh post-compile validation", () => {
+  const requested = structuredClone(passingInput);
+  requested.compileRequested = true;
+  requested.compileExecution = { ok: true, committed: true, rolledBack: false };
+  requested.postCompileValidation = { ok: true, compiled: true, compiledFresh: true };
+  assert.equal(assessOfflineAcceptance(requested).ok, true);
+
+  requested.compileExecution = { ok: false, committed: false, rolledBack: true };
+  requested.postCompileValidation = { ok: true, compiled: true, compiledFresh: true };
+  let failed = assessOfflineAcceptance(requested);
+  assert.equal(failed.ok, false);
+  assert.equal(failed.criteria.compileExecutionPasses, false);
+
+  requested.compileExecution = { ok: true, committed: true, rolledBack: false };
+  requested.postCompileValidation = { ok: true, compiled: true, compiledFresh: false };
+  failed = assessOfflineAcceptance(requested);
+  assert.equal(failed.ok, false);
+  assert.equal(failed.criteria.postCompileValidationPasses, false);
 });

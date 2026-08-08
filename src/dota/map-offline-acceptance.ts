@@ -4,6 +4,8 @@ export interface OfflineAcceptanceCriteria {
   currentSpatialRulesPass: boolean;
   desiredSpatialRulesPass: boolean;
   compilePreflightPasses: boolean;
+  compileExecutionPasses: boolean;
+  postCompileValidationPasses: boolean;
   staticValidationPasses: boolean;
   previewSpatialRulesPass: boolean;
   previewProduced: boolean;
@@ -23,6 +25,11 @@ export interface OfflineAcceptanceInput {
   };
   sync: unknown;
   compilePreflight: unknown;
+  compileRequested: boolean;
+  compileExecutionError: boolean;
+  compileExecution: unknown;
+  postCompileValidationError: boolean;
+  postCompileValidation: unknown;
   validation: unknown;
   preview: unknown;
   previewProduced: boolean;
@@ -57,6 +64,16 @@ export function assessOfflineAcceptance(input: OfflineAcceptanceInput): OfflineA
   const preview = record(input.preview);
   const previewStats = record(preview?.stats);
   const previewOverlays = record(previewStats?.overlays);
+  const compileExecution = record(input.compileExecution);
+  const postCompileValidation = record(input.postCompileValidation);
+  const compileExecutionPasses = !input.compileRequested || (
+    !input.compileExecutionError && compileExecution?.ok === true &&
+    compileExecution?.committed === true && compileExecution?.rolledBack === false
+  );
+  const postCompileValidationPasses = !input.compileRequested || (
+    !input.postCompileValidationError && postCompileValidation?.ok === true &&
+    postCompileValidation?.compiled === true && postCompileValidation?.compiledFresh === true
+  );
   const criteria: OfflineAcceptanceCriteria = {
     stagesSucceeded: !input.stageErrors.sync && !input.stageErrors.compile &&
       !input.stageErrors.validation && !input.stageErrors.preview,
@@ -64,6 +81,8 @@ export function assessOfflineAcceptance(input: OfflineAcceptanceInput): OfflineA
     currentSpatialRulesPass: zeroFailureSummary(sync?.currentSpatialAssertionSummary),
     desiredSpatialRulesPass: zeroFailureSummary(sync?.spatialAssertionSummary),
     compilePreflightPasses: compilePreflightPasses(input.compilePreflight),
+    compileExecutionPasses,
+    postCompileValidationPasses,
     staticValidationPasses: validation?.ok === true,
     previewSpatialRulesPass: Number.isInteger(previewOverlays?.failedSpatialAssertions) &&
       Number(previewOverlays?.failedSpatialAssertions) === 0,

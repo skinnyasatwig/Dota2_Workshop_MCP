@@ -540,10 +540,18 @@ Last updated: 2026-08-07
     only 3v3 run committed successfully, retained a recovery copy of the previous VPK, and produced a checked 6,125,900-
     byte VPK whose written and read-back MD5 both equal `9c7c11d31fe191b8cfa4b10154b60041`. Dota and Hammer stayed closed.
 
+80. This milestone - added an explicit `--compile` mode to the unified offline acceptance runner. Compilation is not
+    attempted unless sync, actual/desired spatial rules, compile preflight, static validation, preview rules, and PNG
+    evidence all pass first. The runner then uses transactional `map_compile` and performs a second validation with
+    `requireCompiled:true`; the final verdict requires a committed, non-rolled-back VPK plus `compiledFresh:true`.
+    `--force` is rejected unless compile mode is explicit, while default operation remains read-only. Verdict tests cover
+    successful compile evidence, rollback/failure, and stale post-validation. The real 3v3 workflow passed all ten criteria,
+    committed its VPK with a recovery backup, and proved freshness afterward without launching Dota or Hammer.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 375 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 376 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 208 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed palette-bound audit: 20 of 20 model CRCs and MDAT snapshots match the current Dota VPK.
 - Installed palette-gallery proof: the four-model `river-wetland` set passed exact CRC checks, decoded to textured GLBs,

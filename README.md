@@ -226,7 +226,10 @@ For one safe project-wide checkpoint, run
 preview-only contract sync, dry-run compiler asset preflight, full static validation, and diagnostic preview, then writes
 one structured JSON report and PNG under the project's `artifacts` folder. It fails closed on map drift, actual or desired
 spatial failures, unsafe material/model/PHYS evidence, validation errors, a missing preview, or missing structured evidence.
-It never writes the VMAP, invokes ResourceCompiler, launches Dota, or opens Hammer.
+Default mode never writes the VMAP, invokes ResourceCompiler, launches Dota, or opens Hammer.
+Pass `--compile` only when a VPK build is wanted. The runner first requires the entire read-only gate to pass, then calls
+transactional `map_compile` and performs a second `requireCompiled:true` validation; the final verdict requires a committed,
+non-rolled-back compile and a fresh VPK. `--force` is accepted only together with `--compile`.
 
 - **`map_build`** — one call: clone the template, apply one validated desired-state map specification,
   register, and optionally compile it. The preferred `specification` object uses the same
