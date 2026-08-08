@@ -258,6 +258,7 @@ test("checked profile arches compose an irregular opening from sloped overhead s
       sides: [16, -16],
     },
     faceTextureRotations: { top: 45, sides: -90 },
+    faceTextureAlignments: { top: "shared", sides: "shared" },
   }]);
   const solids = expandDotaComponents([arch]).managedSolids;
 
@@ -288,6 +289,7 @@ test("checked profile arches compose an irregular opening from sloped overhead s
       sides: [16, -16],
     },
     faceTextureRotations: { top: 45, sides: -90 },
+    faceTextureAlignments: { top: "shared", sides: "shared" },
     extrusion: {
       points: [[-64, -128], [64, -128], [64, 128], [-64, 128]],
       height: 768,
@@ -311,6 +313,7 @@ test("checked profile arches compose an irregular opening from sloped overhead s
       sides: [16, -16],
     },
     faceTextureRotations: { top: 45, sides: -90 },
+    faceTextureAlignments: { top: "shared", sides: "shared" },
     extrusion: {
       points: [[-96, -128], [96, -128], [96, 128], [-96, 128]],
       bottom: [0, 216, 216, 0],
@@ -540,6 +543,7 @@ test("checked multi-hole platforms emit only independently proven triangle pairs
     faceTextureScales: { top: [0.25, 0.25], sides: [0.5, 1] },
     faceTextureShifts: { top: [0, 64], sides: [16, -16] },
     faceTextureRotations: { top: 45, sides: -90 },
+    faceTextureAlignments: { top: "shared", sides: "shared" },
   }]);
   const expanded = expandDotaComponents([platform]);
 
@@ -556,7 +560,9 @@ test("checked multi-hole platforms emit only independently proven triangle pairs
     solid.faceTextureShifts?.top?.[1] === 64 &&
     solid.faceTextureShifts?.sides?.[0] === 16 &&
     solid.faceTextureRotations?.top === 45 &&
-    solid.faceTextureRotations?.sides === -90));
+    solid.faceTextureRotations?.sides === -90 &&
+    solid.faceTextureAlignments?.top === "shared" &&
+    solid.faceTextureAlignments?.sides === "shared"));
   assert.deepEqual(
     expanded.managedNavSurfaces.map((surface) => surface.extrusion),
     expanded.managedSolids.map((solid) => solid.extrusion),

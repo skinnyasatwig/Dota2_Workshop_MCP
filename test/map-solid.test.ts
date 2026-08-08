@@ -7,6 +7,7 @@ import {
   mapSolidFaceTextureScalePlan,
   mapSolidFaceTextureShiftPlan,
   mapSolidFaceTextureRotationPlan,
+  mapSolidSharedTextureAxes,
   parseManagedMapSolids,
   parseMapSolids,
   reconcileMapSolids,
@@ -119,6 +120,14 @@ test("managed solids reject unsafe outlines, materials, and property overrides",
     /greater than or equal to -180/,
   );
   assert.throws(
+    () => parseManagedMapSolids([{ ...concaveSolid, faceTextureAlignments: {} }]),
+    /must set top, bottom, sides/,
+  );
+  assert.throws(
+    () => parseManagedMapSolids([{ ...concaveSolid, faceTextureAlignments: { top: "world" } }]),
+    /Invalid literal value|Invalid input/,
+  );
+  assert.throws(
     () => parseManagedMapSolids([{ ...concaveSolid, properties: { Solidity: 0 } }]),
     /controlled by the checked solid recipe/,
   );
@@ -211,6 +220,11 @@ test("checked solids assign role-based texture projection settings and reconcile
       bottom: -90,
       sides: 180,
     },
+    faceTextureAlignments: {
+      top: "shared",
+      bottom: "shared",
+      sides: "shared",
+    },
   }])![0];
   const plan = mapSolidFaceTextureScalePlan(textured).faceTextureScales;
   assert.deepEqual(plan, [
@@ -228,11 +242,19 @@ test("checked solids assign role-based texture projection settings and reconcile
     ...Array(4).fill(-90),
     ...Array(12).fill(180),
   ]);
+  const aligned = mapSolidSharedTextureAxes(buildExtrudedSolidMesh(textured), textured);
+  assert.equal(new Set(aligned.textureAxisU.slice(0, 4)).size, 1);
+  assert.equal(new Set(aligned.textureAxisU.slice(4, 8)).size, 1);
+  for (let side = 0; side < 6; side++) {
+    assert.equal(aligned.textureAxisU[8 + side * 2], aligned.textureAxisU[9 + side * 2]);
+    assert.equal(aligned.textureAxisV[8 + side * 2], aligned.textureAxisV[9 + side * 2]);
+  }
 
   const first = reconcileMapSolids(EMPTY_MAP, [textured]);
   assert.deepEqual(parseMapSolids(first.text)[0]?.faceTextureScales, textured.faceTextureScales);
   assert.deepEqual(parseMapSolids(first.text)[0]?.faceTextureShifts, textured.faceTextureShifts);
   assert.deepEqual(parseMapSolids(first.text)[0]?.faceTextureRotations, textured.faceTextureRotations);
+  assert.deepEqual(parseMapSolids(first.text)[0]?.faceTextureAlignments, textured.faceTextureAlignments);
   assert.deepEqual(reconcileMapSolids(first.text, [textured]).unchanged, [textured.targetname]);
 
   const changed = {

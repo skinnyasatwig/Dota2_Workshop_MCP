@@ -617,6 +617,9 @@ function expandComponent(
       ...(solid.faceTextureRotations
         ? { faceTextureRotations: { ...solid.faceTextureRotations } }
         : {}),
+      ...(solid.faceTextureAlignments
+        ? { faceTextureAlignments: { ...solid.faceTextureAlignments } }
+        : {}),
       extrusion,
       properties: localProperties(solid.properties, placement.name, deferLocalReferences),
     };

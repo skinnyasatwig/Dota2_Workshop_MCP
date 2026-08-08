@@ -123,6 +123,11 @@ export function buildRepositoryCompileFixtureText(baseText: string): string {
               bottom: -90,
               sides: 180,
             },
+            faceTextureAlignments: {
+              top: "shared",
+              bottom: "shared",
+              sides: "shared",
+            },
           },
           {
             kind: "bridge",

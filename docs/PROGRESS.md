@@ -305,6 +305,16 @@ Last updated: 2026-08-07
     with Dota and Hammer closed. Shared/world alignment remains separate because face-relative rotation alone cannot
     promise seamless texturing across triangles whose original edge bases differ.
 
+56. This milestone - added checked object-local `shared` texture alignment for top, bottom, and side roles. Rather than
+    accepting raw projection vectors, the MCP chooses the least-parallel local cardinal axis, projects it onto each
+    generated face plane, and derives the paired axis from the outward normal. Coplanar top/bottom triangles therefore
+    receive one canonical basis, and both triangles of each vertical/sloped side panel receive matching axes. Scale,
+    rotation, then shift compose in a fixed order. Inspection tries the eight bounded role combinations, accepts the
+    least-custom alignment that exactly explains both observed axis streams, and recovers the accompanying role
+    rotations. Desired-state checks still compare every final axis component. Reusable components and mirrors retain
+    the alignment. Valve's converter and ResourceCompiler accepted a profile arch combining shared alignment, three
+    materials, mirrored scale, positive/negative shifts, and 45/-90/180 degree rotations with Dota and Hammer closed.
+
 ## Current verification record
 
 - TypeScript build passes.

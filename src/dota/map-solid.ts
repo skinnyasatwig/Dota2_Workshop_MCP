@@ -84,6 +84,21 @@ export interface ManagedMapSolidFaceTextureRotations {
   sides?: number;
 }
 
+export const managedMapSolidFaceTextureAlignmentsInputSchema = z.object({
+  top: z.literal("shared").optional(),
+  bottom: z.literal("shared").optional(),
+  sides: z.literal("shared").optional(),
+}).strict().refine(
+  (value) => value.top !== undefined || value.bottom !== undefined || value.sides !== undefined,
+  { message: "must set top, bottom, sides, or a combination of those roles to shared" },
+);
+
+export interface ManagedMapSolidFaceTextureAlignments {
+  top?: "shared";
+  bottom?: "shared";
+  sides?: "shared";
+}
+
 export function signedPolygonArea(points: readonly [number, number][]): number {
   return points.reduce((area, [x, y], index) => {
     const [nextX, nextY] = points[(index + 1) % points.length];
@@ -182,6 +197,7 @@ export const managedMapSolidInputSchema = z.object({
   faceTextureScales: managedMapSolidFaceTextureScalesInputSchema.optional(),
   faceTextureShifts: managedMapSolidFaceTextureShiftsInputSchema.optional(),
   faceTextureRotations: managedMapSolidFaceTextureRotationsInputSchema.optional(),
+  faceTextureAlignments: managedMapSolidFaceTextureAlignmentsInputSchema.optional(),
   extrusion: solidExtrusionInputSchema,
   properties: z.record(scalar).optional(),
 }).strict().superRefine((solid, context) => {
@@ -247,6 +263,7 @@ export interface ManagedMapSolid {
   faceTextureScales?: ManagedMapSolidFaceTextureScales;
   faceTextureShifts?: ManagedMapSolidFaceTextureShifts;
   faceTextureRotations?: ManagedMapSolidFaceTextureRotations;
+  faceTextureAlignments?: ManagedMapSolidFaceTextureAlignments;
   extrusion:
     | { points: [number, number][]; height: number; bottom?: never; top?: never }
     | { points: [number, number][]; height?: never; bottom: number[]; top: number[] };
@@ -268,6 +285,57 @@ export interface MapSolidFaceTextureShiftPlan {
 
 export interface MapSolidFaceTextureRotationPlan {
   faceTextureRotations: number[];
+}
+
+function cross3(a: readonly number[], b: readonly number[]): [number, number, number] {
+  return [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
+}
+
+function canonicalTextureAxes(normalText: string, shiftU: number, shiftV: number): {
+  u: string;
+  v: string;
+} {
+  const normal = normalizedAxis3(normalText.trim().split(/\s+/).map(Number));
+  if (!normal) throw new Error("Generated face normals must be finite and non-degenerate.");
+  const references: [number, number, number][] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  const reference = references.reduce((best, candidate) =>
+    Math.abs(dot3(candidate, normal)) < Math.abs(dot3(best, normal)) ? candidate : best);
+  const projection = reference.map((value, axis) =>
+    value - normal[axis] * dot3(reference, normal));
+  const u = normalizedAxis3(projection);
+  if (!u) throw new Error("Could not derive a shared texture axis for a generated face.");
+  const v = normalizedAxis3(cross3(u, normal));
+  if (!v) throw new Error("Could not derive the paired shared texture axis for a generated face.");
+  return { u: vectorText([...u, shiftU]), v: vectorText([...v, shiftV]) };
+}
+
+/** Replace selected role axes with deterministic object-local planar projections. */
+export function mapSolidSharedTextureAxes(
+  mesh: MapMeshData,
+  solid: Pick<ManagedMapSolid, "extrusion" | "faceTextureAlignments">,
+): { textureAxisU: string[]; textureAxisV: string[] } {
+  const textureAxisU = [...mesh.textureAxisU];
+  const textureAxisV = [...mesh.textureAxisV];
+  const topFaceCount = solid.extrusion.points.length - 2;
+  const roleForFace = (face: number): keyof ManagedMapSolidFaceTextureAlignments =>
+    face < topFaceCount ? "top" : face < topFaceCount * 2 ? "bottom" : "sides";
+  for (let face = 0; face < mesh.faceEdgeIndices.length; face++) {
+    if (solid.faceTextureAlignments?.[roleForFace(face)] !== "shared") continue;
+    const normal = mesh.normals[mesh.faceEdgeIndices[face]];
+    const baseU = mesh.textureAxisU[face].trim().split(/\s+/).map(Number);
+    const baseV = mesh.textureAxisV[face].trim().split(/\s+/).map(Number);
+    if (baseU.length !== 4 || baseV.length !== 4 || [...baseU, ...baseV].some((value) => !Number.isFinite(value))) {
+      throw new Error("Generated texture axes must contain four finite values.");
+    }
+    const shared = canonicalTextureAxes(normal, baseU[3], baseV[3]);
+    textureAxisU[face] = shared.u;
+    textureAxisV[face] = shared.v;
+  }
+  return { textureAxisU, textureAxisV };
 }
 
 /** Assign one checked material index to every generated top, bottom, and side triangle. */
@@ -386,6 +454,9 @@ export function parseManagedMapSolids(
       ...(solid.faceTextureRotations
         ? { faceTextureRotations: { ...solid.faceTextureRotations } }
         : {}),
+      ...(solid.faceTextureAlignments
+        ? { faceTextureAlignments: { ...solid.faceTextureAlignments } }
+        : {}),
       extrusion,
       properties: solid.properties
         ? Object.fromEntries(Object.entries(solid.properties).map(([key, value]) => [key, String(value)]))
@@ -492,6 +563,7 @@ export function buildMapSolidBlock(
   const textureScalePlan = mapSolidFaceTextureScalePlan(parsed);
   const textureShiftPlan = mapSolidFaceTextureShiftPlan(parsed);
   const textureRotationPlan = mapSolidFaceTextureRotationPlan(parsed);
+  const sharedTextureAxes = mapSolidSharedTextureAxes(mesh, parsed);
   const origin = vectorText(parsed.center);
   const yaw = numberText(((parsed.yaw ?? 0) % 360 + 360) % 360);
   const propertyLines = Object.entries({
@@ -499,7 +571,7 @@ export function buildMapSolidBlock(
     ...(parsed.properties ?? {}),
     targetname: parsed.targetname,
   }).map(([key, value]) => `\t\t"${escaped(key)}" "string" "${escaped(value)}"`).join("\n");
-  const meshNode = buildMapMeshNode(mesh, {
+  const meshNode = buildMapMeshNode({ ...mesh, ...sharedTextureAxes }, {
     nodeId: meshNodeId,
     origin: parsed.center,
     yaw: parsed.yaw,
@@ -719,8 +791,9 @@ function solidBlockMatches(block: string, desired: ManagedMapSolid): boolean {
   const textureScalePlan = mapSolidFaceTextureScalePlan(desired);
   const textureShiftPlan = mapSolidFaceTextureShiftPlan(desired);
   const textureRotationPlan = mapSolidFaceTextureRotationPlan(desired);
+  const sharedTextureAxes = mapSolidSharedTextureAxes(mesh, desired);
   const rotatedTextureAxes = mapTextureAxesWithRotations(
-    mesh,
+    sharedTextureAxes,
     textureRotationPlan.faceTextureRotations,
   );
   const textureAxes = mapTextureAxesWithShifts(rotatedTextureAxes, textureShiftPlan.faceTextureShifts);
@@ -757,6 +830,7 @@ export interface ParsedMapSolid {
   faceTextureScales?: ManagedMapSolidFaceTextureScales;
   faceTextureShifts?: ManagedMapSolidFaceTextureShifts;
   faceTextureRotations?: ManagedMapSolidFaceTextureRotations;
+  faceTextureAlignments?: ManagedMapSolidFaceTextureAlignments;
   footprint: [number, number][];
   height?: number;
   sloped?: { bottom: number[]; top: number[] };
@@ -869,26 +943,49 @@ export function parseMapSolids(text: string): ParsedMapSolid[] {
       observedAxisU.length !== baseMesh.textureAxisU.length ||
       observedAxisV.length !== baseMesh.textureAxisV.length
     ) continue;
-    const rotationValues = observedAxisU.map((axis, face) => inferTextureRotation(
-      baseMesh.textureAxisU[face],
-      baseMesh.textureAxisV[face],
-      axis,
-      observedAxisV[face],
-    ));
-    if (rotationValues.some((rotation) => rotation === undefined)) continue;
-    const rotations = rotationValues as number[];
-    const uniformRoleRotation = (start: number, length: number): number | undefined => {
-      const role = rotations.slice(start, start + length);
-      const first = role[0];
-      return role.length === length && first !== undefined && role.every((rotation) =>
-        rotationDistance(rotation, first) <= 1e-4)
-        ? first
-        : undefined;
-    };
-    const topRotation = uniformRoleRotation(0, topFaceCount);
-    const bottomRotation = uniformRoleRotation(topFaceCount, topFaceCount);
-    const sideRotation = uniformRoleRotation(topFaceCount * 2, count * 2);
-    if (topRotation === undefined || bottomRotation === undefined || sideRotation === undefined) continue;
+    let projection: {
+      alignments: ManagedMapSolidFaceTextureAlignments;
+      topRotation: number;
+      bottomRotation: number;
+      sideRotation: number;
+    } | undefined;
+    const alignmentRoles = ["top", "bottom", "sides"] as const;
+    const alignmentMasks = Array.from({ length: 8 }, (_unused, mask) => mask)
+      .sort((a, b) => a.toString(2).replace(/0/g, "").length - b.toString(2).replace(/0/g, "").length || a - b);
+    for (const mask of alignmentMasks) {
+      const alignments: ManagedMapSolidFaceTextureAlignments = {};
+      alignmentRoles.forEach((role, index) => {
+        if (mask & (1 << index)) alignments[role] = "shared";
+      });
+      const aligned = mapSolidSharedTextureAxes(baseMesh, {
+        extrusion,
+        ...(Object.keys(alignments).length ? { faceTextureAlignments: alignments } : {}),
+      });
+      const rotationValues = observedAxisU.map((axis, face) => inferTextureRotation(
+        aligned.textureAxisU[face],
+        aligned.textureAxisV[face],
+        axis,
+        observedAxisV[face],
+      ));
+      if (rotationValues.some((rotation) => rotation === undefined)) continue;
+      const rotations = rotationValues as number[];
+      const uniformRoleRotation = (start: number, length: number): number | undefined => {
+        const role = rotations.slice(start, start + length);
+        const first = role[0];
+        return role.length === length && first !== undefined && role.every((rotation) =>
+          rotationDistance(rotation, first) <= 1e-4)
+          ? first
+          : undefined;
+      };
+      const topRotation = uniformRoleRotation(0, topFaceCount);
+      const bottomRotation = uniformRoleRotation(topFaceCount, topFaceCount);
+      const sideRotation = uniformRoleRotation(topFaceCount * 2, count * 2);
+      if (topRotation === undefined || bottomRotation === undefined || sideRotation === undefined) continue;
+      projection = { alignments, topRotation, bottomRotation, sideRotation };
+      break;
+    }
+    if (!projection) continue;
+    const { alignments: faceTextureAlignments, topRotation, bottomRotation, sideRotation } = projection;
     const faceTextureRotations = {
       ...(rotationDistance(topRotation, 0) > 1e-4 ? { top: topRotation } : {}),
       ...(rotationDistance(bottomRotation, 0) > 1e-4 ? { bottom: bottomRotation } : {}),
@@ -903,6 +1000,7 @@ export function parseMapSolids(text: string): ParsedMapSolid[] {
       ...(Object.keys(faceTextureScales).length ? { faceTextureScales } : {}),
       ...(Object.keys(faceTextureShifts).length ? { faceTextureShifts } : {}),
       ...(Object.keys(faceTextureRotations).length ? { faceTextureRotations } : {}),
+      ...(Object.keys(faceTextureAlignments).length ? { faceTextureAlignments } : {}),
       footprint,
       ...(flat
         ? { height: extrusion.height }
