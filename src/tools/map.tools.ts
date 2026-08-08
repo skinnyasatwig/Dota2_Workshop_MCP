@@ -29,6 +29,7 @@ import { resolveMapCollisionObstacles } from "../dota/map-collision.js";
 import { reconcileMapVolumes } from "../dota/map-volume.js";
 import { reconcileMapSolids } from "../dota/map-solid.js";
 import { reconcileMapNavSurfaces } from "../dota/map-nav-surface.js";
+import { evaluateSpatialAssertions } from "../dota/map-spatial.js";
 import { inspectProjectMapMaterials, MapMaterialReport } from "../dota/map-material.js";
 import { inspectProjectMapModels, MapModelReport } from "../dota/map-model.js";
 import {
@@ -1594,6 +1595,7 @@ export function registerMapTools(server: McpServer) {
         "Paths expand into complete linked waypoint chains. Missing named entities " +
         "are created; existing named entities are repaired; obsolete managed path nodes are removed; and declared " +
         "terrain shapes are restored while terrain outside those shapes is preserved. The operation is idempotent and " +
+        "declared entity-distance/path-separation assertions must pass before reconciliation. It " +
         "refuses ambiguous duplicate targetnames, missing/unsafe material or model assets, or an unproven explicit " +
         "managed model-PHYS promise. Preview reports blockers " +
         "without writing. Defaults to preview-only; pass apply=true.",
@@ -1632,6 +1634,7 @@ export function registerMapTools(server: McpServer) {
       }
 
       const current = await vmapToText(dota.dmxconvertExe, p.contentVmap);
+      const spatialAssertions = evaluateSpatialAssertions(resolved.contract);
       const synchronization = reconcileMapSpecification(current, resolved.contract);
       const result = synchronization.entities;
       if (result.conflicts.length) {
@@ -1669,6 +1672,7 @@ export function registerMapTools(server: McpServer) {
             materialValidation,
             modelValidation,
             modelPhysicsValidation,
+            spatialAssertions,
           },
           `No changes written. Preflight found ` +
             `${materialValidation.missingCount + materialValidation.invalidCount} material blocker(s) and ` +
@@ -1745,6 +1749,12 @@ export function registerMapTools(server: McpServer) {
           `${terrain.changedOrientationCells} orientation cells, and ` +
           `${terrain.changedConfigurationCells} tile recipes plus ${terrain.changedPathEdges} path edges.`,
       ];
+      if (spatialAssertions.length) {
+        steps.push(
+          `Spatial assertions: ${spatialAssertions.length} passed; ` +
+            spatialAssertions.map((assertion) => `${assertion.name}=${assertion.actualDistance?.toFixed(2) ?? "unresolved"}`).join(", ") + ".",
+        );
+      }
       if (!apply && changed) steps.push("No files changed. Pass apply=true to write this plan.");
       steps.push(
         `Materials: ${materialValidation.resolvedCount} resolved, ` +
@@ -1776,6 +1786,7 @@ export function registerMapTools(server: McpServer) {
           materialValidation,
           modelValidation,
           modelPhysicsValidation,
+          spatialAssertions,
           changed,
           changedEntities,
           changedSolids,
@@ -2041,6 +2052,7 @@ export function registerMapTools(server: McpServer) {
         "all VMAP material and model references across addon/base loose assets and VPKs, overview source/compiled material and " +
         "texture assets, image dimensions, and the world-to-minimap transform. When a project contract declares managedTerrain or " +
         "managedSolids, managedNavSurfaces, or managedVolumes, validation also reports tile-grid, checked-solid, navigation-surface, or checked-volume drift without writing it. Whole-map " +
+        "Contract spatial assertions continuously check declared entity distances and minimum path separation. " +
         "offline reachability checks detect terrain holes, " +
         "trapped spawns, blocked entrances/path segments, and inaccessible objectives or camps. Known entity keyvalues " +
         "are checked against the installed official Valve FGD definitions.",
@@ -2103,6 +2115,16 @@ export function registerMapTools(server: McpServer) {
       const requirements = requiredEntities
         ? requiredEntities
         : [...new Map(contractRequirements.map((requirement) => [requirement.targetname, requirement])).values()];
+      const spatialAssertions = resolvedContract
+        ? evaluateSpatialAssertions(resolvedContract.contract)
+        : [];
+      for (const assertion of spatialAssertions.filter((result) => !result.passed)) {
+        findings.push({
+          severity: "error",
+          code: "spatial-assertion-failed",
+          message: `${assertion.name}: ${assertion.detail}`,
+        });
+      }
 
       const source = await pathExists(p.contentVmap);
       const compiled = await pathExists(p.gameVpk);
@@ -2561,6 +2583,7 @@ export function registerMapTools(server: McpServer) {
           navSurfaceDrift: navSurfaceDrift ?? null,
           volumeDrift: volumeDrift ?? null,
           reachability: reachabilitySummary ?? null,
+          spatialAssertions,
           findings,
         },
         `${header}${body ? `\n${body}` : ""}`,

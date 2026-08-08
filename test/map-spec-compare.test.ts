@@ -222,3 +222,24 @@ test("difference detail is bounded without hiding aggregate counts", () => {
   assert.deepEqual(report.families.managedEntities.removed, ["old_0", "old_1"]);
   assert.equal(report.truncated, true);
 });
+
+test("semantic comparison includes named spatial assertions", () => {
+  const specification = (minimum: number) => parseMapSpecification({
+    requiredEntities: [],
+    managedPaths: [
+      { name: "north", points: [[-512, 512, 128], [512, 512, 128]] },
+      { name: "south", points: [[-512, -512, 128], [512, -512, 128]] },
+    ],
+    spatialAssertions: [
+      { kind: "pathSeparation", name: "wave_spacing", pathA: "north", pathB: "south", min: minimum },
+    ],
+  });
+  const report = compareMapSpecifications(specification(1000), specification(900));
+
+  assert.equal(report.equivalent, false);
+  assert.equal(report.families.spatialAssertions.changedCount, 1);
+  assert.equal(
+    report.families.spatialAssertions.changed[0].differences[0].path,
+    'spatialAssertions["wave_spacing"].min',
+  );
+});

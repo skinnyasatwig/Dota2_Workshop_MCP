@@ -223,7 +223,7 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
 
 - **`map_build`** — one call: clone the template, apply one validated desired-state map specification,
   register, and optionally compile it. The preferred `specification` object uses the same
-  `managedTerrain` / `managedEntities` / `managedPaths` / `managedSolids` / `managedNavSurfaces` / `managedVolumes` vocabulary as `map_sync_contract`. A specification can
+  `managedTerrain` / `managedEntities` / `managedPaths` / `managedSolids` / `managedNavSurfaces` / `managedVolumes` / `spatialAssertions` vocabulary as `map_sync_contract`. A specification can
   also define reusable named `regions`, reusable `components`, and transformed `placements`; one component may
   contain local entities, paths, terrain, checked world solids, checked navigation surfaces, gameplay volumes, and
   checked `dotaComponents`. Every placement is automatically namespaced. Generated links such as a neutral camp's
@@ -236,7 +236,7 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
   a real write refuses missing or unsafe assets before conversion begins.
 - **`map_compare_specifications`** — prove that a contract refactor preserves the generated map before touching a
   VMAP. Each side can be an inline specification or a project-local JSON file. The tool validates and expands reusable
-  components first, compares named entities/paths/solids/surfaces/volumes independent of declaration order, preserves
+  components first, compares named entities/paths/solids/surfaces/volumes/assertions independent of declaration order, preserves
   terrain-operation order, and reports additions, removals, changed fields, and any explicitly tolerated numeric drift.
   It is read-only, requires no Dota installation, and rejects JSON paths outside the addon project (including links that
   resolve outside it).
@@ -624,7 +624,12 @@ reports any selector that still matches. A `managedPaths` entry takes a `name` p
 the terminal node explicitly removes stale `target` values (`startIndex`, `classname`, `loop`,
 `angles`, and shared `properties` are optional). `maxSegmentLength` rejects accidental large jumps;
 `mirrorOf` plus `mirrorAxis` (`x`, `y`, or `xy`) enforces exact route symmetry. `map_validate`
-checks all expanded entities. `managedTerrain` is an ordered list of the same idempotent tile-grid
+checks all expanded entities. `spatialAssertions` turns important layout intent into continuous data checks:
+`entityDistance` enforces a planar minimum and/or maximum between two managed entities (including generated path
+nodes), while `pathSeparation` measures the true closest points along two complete managed polylines rather than only
+comparing waypoints. Assertions are named, reference-checked, component-aware, and namespaced through reusable
+placements. Build/sync refuses a violated assertion; validation reports the measured distance without writing.
+`managedTerrain` is an ordered list of the same idempotent tile-grid
 operations accepted by `map_terrain`: `fill`, `height`, `water`, `tileset`, and `ramp`, using `rect`,
 `circle`, `ring`, `path`, `polygon`, reusable `region`, or `managedPath` shapes in tile coordinates. Contract sync previews exact height-vertex,
 water-vertex, and tileset-cell drift before writing; undeclared terrain remains untouched unless the

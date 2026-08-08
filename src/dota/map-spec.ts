@@ -42,6 +42,11 @@ import {
   MapNavSurfaceReconcileResult,
   reconcileMapNavSurfaces,
 } from "./map-nav-surface.js";
+import {
+  assertSpatialAssertions,
+  spatialAssertionInputSchema,
+  SpatialAssertion,
+} from "./map-spatial.js";
 
 const scalar = z.union([z.string(), z.number(), z.boolean()]);
 const properties = z.record(scalar);
@@ -196,6 +201,7 @@ export const componentDefinitionInputSchema = z.object({
   managedSolids: z.array(managedMapSolidInputSchema).optional(),
   managedNavSurfaces: z.array(managedMapNavSurfaceInputSchema).optional(),
   managedVolumes: z.array(managedMapVolumeInputSchema).optional(),
+  spatialAssertions: z.array(spatialAssertionInputSchema).optional(),
   dotaComponents: z.array(dotaComponentInputSchema).optional(),
   placements: z.array(componentPlacementInputSchema).optional(),
 }).strict();
@@ -210,6 +216,7 @@ export const mapSpecificationInputSchema = z.object({
   managedSolids: z.array(managedMapSolidInputSchema).optional(),
   managedNavSurfaces: z.array(managedMapNavSurfaceInputSchema).optional(),
   managedVolumes: z.array(managedMapVolumeInputSchema).optional(),
+  spatialAssertions: z.array(spatialAssertionInputSchema).optional(),
   regions: z.record(regionDefinitionInputSchema).optional(),
   components: z.record(componentDefinitionInputSchema).optional(),
   placements: z.array(componentPlacementInputSchema).optional(),
@@ -484,7 +491,7 @@ function expandComponent(
   placement: ComponentPlacementInput,
   path: string,
   deferLocalReferences: boolean = false,
-): Pick<MapContract, "managedEntities" | "managedAbsentEntities" | "managedPaths" | "managedTerrain" | "managedSolids" | "managedNavSurfaces" | "managedVolumes"> {
+): Pick<MapContract, "managedEntities" | "managedAbsentEntities" | "managedPaths" | "managedTerrain" | "managedSolids" | "managedNavSurfaces" | "managedVolumes" | "spatialAssertions"> {
   const worldOffset = placement.worldOffset ?? [0, 0, 0];
   const transformOrigin = (origin: string, field: string) =>
     transformVectorString(origin, placement.mirrorAxis, worldOffset, field, path);
@@ -541,6 +548,20 @@ function expandComponent(
     mirrorOf: undefined,
     mirrorAxis: undefined,
   });
+  const transformSpatialAssertion = (assertion: SpatialAssertion): SpatialAssertion =>
+    assertion.kind === "entityDistance"
+      ? {
+          ...assertion,
+          name: localName(placement.name, assertion.name),
+          from: localName(placement.name, assertion.from),
+          to: localName(placement.name, assertion.to),
+        }
+      : {
+          ...assertion,
+          name: localName(placement.name, assertion.name),
+          pathA: localName(placement.name, assertion.pathA),
+          pathB: localName(placement.name, assertion.pathB),
+        };
   const transformVolume = (volume: ManagedMapVolume): ManagedMapVolume => {
     const transformedAngles = transformAngles(
       `0 ${volume.yaw ?? 0} 0`,
@@ -667,6 +688,7 @@ function expandComponent(
     managedSolids: (component.managedSolids ?? []).map(transformSolid),
     managedNavSurfaces: (component.managedNavSurfaces ?? []).map(transformNavSurface),
     managedVolumes: (component.managedVolumes ?? []).map(transformVolume),
+    spatialAssertions: (component.spatialAssertions ?? []).map(transformSpatialAssertion),
   };
 }
 
@@ -756,8 +778,10 @@ export function parseMapSpecification(value: unknown, path = "inline map specifi
               ...(definition.managedVolumes ?? []),
               ...localDotaComponents.managedVolumes,
             ],
+            spatialAssertions: definition.spatialAssertions,
           },
           `${path}, component "${name}"`,
+          false,
         ),
         placements: definition.placements ?? [],
       },
@@ -830,6 +854,10 @@ export function parseMapSpecification(value: unknown, path = "inline map specifi
             ...(definition.contract.managedVolumes ?? []),
             ...nested.flatMap((component) => component.managedVolumes ?? []),
           ],
+          spatialAssertions: [
+            ...(definition.contract.spatialAssertions ?? []),
+            ...nested.flatMap((component) => component.spatialAssertions ?? []),
+          ],
         },
         `${path}, component "${name}"`,
       );
@@ -893,6 +921,10 @@ export function parseMapSpecification(value: unknown, path = "inline map specifi
         ...dotaComponents.managedVolumes,
         ...expandedComponents.flatMap((component) => component.managedVolumes ?? []),
       ],
+      spatialAssertions: [
+        ...(parsed.spatialAssertions ?? []),
+        ...expandedComponents.flatMap((component) => component.spatialAssertions ?? []),
+      ],
     },
     path,
   );
@@ -913,6 +945,7 @@ export function reconcileMapSpecification(
   text: string,
   specification: MapContract,
 ): MapSpecificationReconcileResult {
+  assertSpatialAssertions(specification);
   const solids = reconcileMapSolids(text, specification.managedSolids ?? []);
   const navSurfaces = reconcileMapNavSurfaces(solids.text, specification.managedNavSurfaces ?? []);
   const volumes = reconcileMapVolumes(navSurfaces.text, specification.managedVolumes ?? []);

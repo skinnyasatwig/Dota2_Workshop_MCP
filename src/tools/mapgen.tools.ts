@@ -21,6 +21,7 @@ import {
   terrainOperationInputSchema,
 } from "../dota/map-spec.js";
 import { compareMapSpecifications } from "../dota/map-spec-compare.js";
+import { evaluateSpatialAssertions } from "../dota/map-spatial.js";
 import { resolveDataPath } from "../util/datapath.js";
 import { runMapTransaction } from "../dota/map-transaction.js";
 import { renderMapPreview } from "../dota/map-preview.js";
@@ -827,10 +828,11 @@ export function registerMapGenTools(server: McpServer) {
       description:
         "Generate a whole playable map in one call. Prefer specification, which uses the same validated desired-state " +
         "format as map_sync_contract: managedTerrain, managedEntities, managedAbsentEntities, managedPaths, checked " +
-        "managedSolids, managedNavSurfaces, managedVolumes, and " +
+        "managedSolids, managedNavSurfaces, managedVolumes, spatialAssertions, and " +
         "requiredEntities, plus reusable regions, components, and transformed placements. Legacy terrain/entities/paths " +
         "remain supported. Dry runs report missing/unsafe materials and models, and writes refuse those blockers before conversion. " +
         "Collision-enabled checked props must also prove real compiled Valve PHYS data before any write. " +
+        "Declared entity-distance and path-separation assertions must pass before reconciliation. " +
         "Terrain coordinates are tile units; entity/path coordinates are world units.",
       inputSchema: {
         projectRoot: z.string().optional(),
@@ -871,7 +873,9 @@ export function registerMapGenTools(server: McpServer) {
       const log: string[] = [`prepared "${name}" from the template`];
       let txt = await vmapToText(dota.dmxconvertExe, p.baseTemplate);
       let specificationChangeReport: unknown;
+      let spatialAssertions: ReturnType<typeof evaluateSpatialAssertions> = [];
       if (parsedSpecification) {
+        spatialAssertions = evaluateSpatialAssertions(parsedSpecification);
         const result = reconcileMapSpecification(txt, parsedSpecification);
         if (result.entities.conflicts.length) {
           return error(`Map specification has ambiguous duplicate targetnames: ${result.entities.conflicts.join(", ")}`);
@@ -908,6 +912,7 @@ export function registerMapGenTools(server: McpServer) {
             changedConfigurationCells: result.terrain.changedConfigurationCells,
             changedPathEdges: result.terrain.changedPathEdges,
           },
+          spatialAssertions,
         };
         log.push(
           `specification: add ${result.entities.added.length}, update ${result.entities.updated.length}, ` +
@@ -916,6 +921,12 @@ export function registerMapGenTools(server: McpServer) {
             `update ${result.navSurfaces.updated.length}; volumes add ${result.volumes.added.length}, ` +
             `update ${result.volumes.updated.length}; terrain ${result.terrain.changed ? "changed" : "unchanged"}`,
         );
+        if (spatialAssertions.length) {
+          log.push(
+            `spatial assertions: ${spatialAssertions.length} passed; ` +
+              spatialAssertions.map((assertion) => `${assertion.name}=${assertion.actualDistance?.toFixed(2) ?? "unresolved"}`).join(", "),
+          );
+        }
       } else {
         if (terrain?.length) {
           const operations = parseManagedTerrain(terrain, "terrain", `map_build(${name})`) ?? [];
@@ -1054,6 +1065,7 @@ export function registerMapGenTools(server: McpServer) {
           materialValidation,
           modelValidation,
           modelPhysicsValidation,
+          changes: specificationChangeReport,
           backupDirectory: transaction.backupDirectory,
           rolledBack: false,
         },

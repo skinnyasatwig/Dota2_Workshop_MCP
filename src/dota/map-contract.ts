@@ -5,6 +5,11 @@ import { ManagedTerrainOperation, parseManagedTerrain } from "./map-terrain.js";
 import { ManagedMapSolid, parseManagedMapSolids } from "./map-solid.js";
 import { ManagedMapVolume, parseManagedMapVolumes } from "./map-volume.js";
 import { ManagedMapNavSurface, parseManagedMapNavSurfaces } from "./map-nav-surface.js";
+import {
+  evaluateSpatialAssertions,
+  parseSpatialAssertions,
+  SpatialAssertion,
+} from "./map-spatial.js";
 
 export interface MapEntityRequirement {
   targetname: string;
@@ -58,6 +63,7 @@ export interface MapContract {
   managedSolids?: ManagedMapSolid[];
   managedNavSurfaces?: ManagedMapNavSurface[];
   managedVolumes?: ManagedMapVolume[];
+  spatialAssertions?: SpatialAssertion[];
 }
 
 export interface ResolvedMapContract {
@@ -108,7 +114,11 @@ export function managedEntitiesForContract(contract: MapContract): ManagedMapEnt
   ];
 }
 
-export function parseMapContract(value: unknown, path: string): MapContract {
+export function parseMapContract(
+  value: unknown,
+  path: string,
+  validateSpatialReferences = true,
+): MapContract {
   if (!value || typeof value !== "object") throw new Error(`Map contract must be a JSON object: ${path}`);
   const raw = value as Record<string, unknown>;
   if (raw.map !== undefined && typeof raw.map !== "string") throw new Error(`Map contract "map" must be a string: ${path}`);
@@ -414,6 +424,7 @@ export function parseMapContract(value: unknown, path: string): MapContract {
   const managedSolids = parseManagedMapSolids(raw.managedSolids, "managedSolids", path);
   const managedNavSurfaces = parseManagedMapNavSurfaces(raw.managedNavSurfaces, "managedNavSurfaces", path);
   const managedVolumes = parseManagedMapVolumes(raw.managedVolumes, "managedVolumes", path);
+  const spatialAssertions = parseSpatialAssertions(raw.spatialAssertions, "spatialAssertions", path);
   const managedPathNames = new Set((managedPaths ?? []).map((managedPath) => managedPath.name));
   for (const [index, operation] of (managedTerrain ?? []).entries()) {
     if (operation.op === "fill" || operation.shape.kind !== "managedPath") continue;
@@ -433,6 +444,7 @@ export function parseMapContract(value: unknown, path: string): MapContract {
     managedSolids,
     managedNavSurfaces,
     managedVolumes,
+    spatialAssertions,
   };
   const names = new Set<string>();
   for (const managed of managedEntitiesForContract(contract)) {
@@ -464,6 +476,14 @@ export function parseMapContract(value: unknown, path: string): MapContract {
       throw new Error(
         `Managed contract both requires and removes targetname "${absent.targetname}": ${path}`,
       );
+    }
+  }
+  if (validateSpatialReferences) {
+    const unresolvedAssertion = evaluateSpatialAssertions(contract).find(
+      (result) => result.actualDistance === undefined,
+    );
+    if (unresolvedAssertion) {
+      throw new Error(`Spatial assertion "${unresolvedAssertion.name}" is unresolved: ${unresolvedAssertion.detail} ${path}`);
     }
   }
   return contract;

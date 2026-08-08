@@ -473,10 +473,23 @@ Last updated: 2026-08-07
     acceptance map returns zero placement suggestions, confirming that its current gameplay entities are already on
     acceptable terrain and that the diagnostic adds no false repair work.
 
+72. This milestone - added checked spatial design assertions to the unified map specification. `entityDistance`
+    enforces a planar minimum and/or maximum between two managed entities, including generated waypoint names;
+    `pathSeparation` computes the true closest distance across every pair of polyline segments, so crossing or
+    converging segments cannot hide behind well-spaced waypoint samples. Names, limits, references, and duplicates
+    fail closed. Assertions declared inside reusable or nested components follow placement namespacing and mirroring.
+    Build and contract sync refuse a violated rule before reconciliation and include measured passing results in their
+    reports; map validation returns measured pass/fail results, and semantic specification comparison treats named
+    assertions as first-class desired state. The real 3v3 contract now permanently requires both teams' north/south
+    creep routes to remain at least 1,000 units apart. Both measure 1,024 units, and the acceptance dry run remains at
+    zero entity, volume, and terrain drift. Focused tests
+    cover exact 1,024-unit route spacing, segment-interior crossing, violations, unsafe input, missing references,
+    component placement, and comparison drift without launching Dota or Hammer.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 365 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 371 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 208 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed palette-bound audit: 20 of 20 model CRCs and MDAT snapshots match the current Dota VPK.
 - Installed palette-gallery proof: the four-model `river-wetland` set passed exact CRC checks, decoded to textured GLBs,

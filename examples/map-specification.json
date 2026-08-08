@@ -149,6 +149,22 @@
       "maxSegmentLength": 1600
     }
   ],
+  "spatialAssertions": [
+    {
+      "kind": "pathSeparation",
+      "name": "radiant_wave_spacing",
+      "pathA": "radiant_north_route",
+      "pathB": "radiant_south_route",
+      "min": 1000
+    },
+    {
+      "kind": "entityDistance",
+      "name": "fort_to_first_waypoint",
+      "from": "radiant_fort",
+      "to": "radiant_north_route_1",
+      "max": 1200
+    }
+  ],
   "managedTerrain": [
     {
       "op": "height",

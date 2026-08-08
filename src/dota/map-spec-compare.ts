@@ -1,4 +1,5 @@
 import { MapContract } from "./map-contract.js";
+import { assertSpatialAssertions } from "./map-spatial.js";
 
 export interface MapSpecificationValueDifference {
   path: string;
@@ -56,6 +57,7 @@ export interface MapSpecificationComparisonReport {
     managedSolids: MapSpecificationFamilyComparison;
     managedNavSurfaces: MapSpecificationFamilyComparison;
     managedVolumes: MapSpecificationFamilyComparison;
+    spatialAssertions: MapSpecificationFamilyComparison;
   };
 }
 
@@ -307,6 +309,10 @@ function terrainKey(_item: unknown, index: number): string {
   return String(index).padStart(6, "0");
 }
 
+function assertionName(item: unknown): string {
+  return (item as { name: string }).name;
+}
+
 function familyDifferenceCount(family: MapSpecificationFamilyComparison): number {
   return family.addedCount + family.removedCount + family.changedCount;
 }
@@ -317,6 +323,8 @@ export function compareMapSpecifications(
   candidate: MapContract,
   options: MapSpecificationComparisonOptions = {},
 ): MapSpecificationComparisonReport {
+  assertSpatialAssertions(baseline, "baseline map specification");
+  assertSpatialAssertions(candidate, "candidate map specification");
   const numericTolerance = options.numericTolerance ?? 0;
   const maxDifferences = options.maxDifferences ?? 100;
   if (!Number.isFinite(numericTolerance) || numericTolerance < 0 || numericTolerance > 1) {
@@ -405,6 +413,14 @@ export function compareMapSpecifications(
       baseline.managedVolumes ?? [],
       candidate.managedVolumes ?? [],
       targetname,
+      normalizeValue,
+      context,
+    ),
+    spatialAssertions: compareFamily(
+      "spatialAssertions",
+      baseline.spatialAssertions ?? [],
+      candidate.spatialAssertions ?? [],
+      assertionName,
       normalizeValue,
       context,
     ),
