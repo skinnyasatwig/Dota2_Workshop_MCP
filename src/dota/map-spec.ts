@@ -600,6 +600,13 @@ function expandComponent(
       yaw: transformedAngles ? parseVector(transformedAngles, "transformed solid yaw", path)[1] : solid.yaw,
       material: solid.material,
       ...(solid.faceMaterials ? { faceMaterials: { ...solid.faceMaterials } } : {}),
+      ...(solid.faceTextureScales
+        ? {
+            faceTextureScales: Object.fromEntries(
+              Object.entries(solid.faceTextureScales).map(([role, scale]) => [role, [...scale]]),
+            ),
+          }
+        : {}),
       extrusion,
       properties: localProperties(solid.properties, placement.name, deferLocalReferences),
     };

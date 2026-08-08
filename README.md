@@ -561,7 +561,10 @@ existing managed world-space path, keeping roads synchronized with route edits.
 `managedSolids` adds named, always-solid `func_brush` world geometry. Each solid supplies `center`, optional `yaw`,
 an explicit visible (non-`materials/tools`) `materials/...vmat` side/fallback asset, and an `extrusion`. An optional
 `faceMaterials` object may override the `top`, `bottom`, or both while all side faces retain `material`; the same option
-is available on `arch`, `profileArch`, `bridge`, `bridgeApproach`, `ringPlatform`, and `holedPlatform`. Use
+is available on `arch`, `profileArch`, `bridge`, `bridgeApproach`, `ringPlatform`, `holedPlatform`, and
+`multiHoledPlatform`. `faceTextureScales` similarly accepts checked `[u, v]` pairs for `top`, `bottom`, and/or `sides`.
+Values must be finite and non-zero within +/-4096; negative values intentionally mirror that texture axis. The MCP
+assigns these settings by generated face role, so callers never provide raw face indexes or arbitrary triangles. Use
 `{ points: [[x,y],...], height }` for a flat centered extrusion, or provide one local height per outline corner with
 `{ points, bottom: [z,...], top: [z,...] }` for a sloped one. Every top height must remain above its matching bottom.
 The footprint may be convex

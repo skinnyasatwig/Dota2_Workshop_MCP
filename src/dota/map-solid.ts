@@ -27,6 +27,26 @@ export const managedMapSolidFaceMaterialsInputSchema = z.object({
   message: "must override top, bottom, or both",
 });
 
+const textureScaleValue = z.number().finite()
+  .refine((value) => Math.abs(value) >= 1e-6, "must be non-zero")
+  .refine((value) => Math.abs(value) <= 4096, "must stay within +/-4096");
+const textureScalePair = z.tuple([textureScaleValue, textureScaleValue]);
+
+export const managedMapSolidFaceTextureScalesInputSchema = z.object({
+  top: textureScalePair.optional(),
+  bottom: textureScalePair.optional(),
+  sides: textureScalePair.optional(),
+}).strict().refine(
+  (value) => value.top !== undefined || value.bottom !== undefined || value.sides !== undefined,
+  { message: "must override top, bottom, sides, or a combination of those roles" },
+);
+
+export interface ManagedMapSolidFaceTextureScales {
+  top?: [number, number];
+  bottom?: [number, number];
+  sides?: [number, number];
+}
+
 export function signedPolygonArea(points: readonly [number, number][]): number {
   return points.reduce((area, [x, y], index) => {
     const [nextX, nextY] = points[(index + 1) % points.length];
@@ -122,6 +142,7 @@ export const managedMapSolidInputSchema = z.object({
   yaw: z.number().finite().optional(),
   material,
   faceMaterials: managedMapSolidFaceMaterialsInputSchema.optional(),
+  faceTextureScales: managedMapSolidFaceTextureScalesInputSchema.optional(),
   extrusion: solidExtrusionInputSchema,
   properties: z.record(scalar).optional(),
 }).strict().superRefine((solid, context) => {
@@ -184,6 +205,7 @@ export interface ManagedMapSolid {
   yaw?: number;
   material: string;
   faceMaterials?: { top?: string; bottom?: string };
+  faceTextureScales?: ManagedMapSolidFaceTextureScales;
   extrusion:
     | { points: [number, number][]; height: number; bottom?: never; top?: never }
     | { points: [number, number][]; height?: never; bottom: number[]; top: number[] };
@@ -193,6 +215,10 @@ export interface ManagedMapSolid {
 export interface MapSolidFaceMaterialPlan {
   materials: string[];
   faceMaterialIndices: number[];
+}
+
+export interface MapSolidFaceTextureScalePlan {
+  faceTextureScales: [number, number][];
 }
 
 /** Assign one checked material index to every generated top, bottom, and side triangle. */
@@ -211,6 +237,23 @@ export function mapSolidFaceMaterialPlan(solid: ManagedMapSolid): MapSolidFaceMa
       ...Array(topFaceCount).fill(materials.indexOf(topMaterial)),
       ...Array(bottomFaceCount).fill(materials.indexOf(bottomMaterial)),
       ...Array(sideFaceCount).fill(materials.indexOf(sideMaterial)),
+    ],
+  };
+}
+
+/** Assign one checked texture scale pair to every generated top, bottom, and side triangle. */
+export function mapSolidFaceTextureScalePlan(solid: ManagedMapSolid): MapSolidFaceTextureScalePlan {
+  const top = solid.faceTextureScales?.top ?? [1, 1];
+  const bottom = solid.faceTextureScales?.bottom ?? [1, 1];
+  const sides = solid.faceTextureScales?.sides ?? [1, 1];
+  const topFaceCount = solid.extrusion.points.length - 2;
+  const bottomFaceCount = topFaceCount;
+  const sideFaceCount = solid.extrusion.points.length * 2;
+  return {
+    faceTextureScales: [
+      ...Array.from({ length: topFaceCount }, () => [...top] as [number, number]),
+      ...Array.from({ length: bottomFaceCount }, () => [...bottom] as [number, number]),
+      ...Array.from({ length: sideFaceCount }, () => [...sides] as [number, number]),
     ],
   };
 }
@@ -243,6 +286,13 @@ export function parseManagedMapSolids(
       ...solid,
       center: [...solid.center],
       ...(solid.faceMaterials ? { faceMaterials: { ...solid.faceMaterials } } : {}),
+      ...(solid.faceTextureScales
+        ? {
+            faceTextureScales: Object.fromEntries(
+              Object.entries(solid.faceTextureScales).map(([role, scale]) => [role, [...scale]]),
+            ) as ManagedMapSolidFaceTextureScales,
+          }
+        : {}),
       extrusion,
       properties: solid.properties
         ? Object.fromEntries(Object.entries(solid.properties).map(([key, value]) => [key, String(value)]))
@@ -346,6 +396,7 @@ export function buildMapSolidBlock(
   const parsed = parseManagedMapSolids([solid])![0];
   const mesh = buildExtrudedSolidMesh(parsed);
   const materialPlan = mapSolidFaceMaterialPlan(parsed);
+  const textureScalePlan = mapSolidFaceTextureScalePlan(parsed);
   const origin = vectorText(parsed.center);
   const yaw = numberText(((parsed.yaw ?? 0) % 360 + 360) % 360);
   const propertyLines = Object.entries({
@@ -359,6 +410,7 @@ export function buildMapSolidBlock(
     yaw: parsed.yaw,
     materials: materialPlan.materials,
     faceMaterialIndices: materialPlan.faceMaterialIndices,
+    faceTextureScales: textureScalePlan.faceTextureScales,
   }).split("\n").map((line) => `\t\t${line}`).join("\n");
   return `"CMapEntity"
 {
@@ -435,12 +487,31 @@ function blockFaceMaterialIndices(block: string): number[] | undefined {
     : undefined;
 }
 
+function blockFaceTextureScales(block: string): [number, number][] | undefined {
+  const match = /"standardAttributeName"\s+"string"\s+"textureScale"[\s\S]*?"data"\s+"vector2_array"\s*\[([\s\S]*?)\]/
+    .exec(block);
+  if (!match) return undefined;
+  const scales = [...match[1].matchAll(/"([^"]+)"/g)].map((entry) =>
+    entry[1].trim().split(/\s+/).map(Number));
+  return scales.length && scales.every((scale) => scale.length === 2 && scale.every(Number.isFinite))
+    ? scales as [number, number][]
+    : undefined;
+}
+
 function sameNumbers(actual: readonly number[] | undefined, expected: readonly number[]): boolean {
   return !!actual && actual.length === expected.length && actual.every((value, index) => value === expected[index]);
 }
 
 function sameStrings(actual: readonly string[] | undefined, expected: readonly string[]): boolean {
   return !!actual && actual.length === expected.length && actual.every((value, index) => value === expected[index]);
+}
+
+function sameTextureScales(
+  actual: readonly (readonly [number, number])[] | undefined,
+  expected: readonly (readonly [number, number])[],
+): boolean {
+  return !!actual && actual.length === expected.length && actual.every((scale, index) =>
+    scale.every((value, axis) => Math.abs(value - expected[index][axis]) <= 1e-4));
 }
 
 function sameVertices(
@@ -466,8 +537,10 @@ function solidBlockMatches(block: string, desired: ManagedMapSolid): boolean {
   }
   const mesh = buildExtrudedSolidMesh(desired);
   const materialPlan = mapSolidFaceMaterialPlan(desired);
+  const textureScalePlan = mapSolidFaceTextureScalePlan(desired);
   if (!sameStrings(blockMaterials(block), materialPlan.materials)) return false;
   if (!sameNumbers(blockFaceMaterialIndices(block), materialPlan.faceMaterialIndices)) return false;
+  if (!sameTextureScales(blockFaceTextureScales(block), textureScalePlan.faceTextureScales)) return false;
   if (!sameVertices(positionVertices(block), mesh.vertices)) return false;
   for (const [name, expected] of Object.entries({
     vertexEdgeIndices: mesh.vertexEdgeIndices,
@@ -493,6 +566,7 @@ export interface ParsedMapSolid {
   yaw: number;
   material: string;
   faceMaterials?: { top?: string; bottom?: string };
+  faceTextureScales?: ManagedMapSolidFaceTextureScales;
   footprint: [number, number][];
   height?: number;
   sloped?: { bottom: number[]; top: number[] };
@@ -545,12 +619,34 @@ export function parseMapSolids(text: string): ParsedMapSolid[] {
       ...(topMaterial !== materialPath ? { top: topMaterial } : {}),
       ...(bottomMaterial !== materialPath ? { bottom: bottomMaterial } : {}),
     };
+    const scaleValues = blockFaceTextureScales(range.block);
+    if (!scaleValues || scaleValues.length !== 4 * count - 4) continue;
+    const uniformRoleScale = (start: number, length: number): [number, number] | undefined => {
+      const role = scaleValues.slice(start, start + length);
+      const first = role[0];
+      return role.length === length && first && role.every((scale) =>
+        scale.every((value, axis) => Math.abs(value - first[axis]) <= 1e-4))
+        ? [...first]
+        : undefined;
+    };
+    const topScale = uniformRoleScale(0, topFaceCount);
+    const bottomScale = uniformRoleScale(topFaceCount, topFaceCount);
+    const sideScale = uniformRoleScale(topFaceCount * 2, count * 2);
+    if (!topScale || !bottomScale || !sideScale) continue;
+    const defaultScale = (scale: readonly number[]) =>
+      Math.abs(scale[0] - 1) <= 1e-4 && Math.abs(scale[1] - 1) <= 1e-4;
+    const faceTextureScales = {
+      ...(!defaultScale(topScale) ? { top: topScale } : {}),
+      ...(!defaultScale(bottomScale) ? { bottom: bottomScale } : {}),
+      ...(!defaultScale(sideScale) ? { sides: sideScale } : {}),
+    };
     parsed.push({
       targetname: entity.targetname,
       center,
       yaw: angles[1],
       material: materialPath,
       ...(Object.keys(faceMaterials).length ? { faceMaterials } : {}),
+      ...(Object.keys(faceTextureScales).length ? { faceTextureScales } : {}),
       footprint: top.map(([x, y]) => [x, y]),
       ...(flat
         ? { height: topHeights[0] - bottomHeights[0] }

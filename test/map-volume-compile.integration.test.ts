@@ -5,6 +5,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { buildRepositoryCompileFixtureText } from "../src/dota/compile-fixture.js";
 import { inspectMapMaterials } from "../src/dota/map-material.js";
+import { parseMapSolids } from "../src/dota/map-solid.js";
 import { compileVmap, textToVmap, vmapToText } from "../src/dota/vmap.js";
 import { Vpk } from "../src/dota/vpk.js";
 
@@ -44,6 +45,11 @@ test(
       assert.match(roundTripped, /fixture_profile_arch_arch_segment_01/);
       assert.match(roundTripped, /materials\/dev\/reflectivity_50\.vmat/);
       assert.match(roundTripped, /materials\/dev\/reflectivity_20\.vmat/);
+      assert.deepEqual(
+        parseMapSolids(roundTripped).find((solid) =>
+          solid.targetname === "fixture_profile_arch_arch_segment_01")?.faceTextureScales,
+        { top: [0.25, 0.25], bottom: [-0.5, 0.5], sides: [0.5, 1] },
+      );
       assert.match(roundTripped, /fixture_bridge_deck/);
       assert.match(roundTripped, /fixture_irregular_platform_segment_01_deck/);
       assert.match(roundTripped, /fixture_multi_hole_platform_triangle_001_deck/);

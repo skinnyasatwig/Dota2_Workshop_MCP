@@ -4,6 +4,7 @@ import {
   buildExtrudedSolidMesh,
   buildMapSolidBlock,
   mapSolidFaceMaterialPlan,
+  mapSolidFaceTextureScalePlan,
   parseManagedMapSolids,
   parseMapSolids,
   reconcileMapSolids,
@@ -88,6 +89,18 @@ test("managed solids reject unsafe outlines, materials, and property overrides",
     /visible world material/,
   );
   assert.throws(
+    () => parseManagedMapSolids([{ ...concaveSolid, faceTextureScales: {} }]),
+    /must override top, bottom, sides/,
+  );
+  assert.throws(
+    () => parseManagedMapSolids([{ ...concaveSolid, faceTextureScales: { top: [0, 1] } }]),
+    /must be non-zero/,
+  );
+  assert.throws(
+    () => parseManagedMapSolids([{ ...concaveSolid, faceTextureScales: { sides: [1, 4097] } }]),
+    /within \+\/-4096/,
+  );
+  assert.throws(
     () => parseManagedMapSolids([{ ...concaveSolid, properties: { Solidity: 0 } }]),
     /controlled by the checked solid recipe/,
   );
@@ -159,6 +172,34 @@ test("checked solids assign distinct top, bottom, and side materials determinist
     faceMaterials: { ...parsed.faceMaterials, top: "materials/dev/reflectivity_70.vmat" },
   };
   assert.deepEqual(reconcileMapSolids(first.text, [changed]).updated, [styled.targetname]);
+});
+
+test("checked solids assign role-based texture scales and reconcile them", () => {
+  const textured = parseManagedMapSolids([{
+    ...concaveSolid,
+    targetname: "fixture_scaled_concave_wall",
+    faceTextureScales: {
+      top: [0.25, 0.5],
+      bottom: [-1, 2],
+      sides: [2, 4],
+    },
+  }])![0];
+  const plan = mapSolidFaceTextureScalePlan(textured).faceTextureScales;
+  assert.deepEqual(plan, [
+    ...Array.from({ length: 4 }, () => [0.25, 0.5]),
+    ...Array.from({ length: 4 }, () => [-1, 2]),
+    ...Array.from({ length: 12 }, () => [2, 4]),
+  ]);
+
+  const first = reconcileMapSolids(EMPTY_MAP, [textured]);
+  assert.deepEqual(parseMapSolids(first.text)[0]?.faceTextureScales, textured.faceTextureScales);
+  assert.deepEqual(reconcileMapSolids(first.text, [textured]).unchanged, [textured.targetname]);
+
+  const changed = {
+    ...textured,
+    faceTextureScales: { ...textured.faceTextureScales, top: [0.5, 0.5] as [number, number] },
+  };
+  assert.deepEqual(reconcileMapSolids(first.text, [changed]).updated, [textured.targetname]);
 });
 
 test("paired height rings produce a watertight sloped concave solid", () => {

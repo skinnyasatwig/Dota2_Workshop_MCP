@@ -237,6 +237,8 @@ export interface MapMeshNodeOptions {
   material?: string;
   materials?: readonly string[];
   faceMaterialIndices?: readonly number[];
+  /** One non-zero U/V projection scale for every face. Negative values mirror the texture. */
+  faceTextureScales?: readonly (readonly [number, number])[];
   physicsType?: "default" | "none";
 }
 
@@ -272,9 +274,23 @@ export function buildMapMeshNode(mesh: MapMeshData, options: MapMeshNodeOptions)
   ) {
     throw new Error("faceMaterialIndices must contain one valid material index for every mesh face.");
   }
+  const faceTextureScales = options.faceTextureScales ?? Array.from(
+    { length: faceCount },
+    () => [1, 1] as const,
+  );
+  if (
+    faceTextureScales.length !== faceCount ||
+    faceTextureScales.some((scale) =>
+      scale.length !== 2 || scale.some((value) =>
+        !Number.isFinite(value) || Math.abs(value) < 1e-6 || Math.abs(value) > 4096))
+  ) {
+    throw new Error(
+      "faceTextureScales must contain one finite, non-zero U/V pair within +/-4096 for every mesh face.",
+    );
+  }
   const edgeData = dataArray(edgeCount, [dataStream("flags", "flags", "int", Array(edgeCount).fill(0), 3)]);
   const faceData = dataArray(faceCount, [
-    dataStream("textureScale", "textureScale", "vector2", Array(faceCount).fill("1 1"), 0),
+    dataStream("textureScale", "textureScale", "vector2", faceTextureScales.map(vectorText), 0),
     dataStream("textureAxisU", "textureAxisU", "vector4", mesh.textureAxisU, 0),
     dataStream("textureAxisV", "textureAxisV", "vector4", mesh.textureAxisV, 0),
     dataStream("materialindex", "materialindex", "int", faceMaterialIndices, 8),

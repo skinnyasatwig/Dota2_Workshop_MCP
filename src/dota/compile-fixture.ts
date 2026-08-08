@@ -108,6 +108,11 @@ export function buildRepositoryCompileFixtureText(baseText: string): string {
               top: "materials/dev/reflectivity_50.vmat",
               bottom: "materials/dev/reflectivity_20.vmat",
             },
+            faceTextureScales: {
+              top: [0.25, 0.25],
+              bottom: [-0.5, 0.5],
+              sides: [0.5, 1],
+            },
           },
           {
             kind: "bridge",

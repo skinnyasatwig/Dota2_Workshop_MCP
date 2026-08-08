@@ -275,10 +275,20 @@ Last updated: 2026-08-07
     open and intentionally reject a valid-looking aligned input whose candidate is nonconforming. Valve's converter
     and ResourceCompiler accepted the two-hole, 14-triangle fixture without launching Dota or Hammer.
 
+53. This milestone - added bounded role-based texture scale to checked world solids. `faceTextureScales` can set one
+    finite, non-zero U/V pair for top, bottom, and/or side faces; negative values intentionally mirror an axis. The MCP
+    expands those roles into the complete deterministic face stream, rejects missing/extreme/zero pairs, recovers the
+    stream during inspection, and treats any scale drift as a normal transactional solid repair. Arch, profile-arch,
+    bridge, bridge-approach, ring, single-hole, and multi-hole components preserve the setting without exposing raw
+    face indexes. Installed Valve VMAPs established that `textureScale` is a distinct per-face stream, while the
+    existing all-zero face-vertex texcoords and axis offsets are separate concerns. The repository fixture then proved
+    `0.25`, `0.5`, `1`, and negative mirrored scales survive `dmxconvert` and compile into a real VPK with Dota and
+    Hammer closed. Texture shift, rotation, and alignment remain evidence-gated instead of being guessed.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 311 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 313 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 203 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.

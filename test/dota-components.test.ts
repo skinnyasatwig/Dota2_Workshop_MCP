@@ -249,6 +249,10 @@ test("checked profile arches compose an irregular opening from sloped overhead s
       top: "materials/dev/reflectivity_50.vmat",
       bottom: "materials/dev/reflectivity_20.vmat",
     },
+    faceTextureScales: {
+      top: [0.25, 0.25],
+      sides: [0.5, 1],
+    },
   }]);
   const solids = expandDotaComponents([arch]).managedSolids;
 
@@ -270,6 +274,10 @@ test("checked profile arches compose an irregular opening from sloped overhead s
       top: "materials/dev/reflectivity_50.vmat",
       bottom: "materials/dev/reflectivity_20.vmat",
     },
+    faceTextureScales: {
+      top: [0.25, 0.25],
+      sides: [0.5, 1],
+    },
     extrusion: {
       points: [[-64, -128], [64, -128], [64, 128], [-64, 128]],
       height: 768,
@@ -283,6 +291,10 @@ test("checked profile arches compose an irregular opening from sloped overhead s
     faceMaterials: {
       top: "materials/dev/reflectivity_50.vmat",
       bottom: "materials/dev/reflectivity_20.vmat",
+    },
+    faceTextureScales: {
+      top: [0.25, 0.25],
+      sides: [0.5, 1],
     },
     extrusion: {
       points: [[-96, -128], [96, -128], [96, 128], [-96, 128]],
@@ -510,6 +522,7 @@ test("checked multi-hole platforms emit only independently proven triangle pairs
     height: 64,
     material: "materials/dev/reflectivity_30.vmat",
     faceMaterials: { top: "materials/dev/reflectivity_50.vmat" },
+    faceTextureScales: { top: [0.25, 0.25], sides: [0.5, 1] },
   }]);
   const expanded = expandDotaComponents([platform]);
 
@@ -519,7 +532,10 @@ test("checked multi-hole platforms emit only independently proven triangle pairs
     Array.from({ length: 14 }, (_unused, index) =>
       `twin_wells_triangle_${String(index + 1).padStart(3, "0")}_deck`));
   assert.ok(expanded.managedSolids.every((solid) =>
-    solid.extrusion.points.length === 3 && solid.faceMaterials?.top === "materials/dev/reflectivity_50.vmat"));
+    solid.extrusion.points.length === 3 &&
+    solid.faceMaterials?.top === "materials/dev/reflectivity_50.vmat" &&
+    solid.faceTextureScales?.top?.[0] === 0.25 &&
+    solid.faceTextureScales?.sides?.[0] === 0.5));
   assert.deepEqual(
     expanded.managedNavSurfaces.map((surface) => surface.extrusion),
     expanded.managedSolids.map((solid) => solid.extrusion),
