@@ -16,6 +16,7 @@ import { pathExists, ensureDir } from "../util/fsx.js";
 
 const MARKER = "[MCP DebugSDK]";
 const CAMERA_MARKER = "[MCP DebugSDK Camera]";
+export const DEBUG_SDK_VERSION = "1.7.0";
 
 const LUA_SNIPPET =
   `-- ${MARKER} auto-attached; remove this line + mcp_debug.lua to detach\n` +

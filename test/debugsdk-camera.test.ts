@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { attachDebugSdk, detachDebugSdk } from "../src/dota/debugsdk.js";
+import { attachDebugSdk, DEBUG_SDK_VERSION, detachDebugSdk } from "../src/dota/debugsdk.js";
 import { AddonProject } from "../src/dota/project.js";
 import { resolveDataPath } from "../src/util/datapath.js";
 
@@ -31,6 +31,8 @@ test("DebugSDK camera bridge attach is idempotent and detach removes only marked
     const second = await attachDebugSdk(project, false, { cameraBridge: true });
     assert.equal(second.bootstrapAction, "already-present");
     assert.equal(second.cameraBridge?.manifestAction, "already-present");
+
+    assert.match(await readFile(first.copiedTo[0], "utf8"), new RegExp(`SDK_VERSION = "${DEBUG_SDK_VERSION.replace(/\./g, "\\.")}"`));
 
     const manifest = await readFile(first.cameraBridge!.manifestFile, "utf8");
     assert.equal((manifest.match(/mcp_debug_camera\.xml/g) ?? []).length, 1);

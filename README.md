@@ -39,7 +39,7 @@ fallback for non-tstl addons.
 | **In-game DebugSDK** | `addon_attach_debug_sdk`, `addon_detach_debug_sdk`, `dota_lua_eval`, `dota_debug_dump`, `dota_selftest` |
 | **Reference library** | `ref_harvest`, `ref_harvest_top`, `ref_list`, `ref_search`, `ref_find`, `ref_passport`, `ref_inspect`, `ref_get`, `ref_recipe`, `ref_curate`, `ref_stats`, `asset_db` (SQLite index: fast structured search by kind/ext/name) |
 | **Docs & references** | `docs_search`, `docs_get`, `docs_list`, `dota_patterns`, `panorama_api_search`, `panorama_api_get`, `tools_catalog` |
-| **Maps** | `map_create`, `map_add_entity`, `map_inspect`, `map_patch_entities`, `map_sync_contract`, `map_rewrite_path`, `map_to_text`, `map_from_text`, `map_compile`, `map_list`, `map_validate`, `map_engine_readiness_probe`, `map_engine_nav_test`, `map_engine_visual_test` |
+| **Maps** | `map_create`, `map_add_entity`, `map_inspect`, `map_patch_entities`, `map_sync_contract`, `map_rewrite_path`, `map_to_text`, `map_from_text`, `map_compile`, `map_list`, `map_validate`, `map_engine_readiness_probe`, `map_engine_nav_test`, `map_engine_visual_test`, `map_engine_animation_test` |
 | **Map generation** | `map_build`, `map_compare_specifications`, `map_terrain`, `map_preview`, `map_tile_to_world`, `map_recipe_catalog`, `entity_catalog`, `scaffold_td` |
 | **Reference games** | `workshop_search`, `workshop_download`, `workshop_list`, `workshop_inspect`, `workshop_read`, `workshop_grep`, `panorama_decompile` |
 | **Asset preview (out of engine)** | `asset_preview` (particles/textures/models → inline contact-sheet image + HTML gallery), `sound_preview` (sounds → inline waveform/icon image + playable HTML soundboard + inline audio), `preview_studio` / `preview_studio_stop` (interactive gallery + optional public share link: animated particles, 3D models, audio players, click-to-select), `palette_preview` (exact CRC-checked four-model scenery palette → local interactive 3D gallery), `animated_prop_preview` (exact CRC-checked animated recipe → autoplaying per-sequence 3D gallery), `preview_pick` / `preview_selections` (resolve the IDs the user picked/clicked → game + asset path) — decoded via ValveResourceFormat, no Dota launch |
@@ -287,7 +287,15 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
   permission. Valve's legacy overview `rotate` key is handled exactly as its client source does: `0` is north-up and
   any nonzero integer applies one clockwise quarter-turn; it is not a degree value. Set `screenshotMethod:"engine"`
   (or CLI flags `--screenshots --screenshot-method=engine`) for occlusion-proof Source 2 PNG evidence. Requested
-  screenshots are pass/fail evidence: one renderer failure stops further screenshot commands and fails the run.
+  screenshots must be newly created, stable, decodable, and non-blank.
+- **`map_engine_animation_test`** turns the repository's animation fixture work into a reusable, dry-run-first map
+  check. It resolves exactly one named `prop_dynamic` from the source VMAP, derives its model and matching start/idle
+  sequence instead of trusting caller-supplied expectations, verifies the model is available, and reports the complete
+  compile/launch/shutdown plan without changing anything by default. An applied run installs DebugSDK 1.7 plus its
+  bounded camera bridge, waits for actual map-render state 7, frames the exact entity, samples its correlated sequence
+  and cycle twice, scans script errors, and always shuts down the session it launched. Optional `pixelCheck:"warm"`
+  adds two renderer-native PNGs and the deliberately strict warm-colour motion gate; structured cycle proof is the safe
+  default because broad scene motion is not object-specific evidence.
 - **`map_recipe_catalog`** — inspect the named terrain cores, Radiant/Dire cliff recipes, ramp-safe
   fallbacks, checked solid-volume recipes, deterministic visual-dressing palettes, and official Valve prefab references
   used by the generator. `category:"dressing"` returns the curated palette library. `verifyInstalled:true` checks the
@@ -578,6 +586,13 @@ shut down a Dota session it launched. It refuses to replace an existing Dota ses
 The companion `npm run test:engine-visual-map -- "C:\path\to\project" map_name` command is also dry-run-first.
 Add `--apply` for the guarded minimap/camera check. Structured measurement is the default; add `--screenshots` only
 when visual frames are needed. Blank or nearly uniform GPU captures are rejected instead of being attached as evidence.
+
+For one named checked animation, run
+`npm run test:engine-animation-map -- "C:\path\to\project" map_name target_name --frame=1600,90,60,530`.
+It only writes a dry-run report by default. Add `--apply` for one guarded engine session and add `--pixel=warm` only
+when the target has the checked warm-colour profile. Reports are saved under the project's `artifacts` directory;
+`--attach-frames` saves the two PNGs when pixel proof is requested. Existing Dota sessions are preserved unless
+`--replace-running-dota` is explicitly supplied.
 
 If engine startup is uncertain, run `map_engine_readiness_probe` before `map_engine_nav_test`; unlike the
 navigation test, the readiness probe sends no gameplay command and returns a screenshot plus structured

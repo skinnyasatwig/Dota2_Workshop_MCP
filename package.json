@@ -30,6 +30,7 @@
     "test:engine-animation-fixture": "node --import tsx scripts/test-engine-nav-fixture.mjs --animation",
     "test:engine-nav-map": "node scripts/run-map-engine-nav.mjs",
     "test:engine-visual-map": "node scripts/run-map-engine-visual.mjs",
+    "test:engine-animation-map": "node scripts/run-map-engine-animation.mjs",
     "recipe:refresh-report": "node --import tsx scripts/recipe-refresh-report.ts",
     "smoke": "node scripts/smoke.mjs",
     "prepare": "npm run build"

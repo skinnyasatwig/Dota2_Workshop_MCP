@@ -5,9 +5,10 @@ import {
   EngineNavigationRoute,
   engineNavigationRepairSuggestions,
 } from "./engine-nav-test.js";
+import { DEBUG_SDK_VERSION } from "./debugsdk.js";
 
 export const ENGINE_NAV_FIXTURE_MAP = "engine_nav_fixture";
-export const ENGINE_NAV_FIXTURE_DEBUG_SDK_VERSION = "1.7.0";
+export const ENGINE_NAV_FIXTURE_DEBUG_SDK_VERSION = DEBUG_SDK_VERSION;
 
 /**
  * A deliberately tiny real-engine acceptance case.

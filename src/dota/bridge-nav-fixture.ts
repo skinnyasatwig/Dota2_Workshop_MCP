@@ -1,4 +1,5 @@
 import { expandDotaComponents } from "./dota-components.js";
+import { DEBUG_SDK_VERSION } from "./debugsdk.js";
 import {
   EngineNavigationExecution,
   EngineNavigationRoute,
@@ -10,7 +11,7 @@ import { buildEntityBlock, insertEntity, maxNodeId } from "./vmap.js";
 import { relocateTileGridForIsolatedNavigation } from "./isolated-navigation-fixture.js";
 
 export const BRIDGE_NAV_FIXTURE_MAP = "bridge_nav_fixture";
-export const BRIDGE_NAV_FIXTURE_DEBUG_SDK_VERSION = "1.7.0";
+export const BRIDGE_NAV_FIXTURE_DEBUG_SDK_VERSION = DEBUG_SDK_VERSION;
 
 export interface BridgeNavigationFixtureLayout {
   center: [number, number];

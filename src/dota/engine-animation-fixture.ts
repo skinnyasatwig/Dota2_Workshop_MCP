@@ -4,11 +4,12 @@
 // can independently prove that the checked sequence advances in the real engine.
 
 import { animatedPropRecipe } from "./animated-prop-recipes.js";
+import { DEBUG_SDK_VERSION } from "./debugsdk.js";
 import type { EngineFrameSettings } from "./engine-animation-test.js";
 import { parseMapEntities, reconcileMapEntities } from "./vmap.js";
 
 export const ENGINE_ANIMATION_FIXTURE_MAP = "mcp_animation_fixture";
-export const ENGINE_ANIMATION_FIXTURE_DEBUG_SDK_VERSION = "1.7.0";
+export const ENGINE_ANIMATION_FIXTURE_DEBUG_SDK_VERSION = DEBUG_SDK_VERSION;
 export const ENGINE_ANIMATION_CLIENT_TARGET = "fixture_banner_client";
 export const ENGINE_ANIMATION_SERVER_TARGET = "fixture_banner_server_probe";
 export const ENGINE_ANIMATION_FOCUS_TARGET = "fixture_banner_camera_anchor";

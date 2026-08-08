@@ -415,11 +415,22 @@ Last updated: 2026-08-07
     the complete suite, smoke checks, and a real compiler-only disposable-addon run all pass. This protocol is
     compiler-proven but intentionally not called runtime-proven until a future explicitly approved Dota launch.
 
+66. This milestone - exposed the checked animation protocol as a reusable, dry-run-first map tool and project CLI.
+    `map_engine_animation_test` resolves exactly one safe `prop_dynamic` from the source VMAP, derives its installed
+    model and identical start/idle sequence, rejects ambiguity and collision/navigation drift, and previews the exact
+    DebugSDK/camera/compile/launch/shutdown plan without writing or launching by default. An applied run is bounded to
+    one owned session, waits for real map-render state 7, validates deterministic framing before evidence capture,
+    correlates two exact entity/model/sequence/cycle samples, scans script errors, and shuts down in `finally`.
+    Renderer-native warm-colour motion is explicit opt-in and retains the strict existing threshold; generic structured
+    cycle proof is the default so unrelated scene motion cannot be mislabeled as object proof. The companion
+    `test:engine-animation-map` command stores structured reports and optional frames in the project's `artifacts`
+    directory. The build, 350-test default suite, and 208-check MCP smoke surface pass without launching Dota.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 348 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
-- MCP smoke suite: 207 passed, 0 failed, and 1 network-dependent Workshop search skipped.
+- Default suite: 350 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
+- MCP smoke suite: 208 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed palette-bound audit: 20 of 20 model CRCs and MDAT snapshots match the current Dota VPK.
 - Installed palette-gallery proof: the four-model `river-wetland` set passed exact CRC checks, decoded to textured GLBs,
   loaded through the self-hosted browser renderer, and was visually confirmed without Hammer or Dota.
