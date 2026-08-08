@@ -181,6 +181,104 @@ test("closed segmented walls add a final blocker and reject degenerate or sloped
   );
 });
 
+test("static prop sets rotate repeated scenery and require explicit collision intent", () => {
+  const [set] = componentList.parse([{
+    kind: "staticPropSet",
+    name: "radiant_rocks",
+    origin: [1000, 2000, 128],
+    yaw: 90,
+    model: "models/props_debris/rock_debris001.vmdl",
+    collision: "none",
+    castShadows: false,
+    tint: [192, 224, 255],
+    placements: [
+      { name: "west", offset: [100, 0, 0], yaw: 15 },
+      { name: "north", offset: [0, 200, 32], yaw: -30 },
+    ],
+  }]);
+  const entities = expandDotaComponents([set]).managedEntities;
+
+  assert.deepEqual(entities.map((entity) => ({
+    targetname: entity.targetname,
+    classname: entity.classname,
+    origin: entity.origin,
+    angles: entity.angles,
+    properties: entity.properties,
+  })), [
+    {
+      targetname: "radiant_rocks_west",
+      classname: "prop_static",
+      origin: "1000 2100 128",
+      angles: "0 105 0",
+      properties: {
+        model: "models/props_debris/rock_debris001.vmdl",
+        solid: "0",
+        disableshadows: "1",
+        rendercolor: "192 224 255",
+      },
+    },
+    {
+      targetname: "radiant_rocks_north",
+      classname: "prop_static",
+      origin: "800 2000 160",
+      angles: "0 60 0",
+      properties: {
+        model: "models/props_debris/rock_debris001.vmdl",
+        solid: "0",
+        disableshadows: "1",
+        rendercolor: "192 224 255",
+      },
+    },
+  ]);
+
+  assert.equal(
+    expandDotaComponents(componentList.parse([{
+      kind: "staticPropSet",
+      name: "blocking_rocks",
+      origin: [0, 0, 0],
+      model: "models/props_mines/mines_rocks_pile_01a.vmdl",
+      collision: "vphysics",
+      placements: [{ name: "one", offset: [0, 0, 0] }],
+    }])).managedEntities[0].properties?.solid,
+    "6",
+  );
+  assert.throws(
+    () => componentList.parse([{
+      kind: "staticPropSet",
+      name: "implicit_collision",
+      origin: [0, 0, 0],
+      model: "models/props_debris/rock_debris001.vmdl",
+      placements: [{ name: "one", offset: [0, 0, 0] }],
+    }]),
+    /collision/,
+  );
+  assert.throws(
+    () => componentList.parse([{
+      kind: "staticPropSet",
+      name: "unsafe_model",
+      origin: [0, 0, 0],
+      model: "models/../escape.vmdl",
+      collision: "none",
+      placements: [{ name: "one", offset: [0, 0, 0] }],
+    }]),
+    /parent-directory/,
+  );
+  assert.throws(
+    () => componentList.parse([{
+      kind: "staticPropSet",
+      name: "duplicate_names",
+      origin: [0, 0, 0],
+      model: "models/props_debris/rock_debris001.vmdl",
+      collision: "none",
+      placements: [
+        { name: "Rock", offset: [0, 0, 0] },
+        { name: "rock", offset: [64, 0, 0] },
+      ],
+    }]),
+    /unique within the static prop set/,
+  );
+});
+
 test("checked arches expand into two posts and one elevated lintel", () => {
   const [arch] = componentList.parse([{
     kind: "arch",

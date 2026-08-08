@@ -227,8 +227,8 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
   `terrain` / `entities` / `paths` inputs remain compatible. See
   [`examples/map-specification.json`](examples/map-specification.json) for a complete starter. Pass
   `dryRun:true` to generate and report the plan without writing, registering, or compiling anything. The report also
-  resolves every resulting VMAP material against addon/base content, compiled assets, and Dota/core VPKs; a real write
-  refuses missing or unsafe materials before conversion begins.
+  resolves every resulting VMAP material and model against addon/base content, compiled assets, and Dota/core VPKs;
+  a real write refuses missing or unsafe assets before conversion begins.
 - **`map_compare_specifications`** — prove that a contract refactor preserves the generated map before touching a
   VMAP. Each side can be an inline specification or a project-local JSON file. The tool validates and expands reusable
   components first, compares named entities/paths/solids/surfaces/volumes independent of declaration order, preserves
@@ -321,7 +321,7 @@ Transforms and team swaps compose at every level, while deferred `@local:` refer
 chain. Missing children, duplicate local placement names, cycles, and nesting deeper than 32 levels are rejected.
 
 For common gameplay structure, `dotaComponents` provides strongly checked `base`, `ancient`, `tower`, `fountain`,
-`shop`, `camp`, `bossPit`, `playerStart`, `gate`, `baseBlocker`, `fowBlocker`, `wall`, `arch`, `profileArch`, `bridge`,
+`shop`, `camp`, `bossPit`, `playerStart`, `gate`, `baseBlocker`, `fowBlocker`, `wall`, `staticPropSet`, `arch`, `profileArch`, `bridge`,
 `bridgeApproach`, `ringPlatform`, `holedPlatform`, and `multiHoledPlatform` entries. It derives team numbers, official entity classes,
 stock unit/model names, tower tier names, shop/camp numeric values, base member transforms, and boss-pit terrain.
 See [`examples/dota-components.json`](examples/dota-components.json). A `camp` can include an optional checked
@@ -334,6 +334,11 @@ explicitly linked `ent_fow_blocker_node` lines; broken links are reported by map
 The `wall` component turns an open or closed world-space outline into overlapping, checked convex `playerClip`
 segments. This supports practical curved and concave base silhouettes without relying on one fragile concave Source 2
 solid; decorative wall meshes and sloped wall runs remain separate visual work.
+`staticPropSet` places one checked `models/*.vmdl` resource at one to 256 named local offsets. The set rotates as one
+reusable assembly, while each prop can add its own yaw. Collision is mandatory and explicit: `none` emits a non-solid
+decoration, while `vphysics` requests the model's Valve physics. Optional tint and shadow controls use official
+`prop_static` properties. Whole-map model preflight verifies every resulting model before a build, sync, or compile;
+offline collision analysis still refuses to invent a hull when a collision-enabled model has no decodable PHYS data.
 The `arch` component is a checked rectangular opening assembled from two solid posts and one elevated lintel. Its
 origin is the center of the arch at ground level; width, depth, total height, opening width, opening height, yaw, and
 one preflighted visible material are explicit. Offline reachability uses a conservative 256-unit standing corridor,
@@ -468,8 +473,8 @@ playable `.vpk` — a pipeline verified end to end.
   `map_build`, conventionally stored in `.dota-workshop/map-contract.json`. It creates missing named entities, expands
   complete linked waypoint chains, repairs drifted class/position/rotation/keyvalues, prunes obsolete
   numbered nodes owned by those paths, creates or repairs checked solid volumes, expands reusable regions/components/placements, preserves unrelated map data, and refuses ambiguous duplicate
-  target names. Its preview includes the same whole-map material resolution as `map_build`; applying is blocked when a
-  material cannot be safely resolved. Preview is the default; pass `apply:true` to write and `recompile:true` to compile.
+  target names. Its preview includes the same whole-map material and model resolution as `map_build`; applying is blocked
+  when an asset cannot be safely resolved. Preview is the default; pass `apply:true` to write and `recompile:true` to compile.
   Applied map changes use a transaction: the current source map (and compiled map when relevant) is
   backed up under `.dota-workshop/backups`, conversion is staged before replacement, and a failed
   conversion or compile restores the prior files automatically. `map_build` and `map_terrain` use the
@@ -477,8 +482,8 @@ playable `.vpk` — a pipeline verified end to end.
 - **`map_rewrite_path`** — convert/rename a complete numbered waypoint chain while repairing all
   target links (for example generated `path_track` routes → creep `path_corner` routes).
 - **`map_to_text` / `map_from_text`** — read/write the full vmap DMX text for arbitrary edits.
-- **`map_compile`** — resolve all VMAP materials first, then compile `.vmap` → `.vpk`; missing or unsafe assets stop
-  before the expensive Valve compiler run. `dryRun:true` returns both the command and material evidence.
+- **`map_compile`** — resolve all VMAP materials and models first, then compile `.vmap` → `.vpk`; missing or unsafe
+  assets stop before the expensive Valve compiler run. `dryRun:true` returns both the command and asset evidence.
 - **`map_list`** — list maps with source/compiled status.
 - **`map_validate`** — no-game preflight: verify map registration, source/compiled state, required
   script-facing entities, duplicate target names, and broken `path_corner`/`path_track` chains. It
@@ -489,8 +494,8 @@ playable `.vpk` — a pipeline verified end to end.
   `strictEntityProperties:true` to turn unknown classes/properties into warnings. Declared dropdown choices and
   numeric bounds are enforced; a named destination that cannot be resolved is reported as a warning. Dynamic
   targets such as `!activator`, wildcard targets, and existing class-name destinations are not misreported. The same
-  preflight resolves every material serialized in the VMAP against addon/base loose source, compiled assets, and
-  addon/Dota/core VPKs. Missing or unsafe resources are errors; source-only custom materials are warnings until
+  preflight resolves every material and model serialized in the VMAP against addon/base loose source, compiled assets,
+  and addon/Dota/core VPKs. Missing or unsafe resources are errors; source-only custom assets are warnings until
   compiled, or errors when `requireCompiled:true`. It also verifies both `dota_minimap_boundary` corners, overview KeyValues, source and compiled material/texture
   assets, PNG dimensions, and the exact world/image/display transform. Valve's legacy `rotate` field is validated as
   an integer flag: `0` is north-up and any nonzero value is one clockwise 90-degree display turn. Rotated source

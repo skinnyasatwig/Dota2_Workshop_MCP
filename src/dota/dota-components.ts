@@ -38,6 +38,9 @@ const visibleMaterialSchema = z.string()
   .refine((value) => !value.split("/").includes(".."), "must not contain parent-directory segments")
   .refine((value) => !value.toLowerCase().startsWith("materials/tools/"),
     "must be a visible world material");
+const modelResourceSchema = z.string()
+  .regex(/^models\/[A-Za-z0-9_./-]+\.vmdl$/i, "must be a models/*.vmdl resource")
+  .refine((value) => !value.split("/").includes(".."), "must not contain parent-directory segments");
 
 const ancientComponentSchema = z.object({
   kind: z.literal("ancient"),
@@ -182,6 +185,45 @@ const wallComponentSchema = z.object({
       });
     }
   }
+});
+
+const staticPropPlacementSchema = z.object({
+  name: nameSchema,
+  /** Local offset from the set origin. */
+  offset: point3,
+  yaw: z.number().finite().optional(),
+}).strict();
+
+const staticPropSetComponentSchema = z.object({
+  kind: z.literal("staticPropSet"),
+  name: nameSchema,
+  /** World-space origin for the reusable set. */
+  origin: point3,
+  yaw: yawSchema,
+  /** One checked model resource shared by every placement in this set. */
+  model: modelResourceSchema,
+  /** Required so scenery never acquires pathing collision by accident. */
+  collision: z.enum(["none", "vphysics"]),
+  castShadows: z.boolean().optional(),
+  tint: z.tuple([
+    z.number().int().min(0).max(255),
+    z.number().int().min(0).max(255),
+    z.number().int().min(0).max(255),
+  ]).optional(),
+  placements: z.array(staticPropPlacementSchema).min(1).max(256),
+}).strict().superRefine((set, context) => {
+  const seen = new Set<string>();
+  set.placements.forEach((placement, index) => {
+    const key = placement.name.toLowerCase();
+    if (seen.has(key)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["placements", index, "name"],
+        message: "must be unique within the static prop set (case-insensitive)",
+      });
+    }
+    seen.add(key);
+  });
 });
 
 const archComponentSchema = z.object({
@@ -677,6 +719,7 @@ export const dotaComponentInputSchema = z.union([
   baseBlockerComponentSchema,
   fowBlockerComponentSchema,
   wallComponentSchema,
+  staticPropSetComponentSchema,
   archComponentSchema,
   profileArchComponentSchema,
   bridgeComponentSchema,
@@ -714,6 +757,11 @@ export const POINT_BLOCKER_RECIPES = {
 } as const;
 
 export const WORLD_STRUCTURE_RECIPES = {
+  staticPropSet: {
+    parts: ["placement_*"],
+    purpose: "Repeatable static scenery with a checked model path and required explicit collision intent.",
+    source: "Valve prop_static FGD plus MCP model-asset preflight and collision inventory",
+  },
   arch: {
     parts: ["left_post", "right_post", "lintel"],
     purpose: "Rectangular wall opening assembled from three checked always-solid func_brush extrusions.",
@@ -1411,6 +1459,26 @@ function addPoint(a: Point3, b: Point3): Point3 {
   return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 }
 
+function expandStaticPropSet(
+  component: z.infer<typeof staticPropSetComponentSchema>,
+): ManagedMapEntity[] {
+  const yaw = component.yaw ?? 0;
+  return component.placements.map((placement) => ({
+    targetname: `${component.name}_${placement.name}`,
+    classname: "prop_static",
+    origin: originString(addPoint(component.origin, rotateOffset(placement.offset, yaw))),
+    angles: angleString(yaw + (placement.yaw ?? 0)),
+    properties: {
+      model: component.model,
+      solid: component.collision === "vphysics" ? "6" : "0",
+      ...(component.castShadows === undefined
+        ? {}
+        : { disableshadows: component.castShadows ? "0" : "1" }),
+      ...(component.tint ? { rendercolor: component.tint.join(" ") } : {}),
+    },
+  }));
+}
+
 function expandBase(component: z.infer<typeof baseComponentSchema>): ManagedMapEntity[] {
   const yaw = component.yaw ?? 0;
   const at = (offset: Point3): Point3 => addPoint(component.origin, rotateOffset(offset, yaw));
@@ -1522,6 +1590,9 @@ export function expandDotaComponents(components: DotaComponentInput[]): Expanded
         break;
       case "wall":
         managedVolumes.push(...wallVolumes(component));
+        break;
+      case "staticPropSet":
+        managedEntities.push(...expandStaticPropSet(component));
         break;
       case "arch":
         managedSolids.push(...archSolids(component));

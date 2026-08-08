@@ -118,6 +118,20 @@
       "overlap": 48
     },
     {
+      "kind": "staticPropSet",
+      "name": "radiant_river_rocks",
+      "origin": [-3072, -2048, 128],
+      "yaw": 20,
+      "model": "models/props_debris/rock_debris001.vmdl",
+      "collision": "none",
+      "castShadows": true,
+      "placements": [
+        { "name": "west", "offset": [-192, 0, 0], "yaw": -10 },
+        { "name": "center", "offset": [0, 96, 0] },
+        { "name": "east", "offset": [192, 0, 0], "yaw": 15 }
+      ]
+    },
+    {
       "kind": "arch",
       "name": "radiant_north_arch",
       "origin": [-4352, 2304, 128],

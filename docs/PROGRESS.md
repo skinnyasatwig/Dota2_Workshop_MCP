@@ -315,10 +315,20 @@ Last updated: 2026-08-07
     the alignment. Valve's converter and ResourceCompiler accepted a profile arch combining shared alignment, three
     materials, mirrored scale, positive/negative shifts, and 45/-90/180 degree rotations with Dota and Hammer closed.
 
+57. This milestone - added repeatable checked static scenery plus whole-map model preflight. `staticPropSet` expands one
+    safe `models/*.vmdl` resource into one to 256 deterministically named `prop_static` entities, rotating local offsets
+    as one reusable assembly while retaining optional per-prop yaw. Collision intent is mandatory (`none` or
+    `vphysics`); tint and shadow controls map only to official Valve FGD properties. Case-insensitive duplicate local
+    names, unsafe paths, implicit collision, and unbounded set sizes fail before VMAP editing. Build and contract-sync
+    previews, writes, `map_compile`, and `map_validate` now resolve every serialized `.vmdl` against addon/base loose
+    source, compiled assets, and addon/Dota/core VPKs, blocking missing or unsafe models before conversion or compiler
+    work. Unit tests cover expansion and asset shadowing; the repository fixture carries two preflighted decorative
+    rocks through desired-state expansion and Valve's converter/compiler with Dota and Hammer closed.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 313 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 317 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 203 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
@@ -327,7 +337,7 @@ Last updated: 2026-08-07
 - Valve's installed `dmxconvert.exe` successfully round-trips generated camp, polygonal no-ward, player-clip, and
   sloped trigger volumes from text to binary VMAP and back during the integration suite, preserving exact corner heights.
 - `npm run test:compiler-fixture` successfully round-tripped and compiled the repository-owned acceptance payload,
-  including its sloped trigger, flat and sloped concave L-shaped world solids, checked rectangular arch, checked bridge
+  including its two-prop preflighted decorative set, sloped trigger, flat and sloped concave L-shaped world solids, checked rectangular arch, checked bridge
   deck/navigation twin, complete visible sloped bridge approach/navigation twin, three-material six-piece profile arch, eight-segment ring platform,
   eight-segment unequal-outline holed platform, 14-triangle two-hole platform, and explicit navigation obstruction,
   into a real VPK. The generated map uses Valve's installed blank template only as required hidden
@@ -354,6 +364,8 @@ Last updated: 2026-08-07
 - Real Dota 3v3 contract: 84 managed entities, 4 managed paths, 98 terrain operations, and zero desired-state drift.
 - Real Dota 3v3 minimap: both boundary entities, overview metadata, 1024x1024 PNG, source/compiled material and
   hashed texture, and the scale-16 world transform validate with zero findings.
+- Real Dota 3v3 models: all 16 serialized references (7 unique models) resolve through loose or packed installed
+  assets with zero missing, unsafe, or source-only findings.
 - Offline 3v3 terrain: zero holes, zero inaccessible camps, and only the deliberate 384-cell off-map strip.
 - Installed official definitions expose 187 enum properties with 1,171 choices, 16 explicitly ranged properties,
   and 297 named-destination fields. All 157 acceptance-map entities are recognized with zero invalid types,

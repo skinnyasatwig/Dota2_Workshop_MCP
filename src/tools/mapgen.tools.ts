@@ -26,6 +26,7 @@ import { runMapTransaction } from "../dota/map-transaction.js";
 import { renderMapPreview } from "../dota/map-preview.js";
 import { resolveMapCollisionObstacles } from "../dota/map-collision.js";
 import { inspectProjectMapMaterials } from "../dota/map-material.js";
+import { inspectProjectMapModels } from "../dota/map-model.js";
 import { MAP_VOLUME_RECIPES } from "../dota/map-volume.js";
 import { POINT_BLOCKER_RECIPES, WORLD_STRUCTURE_RECIPES } from "../dota/dota-components.js";
 import {
@@ -788,7 +789,7 @@ export function registerMapGenTools(server: McpServer) {
         "format as map_sync_contract: managedTerrain, managedEntities, managedAbsentEntities, managedPaths, checked " +
         "managedSolids, managedNavSurfaces, managedVolumes, and " +
         "requiredEntities, plus reusable regions, components, and transformed placements. Legacy terrain/entities/paths " +
-        "remain supported. Dry runs report missing/unsafe materials, and writes refuse those blockers before conversion. " +
+        "remain supported. Dry runs report missing/unsafe materials and models, and writes refuse those blockers before conversion. " +
         "Terrain coordinates are tile units; entity/path coordinates are world units.",
       inputSchema: {
         projectRoot: z.string().optional(),
@@ -893,10 +894,17 @@ export function registerMapGenTools(server: McpServer) {
         }
       }
       const materialValidation = await inspectProjectMapMaterials(txt, dota, project, false);
+      const modelValidation = await inspectProjectMapModels(txt, dota, project, false);
+      const safeToApply = materialValidation.safeToWrite && modelValidation.safeToWrite;
       log.push(
         `materials: ${materialValidation.resolvedCount} resolved, ` +
         `${materialValidation.sourceOnlyCount} awaiting compilation, ` +
         `${materialValidation.missingCount + materialValidation.invalidCount} blocker(s)`,
+      );
+      log.push(
+        `models: ${modelValidation.resolvedCount} resolved, ` +
+        `${modelValidation.sourceOnlyCount} awaiting compilation, ` +
+        `${modelValidation.missingCount + modelValidation.invalidCount} blocker(s)`,
       );
       if (dryRun) {
         log.push(
@@ -911,23 +919,26 @@ export function registerMapGenTools(server: McpServer) {
             wouldCompile: compile === true,
             vmap: p.contentVmap,
             changes: specificationChangeReport,
-            safeToApply: materialValidation.safeToWrite,
+            safeToApply,
             materialValidation,
+            modelValidation,
           },
           log.join("\n"),
         );
       }
-      if (!materialValidation.safeToWrite) {
+      if (!safeToApply) {
         const failure = json(
           {
             name,
             applied: false,
             safeToApply: false,
             materialValidation,
+            modelValidation,
           },
-          `Map build was not started because material preflight found ` +
-            `${materialValidation.missingCount + materialValidation.invalidCount} blocker(s).\n` +
-            materialValidation.findings
+          `Map build was not started because asset preflight found ` +
+            `${materialValidation.missingCount + materialValidation.invalidCount} material blocker(s) and ` +
+            `${modelValidation.missingCount + modelValidation.invalidCount} model blocker(s).\n` +
+            [...materialValidation.findings, ...modelValidation.findings]
               .map((finding) => `[${finding.severity.toUpperCase()}] ${finding.detail}`)
               .join("\n"),
         );

@@ -30,6 +30,8 @@ test("repository compile fixture is self-contained and structurally inspectable"
       "fixture_bridge_approach_ramp",
       "fixture_bridge_deck",
       "fixture_concave_solid",
+      "fixture_decorative_rocks_east",
+      "fixture_decorative_rocks_west",
       "fixture_dire_start",
       "fixture_dire_team_core_start",
       "fixture_dire_team_core_tower",
@@ -89,6 +91,13 @@ test("repository compile fixture is self-contained and structurally inspectable"
     fixture.entities.find((entity) => entity.targetname === "fixture_dire_team_core_start")?.classname,
     "info_player_start_badguys",
   );
+  const decorativeRocks = fixture.entities.filter((entity) =>
+    entity.targetname?.startsWith("fixture_decorative_rocks_"));
+  assert.equal(decorativeRocks.length, 2);
+  assert.ok(decorativeRocks.every((entity) => entity.classname === "prop_static"));
+  assert.ok(decorativeRocks.every((entity) => entity.properties.solid === "0"));
+  assert.ok(decorativeRocks.every((entity) =>
+    entity.properties.model === "models/props_debris/rock_debris001.vmdl"));
   assert.equal(fixture.solids.length, 43);
   const concave = fixture.solids.find((solid) => solid.targetname === "fixture_concave_solid");
   assert.equal(concave?.footprint.length, 6);

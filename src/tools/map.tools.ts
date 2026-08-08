@@ -30,6 +30,7 @@ import { reconcileMapVolumes } from "../dota/map-volume.js";
 import { reconcileMapSolids } from "../dota/map-solid.js";
 import { reconcileMapNavSurfaces } from "../dota/map-nav-surface.js";
 import { inspectProjectMapMaterials, MapMaterialReport } from "../dota/map-material.js";
+import { inspectProjectMapModels, MapModelReport } from "../dota/map-model.js";
 import { inspectMapOverview, MapOverviewReport } from "../dota/map-overview.js";
 import {
   buildEngineNavigationCommand,
@@ -84,6 +85,12 @@ const NAME_RE = /^[a-z][a-z0-9_]+$/;
 const numOrStr = z.union([z.string(), z.number()]);
 
 function materialFindingText(report: MapMaterialReport): string {
+  return report.findings
+    .map((finding) => `[${finding.severity.toUpperCase()}] ${finding.detail}`)
+    .join("\n");
+}
+
+function modelFindingText(report: MapModelReport): string {
   return report.findings
     .map((finding) => `[${finding.severity.toUpperCase()}] ${finding.detail}`)
     .join("\n");
@@ -1565,7 +1572,7 @@ export function registerMapTools(server: McpServer) {
         "Paths expand into complete linked waypoint chains. Missing named entities " +
         "are created; existing named entities are repaired; obsolete managed path nodes are removed; and declared " +
         "terrain shapes are restored while terrain outside those shapes is preserved. The operation is idempotent and " +
-        "refuses ambiguous duplicate targetnames or missing/unsafe material assets. Preview reports material blockers " +
+        "refuses ambiguous duplicate targetnames or missing/unsafe material or model assets. Preview reports asset blockers " +
         "without writing. Defaults to preview-only; pass apply=true.",
       inputSchema: {
         projectRoot: z.string().optional(),
@@ -1615,7 +1622,14 @@ export function registerMapTools(server: McpServer) {
         project,
         false,
       );
-      if (apply && !materialValidation.safeToWrite) {
+      const modelValidation = await inspectProjectMapModels(
+        synchronization.text,
+        dota,
+        project,
+        false,
+      );
+      const safeToApply = materialValidation.safeToWrite && modelValidation.safeToWrite;
+      if (apply && !safeToApply) {
         const failure = json(
           {
             map,
@@ -1623,10 +1637,12 @@ export function registerMapTools(server: McpServer) {
             applied: false,
             safeToApply: false,
             materialValidation,
+            modelValidation,
           },
-          `No changes written. Material preflight found ` +
-            `${materialValidation.missingCount + materialValidation.invalidCount} blocker(s).\n` +
-            materialFindingText(materialValidation),
+          `No changes written. Asset preflight found ` +
+            `${materialValidation.missingCount + materialValidation.invalidCount} material blocker(s) and ` +
+            `${modelValidation.missingCount + modelValidation.invalidCount} model blocker(s).\n` +
+            [materialFindingText(materialValidation), modelFindingText(modelValidation)].filter(Boolean).join("\n"),
         );
         failure.isError = true;
         return failure;
@@ -1699,8 +1715,13 @@ export function registerMapTools(server: McpServer) {
         `${materialValidation.sourceOnlyCount} awaiting compilation, ` +
         `${materialValidation.missingCount + materialValidation.invalidCount} blocker(s).`,
       );
-      if (!apply && !materialValidation.safeToWrite) {
-        steps.push("This preview is unsafe to apply until the material blockers are fixed.");
+      steps.push(
+        `Models: ${modelValidation.resolvedCount} resolved, ` +
+        `${modelValidation.sourceOnlyCount} awaiting compilation, ` +
+        `${modelValidation.missingCount + modelValidation.invalidCount} blocker(s).`,
+      );
+      if (!apply && !safeToApply) {
+        steps.push("This preview is unsafe to apply until the asset blockers are fixed.");
       }
       if (apply && recompile) steps.push(`Recompiled -> ${p.installedGameVpk}`);
       if (transaction) steps.push(`Recovery backup -> ${transaction.backupDirectory}`);
@@ -1709,8 +1730,9 @@ export function registerMapTools(server: McpServer) {
           map,
           contract: resolved.path,
           applied: apply === true,
-          safeToApply: materialValidation.safeToWrite,
+          safeToApply,
           materialValidation,
+          modelValidation,
           changed,
           changedEntities,
           changedSolids,
@@ -1828,8 +1850,8 @@ export function registerMapTools(server: McpServer) {
     {
       title: "Compile a map",
       description:
-        "Preflight every VMAP material against addon/base loose assets and VPKs, then compile the content .vmap into " +
-        "a playable game .vpk (resourcecompiler). Missing or unsafe materials stop before the expensive compiler run.",
+        "Preflight every VMAP material and model against addon/base loose assets and VPKs, then compile the content " +
+        ".vmap into a playable game .vpk (resourcecompiler). Missing or unsafe assets stop before the expensive compiler run.",
       inputSchema: {
         projectRoot: z.string().optional(),
         name: z.string(),
@@ -1845,31 +1867,45 @@ export function registerMapTools(server: McpServer) {
       const sourceExists = await pathExists(p.contentVmap);
       if (dryRun && !sourceExists) {
         return json(
-          { dryRun: true, name, command, sourceExists: false, materialValidation: null },
-          `[dry run]\n${command}\nMaterial preflight unavailable because the source VMAP does not exist: ${p.contentVmap}`,
+          { dryRun: true, name, command, sourceExists: false, materialValidation: null, modelValidation: null },
+          `[dry run]\n${command}\nAsset preflight unavailable because the source VMAP does not exist: ${p.contentVmap}`,
         );
       }
       if (!sourceExists) return error(`Map content not found: ${p.contentVmap}.`);
       const mapText = await vmapToText(dota.dmxconvertExe, p.contentVmap);
       const materials = await inspectProjectMapMaterials(mapText, dota, project, false);
+      const models = await inspectProjectMapModels(mapText, dota, project, false);
       if (dryRun) {
         return json(
-          { dryRun: true, name, command, materialValidation: materials },
+          { dryRun: true, name, command, materialValidation: materials, modelValidation: models },
           `[dry run]\n${command}\nMaterials: ${materials.resolvedCount} resolved, ` +
             `${materials.sourceOnlyCount} awaiting compilation, ${materials.missingCount + materials.invalidCount} blocker(s).` +
-            `${materials.findings.length ? `\n${materialFindingText(materials)}` : ""}`,
+            `\nModels: ${models.resolvedCount} resolved, ` +
+            `${models.sourceOnlyCount} awaiting compilation, ${models.missingCount + models.invalidCount} blocker(s).` +
+            `${materials.findings.length || models.findings.length
+              ? `\n${[materialFindingText(materials), modelFindingText(models)].filter(Boolean).join("\n")}`
+              : ""}`,
         );
       }
-      if (!materials.safeToWrite) {
+      if (!materials.safeToWrite || !models.safeToWrite) {
         return error(
-          `Map compilation was not started because material preflight found ` +
-          `${materials.missingCount + materials.invalidCount} blocker(s).\n${materialFindingText(materials)}`,
+          `Map compilation was not started because asset preflight found ` +
+          `${materials.missingCount + materials.invalidCount} material blocker(s) and ` +
+          `${models.missingCount + models.invalidCount} model blocker(s).\n` +
+          [materialFindingText(materials), modelFindingText(models)].filter(Boolean).join("\n"),
         );
       }
       const res = await compileProjectMap(dota, project, name, force);
       const ok = res.code === 0 && (await pathExists(p.installedGameVpk));
       return json(
-        { name, ok, vpk: p.installedGameVpk, exitCode: res.code, materialValidation: materials },
+        {
+          name,
+          ok,
+          vpk: p.installedGameVpk,
+          exitCode: res.code,
+          materialValidation: materials,
+          modelValidation: models,
+        },
         `${ok ? "COMPILE OK -> " + p.installedGameVpk : "COMPILE FAILED (exit " + res.code + ")"}\n\n${res.stdout.slice(-2000)}\n${res.stderr.slice(-500)}`.trim(),
       );
     }),
@@ -1933,7 +1969,7 @@ export function registerMapTools(server: McpServer) {
         "and whether the compiled VPK is older than its VMAP source, " +
         "extracts entities, finds duplicate targetnames and broken path_corner/path_track links, and verifies required " +
         "targetname/classname pairs used by game scripts. It also checks minimap boundary entities, overview metadata, " +
-        "all VMAP material references across addon/base loose assets and VPKs, overview source/compiled material and " +
+        "all VMAP material and model references across addon/base loose assets and VPKs, overview source/compiled material and " +
         "texture assets, image dimensions, and the world-to-minimap transform. When a project contract declares managedTerrain or " +
         "managedSolids, managedNavSurfaces, or managedVolumes, validation also reports tile-grid, checked-solid, navigation-surface, or checked-volume drift without writing it. Whole-map " +
         "offline reachability checks detect terrain holes, " +
@@ -2032,6 +2068,7 @@ export function registerMapTools(server: McpServer) {
       let entityDefinitionValidation: FgdValidationReport | undefined;
       let overviewReport: MapOverviewReport | undefined;
       let materialReport: MapMaterialReport | undefined;
+      let modelReport: MapModelReport | undefined;
       let terrainDrift:
         | {
             changedHeightVertices: number;
@@ -2096,6 +2133,19 @@ export function registerMapTools(server: McpServer) {
           requireCompiled === true,
         );
         for (const finding of materialReport.findings) {
+          findings.push({
+            severity: finding.severity,
+            code: finding.code,
+            message: finding.detail,
+          });
+        }
+        modelReport = await inspectProjectMapModels(
+          mapText,
+          dota,
+          project,
+          requireCompiled === true,
+        );
+        for (const finding of modelReport.findings) {
           findings.push({
             severity: finding.severity,
             code: finding.code,
@@ -2409,6 +2459,7 @@ export function registerMapTools(server: McpServer) {
           requirementCount: requirements.length,
           entityDefinitions: entityDefinitionValidation ?? null,
           materials: materialReport ?? null,
+          models: modelReport ?? null,
           overview: overviewReport ?? null,
           terrainDrift: terrainDrift ?? null,
           solidDrift: solidDrift ?? null,

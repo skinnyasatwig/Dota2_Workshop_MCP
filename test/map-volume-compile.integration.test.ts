@@ -5,8 +5,9 @@ import { mkdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { buildRepositoryCompileFixtureText } from "../src/dota/compile-fixture.js";
 import { inspectMapMaterials } from "../src/dota/map-material.js";
+import { inspectMapModels } from "../src/dota/map-model.js";
 import { parseMapSolids } from "../src/dota/map-solid.js";
-import { compileVmap, textToVmap, vmapToText } from "../src/dota/vmap.js";
+import { compileVmap, parseMapEntities, textToVmap, vmapToText } from "../src/dota/vmap.js";
 import { Vpk } from "../src/dota/vpk.js";
 
 const dotaRoot = process.env.DOTA2_PATH || "C:\\Program Files (x86)\\Steam\\steamapps\\common\\dota 2 beta";
@@ -68,6 +69,14 @@ test(
       assert.match(roundTripped, /fixture_bridge_deck/);
       assert.match(roundTripped, /fixture_irregular_platform_segment_01_deck/);
       assert.match(roundTripped, /fixture_multi_hole_platform_triangle_001_deck/);
+      assert.match(roundTripped, /fixture_decorative_rocks_west/);
+      const decorativeRocks = parseMapEntities(roundTripped)
+        .filter((entity) => entity.targetname?.startsWith("fixture_decorative_rocks_"));
+      assert.equal(decorativeRocks.length, 2);
+      assert.ok(decorativeRocks.every((entity) => entity.classname === "prop_static"));
+      assert.ok(decorativeRocks.every((entity) => entity.properties.solid === "0"));
+      assert.ok(decorativeRocks.every((entity) =>
+        entity.properties.model === "models/props_debris/rock_debris001.vmdl"));
       assert.match(roundTripped, /MCP Nav Surface: fixture_bridge_walkable/);
       assert.match(roundTripped, /MCP Nav Surface: fixture_irregular_platform_segment_01_walkable/);
       assert.match(roundTripped, /MCP Nav Surface: fixture_multi_hole_platform_triangle_001_walkable/);
@@ -95,6 +104,27 @@ test(
       });
       assert.equal(materials.safeToWrite, true, JSON.stringify(materials.findings));
       assert.equal(materials.missingCount, 0);
+      const models = await inspectMapModels({
+        mapText: roundTripped,
+        sourceRoots: [
+          contentAddon,
+          join(dotaRoot, "content", "dota"),
+          join(dotaRoot, "content", "core"),
+        ],
+        compiledRoots: [
+          gameAddon,
+          join(dotaRoot, "game", "dota"),
+          join(dotaRoot, "game", "core"),
+        ],
+        packedResources: [
+          { label: "Dota pak01", entries: dotaPak.entries },
+          { label: "core pak01", entries: corePak.entries },
+        ],
+      });
+      assert.equal(models.safeToWrite, true, JSON.stringify(models.findings));
+      assert.equal(models.missingCount, 0);
+      assert.ok(models.models.some((model) =>
+        model.model === "models/props_debris/rock_debris001.vmdl" && model.state === "resolved"));
       const compiled = await compileVmap(compiler, dotaGame, contentMap, gameVpk, true);
       assert.equal(compiled.timedOut, false, compiled.stderr || compiled.stdout);
       assert.equal(compiled.code, 0, compiled.stderr || compiled.stdout);

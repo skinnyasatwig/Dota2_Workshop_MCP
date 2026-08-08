@@ -83,6 +83,20 @@ export function buildRepositoryCompileFixtureText(baseText: string): string {
       checked_structures: {
         dotaComponents: [
           {
+            kind: "staticPropSet",
+            name: "decorative_rocks",
+            origin: [-1024, 2048, 128],
+            yaw: 30,
+            model: "models/props_debris/rock_debris001.vmdl",
+            collision: "none",
+            castShadows: false,
+            tint: [192, 224, 255],
+            placements: [
+              { name: "west", offset: [-128, 0, 0], yaw: -15 },
+              { name: "east", offset: [128, 0, 0], yaw: 15 },
+            ],
+          },
+          {
             kind: "arch",
             name: "arch",
             origin: [-2048, 1024, 128],
