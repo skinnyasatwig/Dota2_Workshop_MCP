@@ -517,10 +517,19 @@ Last updated: 2026-08-07
     dry run reports current 6/6 passing, desired 6/6 passing, zero VMAP changes, and all six exact distances without
     launching Dota or Hammer. The project CLI prints the same distinction for direct local use.
 
+77. This milestone - added one project-independent offline acceptance command: `test:offline-map`. One bounded local MCP
+    session runs preview-only contract synchronization, full static map validation, and the diagnostic preview; it saves
+    a combined versioned JSON report and PNG under the tested project's `artifacts` directory. Its pure verdict function
+    requires proven zero contract drift, current and desired spatial summaries with no failed/unresolved rules, successful
+    static validation, zero preview-rule failures, an actual PNG, and three successful tool stages. Missing fields fail
+    closed rather than defaulting to zero. Unit tests cover complete success, drift, unresolved rules, stage failure, and
+    absent evidence. The real 3v3 run completed in about five seconds with every criterion true, six actual spatial passes,
+    zero holes, zero repair suggestions, one known off-map-strip warning, and no Dota, Hammer, compile, or VMAP write.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 373 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 375 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 208 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed palette-bound audit: 20 of 20 model CRCs and MDAT snapshots match the current Dota VPK.
 - Installed palette-gallery proof: the four-model `river-wetland` set passed exact CRC checks, decoded to textured GLBs,
