@@ -510,6 +510,13 @@ Last updated: 2026-08-07
     actual nodes produce unresolved failures rather than borrowing desired positions. The real converted 3v3 map passes
     all six actual measurements, has zero validation errors, and retains only its known isolated off-map-strip warning.
 
+76. This milestone - made contract-sync plans explain spatial repairs instead of reporting only the healthy destination.
+    Every sync preview/application now returns current actual measurements and a passed/failed/unresolved summary beside
+    the post-sync desired measurements and summary; asset-preflight and transactional-failure reports preserve the same
+    evidence. The reusable summary is tested against both measured drift and duplicate-node unresolved cases. The 3v3
+    dry run reports current 6/6 passing, desired 6/6 passing, zero VMAP changes, and all six exact distances without
+    launching Dota or Hammer. The project CLI prints the same distinction for direct local use.
+
 ## Current verification record
 
 - TypeScript build passes.

@@ -635,6 +635,8 @@ red means it fails, and a red X identifies a zero-distance crossing. The same wi
 returned as structured data, so automation and humans inspect the identical result. Build and sync first check the
 desired contract; validation and preview deliberately substitute the converted VMAP's actual unique named-entity and
 waypoint coordinates, so on-disk drift cannot keep a stale green measurement. Missing or duplicate VMAP nodes fail closed.
+Contract-sync previews report both sets side by side: current converted-map measurements explain existing failures,
+while post-sync desired measurements show whether the proposed reconciliation restores every declared rule.
 `managedTerrain` is an ordered list of the same idempotent tile-grid
 operations accepted by `map_terrain`: `fill`, `height`, `water`, `tileset`, and `ramp`, using `rect`,
 `circle`, `ring`, `path`, `polygon`, reusable `region`, or `managedPath` shapes in tile coordinates. Contract sync previews exact height-vertex,

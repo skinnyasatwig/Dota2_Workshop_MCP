@@ -29,7 +29,11 @@ import { resolveMapCollisionObstacles } from "../dota/map-collision.js";
 import { reconcileMapVolumes } from "../dota/map-volume.js";
 import { reconcileMapSolids } from "../dota/map-solid.js";
 import { reconcileMapNavSurfaces } from "../dota/map-nav-surface.js";
-import { evaluateSpatialAssertions, evaluateSpatialAssertionsAgainstMap } from "../dota/map-spatial.js";
+import {
+  evaluateSpatialAssertions,
+  evaluateSpatialAssertionsAgainstMap,
+  summarizeSpatialAssertions,
+} from "../dota/map-spatial.js";
 import { inspectProjectMapMaterials, MapMaterialReport } from "../dota/map-material.js";
 import { inspectProjectMapModels, MapModelReport } from "../dota/map-model.js";
 import {
@@ -1597,7 +1601,7 @@ export function registerMapTools(server: McpServer) {
         "terrain shapes are restored while terrain outside those shapes is preserved. The operation is idempotent and " +
         "declared entity-distance/entity-to-path/path-separation assertions must pass before reconciliation. It " +
         "refuses ambiguous duplicate targetnames, missing/unsafe material or model assets, or an unproven explicit " +
-        "managed model-PHYS promise. Preview reports blockers " +
+        "managed model-PHYS promise. Preview distinguishes current converted-map measurements from the healthy post-sync intent and reports blockers " +
         "without writing. Defaults to preview-only; pass apply=true.",
       inputSchema: {
         projectRoot: z.string().optional(),
@@ -1635,6 +1639,12 @@ export function registerMapTools(server: McpServer) {
 
       const current = await vmapToText(dota.dmxconvertExe, p.contentVmap);
       const spatialAssertions = evaluateSpatialAssertions(resolved.contract);
+      const currentSpatialAssertions = evaluateSpatialAssertionsAgainstMap(
+        resolved.contract,
+        parseMapEntities(current),
+      );
+      const spatialAssertionSummary = summarizeSpatialAssertions(spatialAssertions);
+      const currentSpatialAssertionSummary = summarizeSpatialAssertions(currentSpatialAssertions);
       const synchronization = reconcileMapSpecification(current, resolved.contract);
       const result = synchronization.entities;
       if (result.conflicts.length) {
@@ -1673,6 +1683,9 @@ export function registerMapTools(server: McpServer) {
             modelValidation,
             modelPhysicsValidation,
             spatialAssertions,
+            spatialAssertionSummary,
+            currentSpatialAssertions,
+            currentSpatialAssertionSummary,
           },
           `No changes written. Preflight found ` +
             `${materialValidation.missingCount + materialValidation.invalidCount} material blocker(s) and ` +
@@ -1727,6 +1740,10 @@ export function registerMapTools(server: McpServer) {
             backupDirectory: transaction.backupDirectory,
             error: transaction.error,
             rollbackErrors: transaction.rollbackErrors,
+            spatialAssertions,
+            spatialAssertionSummary,
+            currentSpatialAssertions,
+            currentSpatialAssertionSummary,
           },
           `Contract synchronization failed and ${transaction.rolledBack ? "was rolled back safely" : "the rollback needs attention"}.\n` +
             `Backup: ${transaction.backupDirectory}\n${transaction.error ?? "Unknown transaction failure."}`,
@@ -1751,7 +1768,12 @@ export function registerMapTools(server: McpServer) {
       ];
       if (spatialAssertions.length) {
         steps.push(
-          `Spatial assertions: ${spatialAssertions.length} passed; ` +
+          `Current map spatial assertions: ${currentSpatialAssertionSummary.passed}/${currentSpatialAssertionSummary.total} passed, ` +
+            `${currentSpatialAssertionSummary.failed} failed (${currentSpatialAssertionSummary.unresolved} unresolved); ` +
+            currentSpatialAssertions.map((assertion) => `${assertion.name}=${assertion.actualDistance?.toFixed(2) ?? "unresolved"}`).join(", ") + ".",
+        );
+        steps.push(
+          `Post-sync desired spatial assertions: ${spatialAssertionSummary.passed}/${spatialAssertionSummary.total} passed; ` +
             spatialAssertions.map((assertion) => `${assertion.name}=${assertion.actualDistance?.toFixed(2) ?? "unresolved"}`).join(", ") + ".",
         );
       }
@@ -1787,6 +1809,9 @@ export function registerMapTools(server: McpServer) {
           modelValidation,
           modelPhysicsValidation,
           spatialAssertions,
+          spatialAssertionSummary,
+          currentSpatialAssertions,
+          currentSpatialAssertionSummary,
           changed,
           changedEntities,
           changedSolids,

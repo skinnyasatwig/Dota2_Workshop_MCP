@@ -49,6 +49,13 @@ export interface SpatialAssertionResult {
   detail: string;
 }
 
+export interface SpatialAssertionSummary {
+  total: number;
+  passed: number;
+  failed: number;
+  unresolved: number;
+}
+
 export type Point2 = [number, number];
 
 function vector3(value: string | undefined): [number, number, number] | undefined {
@@ -359,4 +366,13 @@ export function assertSpatialAssertions(contract: MapContract, path = "map speci
     `Spatial assertion failure in ${path}: ` +
     failures.map((failure) => `${failure.name} (${failure.detail})`).join("; "),
   );
+}
+
+export function summarizeSpatialAssertions(results: readonly SpatialAssertionResult[]): SpatialAssertionSummary {
+  return {
+    total: results.length,
+    passed: results.filter((result) => result.passed).length,
+    failed: results.filter((result) => !result.passed).length,
+    unresolved: results.filter((result) => result.actualDistance === undefined).length,
+  };
 }

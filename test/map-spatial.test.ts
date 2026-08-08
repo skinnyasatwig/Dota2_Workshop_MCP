@@ -7,6 +7,7 @@ import {
   evaluateSpatialAssertionsAgainstMap,
   minimumPathSeparation,
   minimumPathSeparationWitness,
+  summarizeSpatialAssertions,
 } from "../src/dota/map-spatial.js";
 import type { ParsedMapEntity } from "../src/dota/vmap.js";
 
@@ -85,7 +86,8 @@ test("actual-map spatial evaluation measures serialized VMAP positions and fails
     actualEntity("path_south_1", "-1000 -300 128"),
     actualEntity("path_south_2", "1000 -300 128"),
   ];
-  assert.deepEqual(evaluateSpatialAssertionsAgainstMap(contract, actual).map((result) => ({
+  const drifted = evaluateSpatialAssertionsAgainstMap(contract, actual);
+  assert.deepEqual(drifted.map((result) => ({
     name: result.name,
     passed: result.passed,
     actualDistance: result.actualDistance,
@@ -93,6 +95,12 @@ test("actual-map spatial evaluation measures serialized VMAP positions and fails
     { name: "spacing", passed: false, actualDistance: 600 },
     { name: "tower_clearance", passed: false, actualDistance: 300 },
   ]);
+  assert.deepEqual(summarizeSpatialAssertions(drifted), {
+    total: 2,
+    passed: 0,
+    failed: 2,
+    unresolved: 0,
+  });
 
   const duplicate = evaluateSpatialAssertionsAgainstMap(contract, [
     ...actual,
@@ -100,6 +108,12 @@ test("actual-map spatial evaluation measures serialized VMAP positions and fails
   ]);
   assert.equal(duplicate[0].actualDistance, undefined);
   assert.match(duplicate[0].detail, /Missing managed path reference.*path_north/);
+  assert.deepEqual(summarizeSpatialAssertions(duplicate), {
+    total: 2,
+    passed: 0,
+    failed: 2,
+    unresolved: 2,
+  });
 });
 
 test("violated spatial assertions fail before map reconciliation", () => {
