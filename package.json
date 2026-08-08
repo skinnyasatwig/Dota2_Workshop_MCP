@@ -20,6 +20,7 @@
     "dev": "tsx src/index.ts",
     "test": "node --import tsx --test test/*.test.ts",
     "test:compiler-fixture": "node scripts/test-compiler-fixture.mjs",
+    "test:palette-bounds": "node scripts/inspect-static-prop-palette-bounds.mjs",
     "test:engine-nav-fixture": "node --import tsx scripts/test-engine-nav-fixture.mjs",
     "test:compiler-bridge-nav-fixture": "node --import tsx scripts/test-engine-nav-fixture.mjs --bridge --compile-only",
     "test:engine-bridge-nav-fixture": "node --import tsx scripts/test-engine-nav-fixture.mjs --bridge",

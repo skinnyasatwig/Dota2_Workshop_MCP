@@ -34,6 +34,8 @@ test("palette installation reports exact compiled-resource coverage", () => {
   assert.equal(complete.modelCount, 20);
   assert.equal(complete.installedCount, 20);
   assert.deepEqual(complete.missing, []);
+  assert.equal(complete.visualBoundsVerified, false);
+  assert.equal(complete.currentVisualBoundsCount, null);
 
   compiled.delete("MODELS/PROPS_NATURE/LILY_PADS001.VMDL_C");
   const incomplete = inspectStaticPropPaletteInstallation(compiled);
@@ -44,4 +46,26 @@ test("palette installation reports exact compiled-resource coverage", () => {
     incomplete.palettes.find((palette) => palette.id === "river-wetland")?.complete,
     false,
   );
+});
+
+test("palette installation proves visual-bound freshness with VPK CRCs", () => {
+  const compiled = new Map(
+    Object.values(STATIC_PROP_PALETTES)
+      .flatMap((palette) => Object.values(palette.variants))
+      .map((variant) => [`${variant.model}_c`.toUpperCase(), { crc: variant.compiledCrc }]),
+  );
+  const complete = inspectStaticPropPaletteInstallation(compiled);
+  assert.equal(complete.visualBoundsVerified, true);
+  assert.equal(complete.currentVisualBoundsCount, 20);
+  assert.deepEqual(complete.staleVisualBounds, []);
+
+  compiled.set("MODELS/PROPS_NATURE/LILY_PADS001.VMDL_C", { crc: 123 });
+  const stale = inspectStaticPropPaletteInstallation(compiled);
+  assert.equal(stale.complete, true);
+  assert.equal(stale.currentVisualBoundsCount, 19);
+  assert.deepEqual(stale.staleVisualBounds, [{
+    model: "models/props_nature/lily_pads001.vmdl",
+    expectedCrc: 1867346537,
+    installedCrc: 123,
+  }]);
 });

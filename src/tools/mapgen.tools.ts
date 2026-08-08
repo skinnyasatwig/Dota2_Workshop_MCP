@@ -25,6 +25,11 @@ import { resolveDataPath } from "../util/datapath.js";
 import { runMapTransaction } from "../dota/map-transaction.js";
 import { renderMapPreview } from "../dota/map-preview.js";
 import { resolveMapCollisionObstacles } from "../dota/map-collision.js";
+import {
+  curatedVisualPropCandidateCount,
+  emptyMapVisualPropReport,
+  resolveProjectCuratedVisualPropFootprints,
+} from "../dota/map-visual-props.js";
 import { inspectProjectMapMaterials } from "../dota/map-material.js";
 import { inspectProjectMapModels } from "../dota/map-model.js";
 import { inspectProjectManagedModelPhysics } from "../dota/map-model-physics.js";
@@ -45,7 +50,7 @@ import {
   STATIC_PROP_PALETTES,
   validateStaticPropPaletteLibrary,
 } from "../dota/static-prop-palettes.js";
-import { Vpk } from "../dota/vpk.js";
+import { openDotaVpk } from "../dota/vpk.js";
 import {
   buildRecipeRefreshReport,
   RECIPE_REFRESH_EVIDENCE_IDS,
@@ -477,9 +482,7 @@ export function registerMapGenTools(server: McpServer) {
       const recipeVerification = dota ? await verifyInstalledRecipeVersion(dota) : null;
       const showDressing = !category || category === "dressing";
       const paletteInstallation = showDressing && verifyInstalled && dota
-        ? inspectStaticPropPaletteInstallation(
-            new Set((await Vpk.open(dota.pak01DirVpk)).entries.keys()),
-          )
+        ? inspectStaticPropPaletteInstallation((await openDotaVpk(dota.pak01DirVpk)).entries)
         : null;
       const prefabs = await Promise.all(
         VALVE_PREFAB_RECIPES
@@ -516,6 +519,7 @@ export function registerMapGenTools(server: McpServer) {
           `${!category || category === "structure" ? Object.keys(WORLD_STRUCTURE_RECIPES).length : 0} checked structure recipes. ` +
           `${showDressing ? Object.keys(STATIC_PROP_PALETTES).length : 0} static-prop palettes` +
           `${paletteInstallation ? ` (${paletteInstallation.installedCount}/${paletteInstallation.modelCount} models installed). ` : ". "}` +
+          `${paletteInstallation?.visualBoundsVerified ? `${paletteInstallation.currentVisualBoundsCount}/${paletteInstallation.modelCount} visual bounds current. ` : ""}` +
           `Baseline Dota build ${RECIPE_VERIFICATION_BASELINE.appBuildId}` +
           `${recipeVerification ? `; installed recipe status: ${recipeVerification.status}` : ""}.`,
       );
@@ -1046,7 +1050,8 @@ export function registerMapGenTools(server: McpServer) {
       description:
         "Render a diagnostic top-down image without launching Dota: terrain contours, cliffs, ramps, water, currents, " +
         "entities, waypoint paths, tower ranges, camps, objectives, minimap bounds, checked trigger/blocker volumes, " +
-        "cached model PHYS bounds, explicit Valve tree/obstruction proximity, unresolved solid props, terrain holes, and unreachable regions.",
+        "cached model PHYS bounds, CRC-current curated visual-prop bounds, explicit Valve tree/obstruction proximity, " +
+        "unresolved solid props, terrain holes, and unreachable regions.",
       inputSchema: {
         projectRoot: z.string().optional(),
         map: z.string(),
@@ -1065,6 +1070,9 @@ export function registerMapGenTools(server: McpServer) {
         showVolumes: z.boolean().optional(),
         showVisionBlockers: z.boolean().optional(),
         showCollisionObstacles: z.boolean().optional(),
+        showVisualProps: z.boolean().optional().describe(
+          "Show CRC-current render-only bounds for curated palette models (default true; never affects pathing).",
+        ),
         resolveModelCollision: z.boolean().optional().describe(
           "Resolve and cache real model PHYS bounds through VRF (default true; no Dota launch).",
         ),
@@ -1088,6 +1096,7 @@ export function registerMapGenTools(server: McpServer) {
       showVolumes,
       showVisionBlockers,
       showCollisionObstacles,
+      showVisualProps,
       resolveModelCollision,
     }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
@@ -1096,6 +1105,14 @@ export function registerMapGenTools(server: McpServer) {
       if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}.`);
       const mapText = await vmapToText(dota.dmxconvertExe, p.contentVmap);
       const parsedEntities = parseMapEntities(mapText);
+      let visualPropReport = emptyMapVisualPropReport();
+      if (showVisualProps !== false && curatedVisualPropCandidateCount(parsedEntities) > 0) {
+        visualPropReport = await resolveProjectCuratedVisualPropFootprints(
+          parsedEntities,
+          (await openDotaVpk(dota.pak01DirVpk)).entries,
+          project.gameDir,
+        );
+      }
       const collisionObstacles = resolveModelCollision === false
         ? undefined
         : await resolveMapCollisionObstacles(parsedEntities, dota.pak01DirVpk, undefined, {
@@ -1118,7 +1135,9 @@ export function registerMapGenTools(server: McpServer) {
         showVolumes,
         showVisionBlockers,
         showCollisionObstacles,
+        showVisualProps,
         collisionObstacles,
+        visualPropFootprints: visualPropReport.footprints,
       });
       const reachability = {
         walkableCellCount: rendered.reachability.walkableCellCount,
@@ -1141,14 +1160,18 @@ export function registerMapGenTools(server: McpServer) {
       const caption =
         `Diagnostic preview of "${map}" (${rendered.stats.width}x${rendered.stats.height}). ` +
         `${rendered.stats.cliffCells} cliff, ${rendered.stats.rampCells} ramp, ` +
-        `${rendered.stats.unreachableCells} unreachable, ${rendered.stats.holeCells} hole cells. ` +
+        `${rendered.stats.unreachableCells} unreachable, ${rendered.stats.holeCells} hole cells, ` +
+        `${visualPropReport.footprintCount} CRC-current visual-prop footprint(s)` +
+        `${visualPropReport.staleModelCount ? `; ${visualPropReport.staleModelCount} stale model snapshot(s) omitted` : ""}. ` +
+        `${visualPropReport.shadowedModelCount ? `${visualPropReport.shadowedModelCount} addon-shadowed model(s) omitted. ` : ""}` +
+        `${visualPropReport.shadowingWarnings.length ? `${visualPropReport.shadowingWarnings.length} addon-package warning(s). ` : ""}` +
         `Legend: ${Object.entries(rendered.stats.legend).map(([name, value]) => `${name}=${value}`).join("; ")}.`;
       return {
         content: [
           { type: "text", text: caption },
           { type: "image", data: rendered.png.toString("base64"), mimeType: "image/png" },
         ],
-        structuredContent: { map, stats: rendered.stats, reachability },
+        structuredContent: { map, stats: rendered.stats, reachability, visualProps: visualPropReport },
       };
     }),
   );

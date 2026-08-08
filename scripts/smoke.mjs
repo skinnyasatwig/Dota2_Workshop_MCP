@@ -209,7 +209,7 @@ async function main() {
   check("map_recipe_catalog reports its verified Dota baseline", /Baseline Dota build/.test(textOf(mapRecipes)));
   check(
     "map_recipe_catalog verifies curated static-prop palettes",
-    /5 static-prop palettes \(20\/20 models installed\)/.test(textOf(mapRecipes)),
+    /5 static-prop palettes \(20\/20 models installed\).*20\/20 visual bounds current/.test(textOf(mapRecipes)),
   );
   const mapComparison = await client.callTool({
     name: "map_compare_specifications",

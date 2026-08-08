@@ -9,6 +9,7 @@ import { inspectMapModels } from "../src/dota/map-model.js";
 import { parseMapSolids } from "../src/dota/map-solid.js";
 import { compileVmap, parseMapEntities, textToVmap, vmapToText } from "../src/dota/vmap.js";
 import { Vpk } from "../src/dota/vpk.js";
+import { resolveCuratedVisualPropFootprints } from "../src/dota/map-visual-props.js";
 
 const dotaRoot = process.env.DOTA2_PATH || "C:\\Program Files (x86)\\Steam\\steamapps\\common\\dota 2 beta";
 const converter = join(dotaRoot, "game", "bin", "win64", "dmxconvert.exe");
@@ -142,6 +143,11 @@ test(
       assert.equal(models.missingCount, 0);
       assert.ok(models.models.some((model) =>
         model.model === "models/props_debris/rock_debris001.vmdl" && model.state === "resolved"));
+      const visualProps = resolveCuratedVisualPropFootprints(parseMapEntities(roundTripped), dotaPak.entries);
+      assert.equal(visualProps.matchedEntityCount, 22);
+      assert.equal(visualProps.footprintCount, 22);
+      assert.equal(visualProps.staleModelCount, 0);
+      assert.equal(visualProps.malformedTransformCount, 0);
       const compiled = await compileVmap(compiler, dotaGame, contentMap, gameVpk, true);
       assert.equal(compiled.timedOut, false, compiled.stderr || compiled.stdout);
       assert.equal(compiled.code, 0, compiled.stderr || compiled.stdout);

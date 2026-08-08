@@ -15,6 +15,7 @@ import {
   ParsedMapNavSurface,
 } from "./map-nav-surface.js";
 import { MapCollisionObstacle } from "./map-collision.js";
+import { MapVisualPropFootprint } from "./map-visual-props.js";
 
 export interface MapPreviewOptions {
   scale?: number;
@@ -33,8 +34,11 @@ export interface MapPreviewOptions {
   showNavSurfaces?: boolean;
   showVisionBlockers?: boolean;
   showCollisionObstacles?: boolean;
+  showVisualProps?: boolean;
   /** Pre-resolved physical/class collision inventory supplied by the async tools. */
   collisionObstacles?: readonly MapCollisionObstacle[];
+  /** CRC-current curated render bounds. Visual context only; never passed to reachability. */
+  visualPropFootprints?: readonly MapVisualPropFootprint[];
 }
 
 export interface MapPreviewStats {
@@ -65,6 +69,7 @@ export interface MapPreviewStats {
     blockingVolumes: number;
     visionBlockers: number;
     collisionObstacles: number;
+    visualProps: number;
   };
   legend: Record<string, string>;
 }
@@ -309,6 +314,18 @@ function drawPreview(
     }
   }
 
+  if (options.showVisualProps !== false) {
+    for (const visual of options.visualPropFootprints ?? []) {
+      const pixels = visual.points.map(([worldX, worldY]) =>
+        worldPixel([worldX, worldY, visual.minZ]));
+      for (let index = 0; index < pixels.length; index++) {
+        const from = pixels[index];
+        const to = pixels[(index + 1) % pixels.length];
+        line(from[0], from[1], to[0], to[1], [255, 128, 238], 0.8, 1);
+      }
+    }
+  }
+
   if (options.showCollisionObstacles !== false) {
     for (const obstacle of reachability.collisionObstacles) {
       const [x, y] = worldPixel(obstacle.origin);
@@ -480,6 +497,7 @@ function drawPreview(
       blockingVolumes: volumes.filter((volume) => volume.blocking).length + solids.length,
       visionBlockers: visionBlockerSegments,
       collisionObstacles: reachability.collisionObstacleCount,
+      visualProps: options.showVisualProps === false ? 0 : options.visualPropFootprints?.length ?? 0,
     },
     legend: {
       water: "blue",
@@ -497,6 +515,7 @@ function drawPreview(
       navSurfaces: "bright green Valve navigation-walkable deck outlines; pale arrows point uphill",
       visionBlockers: "purple linked lines",
       collisionObstacles: "bright cyan exact PHYS hulls; medium cyan mesh envelopes; green-cyan conservative curved primitives; muted cyan PHYS bounds; dark green/orange class approximations; white X means model bounds unknown",
+      visualProps: "pink outlines are CRC-current curated render bounds for placement context only; they never block pathing",
     },
   };
   return { png: encodeRgbaPng(width, height, rgba), stats, reachability, navSurfaceClearance };

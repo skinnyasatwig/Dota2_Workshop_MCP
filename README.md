@@ -244,9 +244,11 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
   entities, complete waypoint paths, tower ranges, camps, objectives, minimap bounds, checked world solids,
   Valve navigation-walkable surfaces, conservative under-deck clearance, and trigger/blocker volumes, missing terrain
   recipes, color-coded outlines recovered from real model `PHYS` blocks (including conservative curved
-  sphere/capsule outlines), explicit Valve tree/obstruction broad phases,
+  sphere/capsule outlines), pink render-only footprints for curated palette models whose installed VPK CRC still
+  matches the measured MDAT bounds, explicit Valve tree/obstruction broad phases,
   collision-enabled props whose physical bounds remain unknown,
-  and regions unreachable from player/creep spawns. Every overlay family can be hidden.
+  and regions unreachable from player/creep spawns. Render-only footprints never feed collision or reachability.
+  Every overlay family can be hidden.
 - **`map_reachability`** — analyze the whole tile grid offline and report missing terrain recipes,
   cliff-separated regions, trapped spawns, blocked entrances, inaccessible objectives or camps, and
   waypoint segments that cross blocked cells. It recognizes generated ramps and checked player-blocking
@@ -282,7 +284,8 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
 - **`map_recipe_catalog`** — inspect the named terrain cores, Radiant/Dire cliff recipes, ramp-safe
   fallbacks, checked solid-volume recipes, deterministic visual-dressing palettes, and official Valve prefab references
   used by the generator. `category:"dressing"` returns the curated palette library. `verifyInstalled:true` checks the
-  prefab references and every palette model against the current Workshop Tools install without opening Hammer. It also compares Steam/Dota/tools
+  prefab references, every palette model, and each measured visual-bound CRC against the current Workshop Tools install
+  without opening Hammer. It also compares Steam/Dota/tools
   versions and hashes of the official tilesets, PvP prefab, FGD, and compiler against the last proven baseline. A newer
   game build with unchanged recipe sources is reported as compatible; changed source/tools files request re-verification.
   `dota_doctor` includes the same concise compatibility status.
@@ -346,8 +349,12 @@ use official `prop_static` properties. Whole-map model preflight verifies every 
 Every placement explicitly selects a variant, so rebuilds never reshuffle scenery. The initial library contains five
 four-model palettes: `radiant-underbrush`, `river-wetland`, `rock-scatter`, `natural-cliffs`, and `dire-debris`.
 Palette models are deliberately non-solid visual dressing: gameplay blocking still comes from terrain, checked solids,
-or dedicated tree/blocker entities. Catalog installation checks and the repository compiler fixture prove availability
-and Source 2 compatibility, but a human must still judge appearance and final placement.
+or dedicated tree/blocker entities. `map_preview` projects the installed, CRC-matched Valve MDAT render bounds through
+each prop's pitch/yaw/roll and uniform/non-uniform scale, giving accurate top-down placement context without claiming
+collision. A loose or packed addon override at the same model path suppresses the base-game outline instead of borrowing
+the wrong bounds. `npm run test:palette-bounds` re-extracts all 20 installed bounds with ValveResourceFormat and fails if a
+snapshot is stale. Catalog checks and the repository compiler fixture prove availability and Source 2 compatibility,
+but a human must still judge appearance and final placement.
 The `arch` component is a checked rectangular opening assembled from two solid posts and one elevated lintel. Its
 origin is the center of the arch at ground level; width, depth, total height, opening width, opening height, yaw, and
 one preflighted visible material are explicit. Offline reachability uses a conservative 256-unit standing corridor,

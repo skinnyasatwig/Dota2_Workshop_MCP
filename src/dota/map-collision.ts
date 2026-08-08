@@ -343,7 +343,8 @@ function convexHull2d(points: readonly [number, number][]): [number, number][] {
   return [...lower.slice(0, -1), ...upper.slice(0, -1)];
 }
 
-function transformedFootprints(
+/** Project checked local model bounds through a VMAP entity transform into world-space footprints. */
+export function transformModelBoundsFootprints(
   entity: ParsedMapEntity,
   bounds: readonly ModelPhysicsBounds[],
 ): MapCollisionFootprint[] | undefined {
@@ -463,7 +464,7 @@ export async function resolveMapCollisionObstacles(
         obstacle.reason = inspection.detail;
         continue;
       }
-      const footprints = transformedFootprints(entity, inspection.bounds);
+      const footprints = transformModelBoundsFootprints(entity, inspection.bounds);
       if (!footprints?.length) {
         obstacle.reason = "Physical bounds exist, but a malformed or degenerate transform cannot be projected safely.";
         continue;

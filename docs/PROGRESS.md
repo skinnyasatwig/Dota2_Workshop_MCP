@@ -347,11 +347,24 @@ Last updated: 2026-08-07
     `prop_static` entities. The 3v3 acceptance contract remains a zero-change sync with four passable routes and zero
     structural findings; no dressing was silently added to the map.
 
+60. This milestone - made curated scenery spatially inspectable without confusing art with collision. A bounded parser
+    now extracts only Valve MDAT `m_sceneObjects` render bounds, stopping before constraints, hitboxes, or PHYS data.
+    Each of the 20 palette snapshots carries the installed compiled-resource CRC; `map_recipe_catalog` reports bound
+    freshness, and `npm run test:palette-bounds` re-extracts every model through ValveResourceFormat and fails closed on
+    any CRC or bound drift. `map_preview` projects only current snapshots through the entity's full pitch/yaw/roll and
+    uniform or non-uniform scale, draws them as separate pink visual-only outlines, and returns a structured visual-prop
+    report. Loose or packed addon overrides suppress the corresponding base snapshot. These outlines never enter
+    collision or reachability. The real converter/compiler fixture proved 22
+    transformed instances (all 20 variants plus two matching standalone rocks) before compiling its VPK. The 3v3
+    preview regenerated with zero visual footprints because its current contract contains no curated palette models;
+    no map dressing or gameplay change was invented.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 326 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 332 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 204 passed, 0 failed, and 1 network-dependent Workshop search skipped.
+- Installed palette-bound audit: 20 of 20 model CRCs and MDAT snapshots match the current Dota VPK.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
 - The guided refresh runner completed all four safe checks in 33 seconds without opening Dota or Hammer. Because the

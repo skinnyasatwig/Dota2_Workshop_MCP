@@ -109,7 +109,21 @@ test("diagnostic preview renders gameplay and navigation overlays", () => {
     entity("minimap_boundary_northeast", "dota_minimap_boundary", "1536 1024 128"),
     entity("preview_tree", "ent_dota_tree", "128 896 128"),
     entity("preview_statue", "prop_static", "1408 128 128", { solid: "6" }),
-  ], { scale: 4 }, volumes, solids, navSurfaces);
+  ], {
+    scale: 4,
+    visualPropFootprints: [{
+      id: "preview_bush",
+      sourceIndex: 13,
+      targetname: "preview_bush",
+      model: "models/props_nature/bush_00.vmdl",
+      palette: "radiant-underbrush",
+      variant: "bush-round",
+      points: [[1152, 128], [1280, 128], [1280, 256], [1152, 256]],
+      minZ: 128,
+      maxZ: 192,
+      source: "crc-matched-render-bounds",
+    }],
+  }, volumes, solids, navSurfaces);
 
   const decoded = decodePng(rendered.png);
   assert.equal(decoded.width, 24);
@@ -131,6 +145,7 @@ test("diagnostic preview renders gameplay and navigation overlays", () => {
   assert.equal(rendered.stats.overlays.blockingVolumes, 2);
   assert.equal(rendered.stats.overlays.visionBlockers, 1);
   assert.equal(rendered.stats.overlays.collisionObstacles, 2);
+  assert.equal(rendered.stats.overlays.visualProps, 1);
   assert.equal(rendered.reachability.findings.length, 0);
   const colors = new Set<string>();
   for (let index = 0; index < decoded.rgba.length; index += 4) {
