@@ -212,6 +212,12 @@ Last updated: 2026-08-07
     preserve class, origin, angles, model, stock unit name, team data, and other keyvalues. Whole-contract counts stayed
     at 84 entities, 98 terrain operations, 10 volumes, and four paths; real sync again reported zero changes across 148
     desired entities, and compiled-required validation remained clean except for the known isolated off-map strip.
+46. This acceptance follow-up - extracted the real 3v3 jungle marker layout into reusable `top_camps` and
+    `bottom_camps` components nested under the same side assembly. Nine Radiant markers now generate all 18 side camps
+    through the existing Radiant/Dire placements. A targetname-keyed comparison proved exact preservation of every
+    class, coordinate, angle, neutral size, and bog subtype; importantly, the outer `teamSwap` left those neutral values
+    untouched. Contract sync remained zero-change, compiled-required validation stayed at zero errors, and offline
+    reachability retained 3,235/3,619 reachable cells, zero holes, and only the known 384-cell isolated strip.
 
 ## Current verification record
 
