@@ -20,6 +20,11 @@ import { ManagedMapNavSurface } from "./map-nav-surface.js";
 import { ManagedTerrainOperation } from "./map-terrain.js";
 import { ManagedMapVolume, regularPolygonFootprint } from "./map-volume.js";
 import { partitionPolygonWithHoles } from "./polygon-holes.js";
+import {
+  STATIC_PROP_PALETTE_IDS,
+  StaticPropScale,
+  staticPropPaletteVariant,
+} from "./static-prop-palettes.js";
 
 const point2 = z.tuple([z.number().finite(), z.number().finite()]);
 const point3 = z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]);
@@ -235,6 +240,48 @@ const staticPropSetComponentSchema = z.object({
       });
     }
     seen.add(key);
+  });
+});
+
+const staticPropPalettePlacementSchema = staticPropPlacementSchema.extend({
+  /** Explicit curated variant id; selection is deterministic and never random. */
+  variant: nameSchema,
+}).strict();
+
+const staticPropPaletteComponentSchema = z.object({
+  kind: z.literal("staticPropPalette"),
+  name: nameSchema,
+  origin: point3,
+  yaw: yawSchema,
+  palette: z.enum(STATIC_PROP_PALETTE_IDS),
+  /** Optional assembly-wide override; otherwise each curated variant uses its checked default. */
+  scale: entityScaleSchema.optional(),
+  castShadows: z.boolean().optional(),
+  tint: z.tuple([
+    z.number().int().min(0).max(255),
+    z.number().int().min(0).max(255),
+    z.number().int().min(0).max(255),
+  ]).optional(),
+  placements: z.array(staticPropPalettePlacementSchema).min(1).max(256),
+}).strict().superRefine((set, context) => {
+  const seen = new Set<string>();
+  set.placements.forEach((placement, index) => {
+    const key = placement.name.toLowerCase();
+    if (seen.has(key)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["placements", index, "name"],
+        message: "must be unique within the static prop palette (case-insensitive)",
+      });
+    }
+    seen.add(key);
+    if (!staticPropPaletteVariant(set.palette, placement.variant)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["placements", index, "variant"],
+        message: `is not a variant in palette "${set.palette}"`,
+      });
+    }
   });
 });
 
@@ -732,6 +779,7 @@ export const dotaComponentInputSchema = z.union([
   fowBlockerComponentSchema,
   wallComponentSchema,
   staticPropSetComponentSchema,
+  staticPropPaletteComponentSchema,
   archComponentSchema,
   profileArchComponentSchema,
   bridgeComponentSchema,
@@ -773,6 +821,11 @@ export const WORLD_STRUCTURE_RECIPES = {
     parts: ["placement_*"],
     purpose: "Repeatable scaled static scenery with a checked model path and fail-closed explicit collision intent.",
     source: "Valve prop_static FGD plus MCP model-asset and decoded-PHYS preflight",
+  },
+  staticPropPalette: {
+    parts: ["placement_*"],
+    purpose: "Deterministic visual-only dressing selected from installed and compiler-proven Dota model palettes.",
+    source: "Curated Valve pak01 model inventory plus repository model preflight and compiler fixture",
   },
   arch: {
     parts: ["left_post", "right_post", "lintel"],
@@ -1471,20 +1524,23 @@ function addPoint(a: Point3, b: Point3): Point3 {
   return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 }
 
+function scaleString(value: StaticPropScale | undefined): string {
+  const vector: readonly number[] = typeof value === "number"
+    ? [value, value, value]
+    : value ?? [1, 1, 1];
+  return vector.map(formatted).join(" ");
+}
+
 function expandStaticPropSet(
   component: z.infer<typeof staticPropSetComponentSchema>,
 ): ManagedMapEntity[] {
   const yaw = component.yaw ?? 0;
-  const scales = (value: number | [number, number, number] | undefined): string => {
-    const vector = Array.isArray(value) ? value : [value ?? 1, value ?? 1, value ?? 1];
-    return vector.map(formatted).join(" ");
-  };
   return component.placements.map((placement) => ({
     targetname: `${component.name}_${placement.name}`,
     classname: "prop_static",
     origin: originString(addPoint(component.origin, rotateOffset(placement.offset, yaw))),
     angles: angleString(yaw + (placement.yaw ?? 0)),
-    scales: scales(placement.scale ?? component.scale),
+    scales: scaleString(placement.scale ?? component.scale),
     ...(component.collision === "vphysics" ? { modelPhysics: "required" as const } : {}),
     properties: {
       model: component.model,
@@ -1495,6 +1551,30 @@ function expandStaticPropSet(
       ...(component.tint ? { rendercolor: component.tint.join(" ") } : {}),
     },
   }));
+}
+
+function expandStaticPropPalette(
+  component: z.infer<typeof staticPropPaletteComponentSchema>,
+): ManagedMapEntity[] {
+  const yaw = component.yaw ?? 0;
+  return component.placements.map((placement) => {
+    const variant = staticPropPaletteVariant(component.palette, placement.variant)!;
+    return {
+      targetname: `${component.name}_${placement.name}`,
+      classname: "prop_static",
+      origin: originString(addPoint(component.origin, rotateOffset(placement.offset, yaw))),
+      angles: angleString(yaw + (placement.yaw ?? 0)),
+      scales: scaleString(placement.scale ?? component.scale ?? variant.defaultScale),
+      properties: {
+        model: variant.model,
+        solid: "0",
+        ...(component.castShadows === undefined
+          ? {}
+          : { disableshadows: component.castShadows ? "0" : "1" }),
+        ...(component.tint ? { rendercolor: component.tint.join(" ") } : {}),
+      },
+    };
+  });
 }
 
 function expandBase(component: z.infer<typeof baseComponentSchema>): ManagedMapEntity[] {
@@ -1611,6 +1691,9 @@ export function expandDotaComponents(components: DotaComponentInput[]): Expanded
         break;
       case "staticPropSet":
         managedEntities.push(...expandStaticPropSet(component));
+        break;
+      case "staticPropPalette":
+        managedEntities.push(...expandStaticPropPalette(component));
         break;
       case "arch":
         managedSolids.push(...archSolids(component));

@@ -133,6 +133,20 @@
       ]
     },
     {
+      "kind": "staticPropPalette",
+      "name": "south_bog_plants",
+      "origin": [-2048, -3072, 96],
+      "yaw": -10,
+      "palette": "river-wetland",
+      "scale": 1.1,
+      "castShadows": false,
+      "placements": [
+        { "name": "west_reeds", "variant": "cattails-a", "offset": [-256, 0, 0], "yaw": -20 },
+        { "name": "center_reeds", "variant": "cattails-c", "offset": [0, 96, 0] },
+        { "name": "east_lilies", "variant": "lily-pads", "offset": [256, -32, 0], "scale": [1.25, 0.9, 1] }
+      ]
+    },
+    {
       "kind": "arch",
       "name": "radiant_north_arch",
       "origin": [-4352, 2304, 128],

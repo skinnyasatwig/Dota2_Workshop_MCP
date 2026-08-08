@@ -294,6 +294,67 @@ test("static prop sets rotate repeated scenery and require explicit collision in
   );
 });
 
+test("static prop palettes expand explicit visual-only variants deterministically", () => {
+  const [component] = componentList.parse([{
+    kind: "staticPropPalette",
+    name: "river_dressing",
+    origin: [1000, 2000, 128],
+    yaw: 90,
+    palette: "river-wetland",
+    scale: 1.25,
+    castShadows: false,
+    placements: [
+      { name: "north_reeds", variant: "cattails-a", offset: [100, 0, 0], yaw: 15 },
+      { name: "south_lilies", variant: "lily-pads", offset: [-200, 0, 16], scale: [0.75, 1, 1.5] },
+    ],
+  }]);
+  const entities = expandDotaComponents([component]).managedEntities;
+  assert.deepEqual(entities.map((entity) => ({
+    targetname: entity.targetname,
+    origin: entity.origin,
+    angles: entity.angles,
+    scales: entity.scales,
+    modelPhysics: entity.modelPhysics,
+    model: entity.properties?.model,
+    solid: entity.properties?.solid,
+  })), [
+    {
+      targetname: "river_dressing_north_reeds",
+      origin: "1000 2100 128",
+      angles: "0 105 0",
+      scales: "1.25 1.25 1.25",
+      modelPhysics: undefined,
+      model: "models/props_nature/cattails001.vmdl",
+      solid: "0",
+    },
+    {
+      targetname: "river_dressing_south_lilies",
+      origin: "1000 1800 144",
+      angles: "0 90 0",
+      scales: "0.75 1 1.5",
+      modelPhysics: undefined,
+      model: "models/props_nature/lily_pads001.vmdl",
+      solid: "0",
+    },
+  ]);
+
+  assert.throws(() => componentList.parse([{
+    kind: "staticPropPalette",
+    name: "bad_variant",
+    origin: [0, 0, 0],
+    palette: "river-wetland",
+    placements: [{ name: "one", variant: "unknown", offset: [0, 0, 0] }],
+  }]), /not a variant in palette/);
+  assert.throws(() => componentList.parse([{
+    kind: "staticPropPalette",
+    name: "implicit_collision",
+    origin: [0, 0, 0],
+    palette: "rock-scatter",
+    collision: "vphysics",
+    placements: [{ name: "one", variant: "debris-a", offset: [0, 0, 0] }],
+  }]), /unrecognized key/i);
+});
+
 test("checked arches expand into two posts and one elevated lintel", () => {
   const [arch] = componentList.parse([{
     kind: "arch",

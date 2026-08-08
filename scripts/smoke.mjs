@@ -207,6 +207,10 @@ async function main() {
   check("tools_catalog official lists VConsole/Hammer", /VConsole|Hammer/.test(textOf(cat)));
   const mapRecipes = await client.callTool({ name: "map_recipe_catalog", arguments: { verifyInstalled: true } });
   check("map_recipe_catalog reports its verified Dota baseline", /Baseline Dota build/.test(textOf(mapRecipes)));
+  check(
+    "map_recipe_catalog verifies curated static-prop palettes",
+    /5 static-prop palettes \(20\/20 models installed\)/.test(textOf(mapRecipes)),
+  );
   const mapComparison = await client.callTool({
     name: "map_compare_specifications",
     arguments: {

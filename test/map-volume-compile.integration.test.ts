@@ -85,6 +85,15 @@ test(
         decorativeRocks.find((entity) => entity.targetname === "fixture_decorative_rocks_east")?.scales,
         "0.75 1 1.5",
       );
+      const paletteProps = parseMapEntities(roundTripped)
+        .filter((entity) => entity.targetname?.startsWith("fixture_palette_"));
+      assert.equal(paletteProps.length, 20);
+      assert.ok(paletteProps.every((entity) =>
+        entity.classname === "prop_static" && entity.properties.solid === "0"));
+      assert.ok(paletteProps.some((entity) =>
+        entity.properties.model === "models/props_nature/lily_pads001.vmdl"));
+      assert.ok(paletteProps.some((entity) =>
+        entity.properties.model === "models/props_nature/cliff_wall002.vmdl"));
       assert.match(roundTripped, /MCP Nav Surface: fixture_bridge_walkable/);
       assert.match(roundTripped, /MCP Nav Surface: fixture_irregular_platform_segment_01_walkable/);
       assert.match(roundTripped, /MCP Nav Surface: fixture_multi_hole_platform_triangle_001_walkable/);

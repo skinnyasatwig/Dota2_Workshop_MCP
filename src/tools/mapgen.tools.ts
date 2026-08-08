@@ -41,6 +41,12 @@ import {
   verifyInstalledRecipeVersion,
 } from "../dota/recipe-version.js";
 import {
+  inspectStaticPropPaletteInstallation,
+  STATIC_PROP_PALETTES,
+  validateStaticPropPaletteLibrary,
+} from "../dota/static-prop-palettes.js";
+import { Vpk } from "../dota/vpk.js";
+import {
   buildRecipeRefreshReport,
   RECIPE_REFRESH_EVIDENCE_IDS,
 } from "../dota/recipe-refresh.js";
@@ -456,19 +462,25 @@ export function registerMapGenTools(server: McpServer) {
       title: "Known-good Dota map recipes",
       description:
         "List the MCP's validated Valve-derived terrain core, cliff decoration, ramp-safe fallback, and official " +
-        "prefab references plus checked solid-volume recipes. Optionally verify that referenced Valve prefabs are " +
-        "present in the installed Workshop content.",
+        "prefab references plus checked solid-volume recipes and deterministic visual-dressing palettes. Optionally " +
+        "verify that referenced Valve prefabs and curated models are present in the installed game.",
       inputSchema: {
         category: z
-          .enum(["base", "ancient", "tower", "fountain", "shop", "camp", "boss", "volume", "structure"])
+          .enum(["base", "ancient", "tower", "fountain", "shop", "camp", "boss", "volume", "structure", "dressing"])
           .optional(),
         verifyInstalled: z.boolean().optional().describe("Check prefab paths under the installed Dota content tree."),
       },
     },
     guard(async ({ category, verifyInstalled }): Promise<ToolResult> => {
-      const errors = validateTerrainRecipeLibrary();
+      const errors = [...validateTerrainRecipeLibrary(), ...validateStaticPropPaletteLibrary()];
       const dota = verifyInstalled ? await resolveDotaPaths() : undefined;
       const recipeVerification = dota ? await verifyInstalledRecipeVersion(dota) : null;
+      const showDressing = !category || category === "dressing";
+      const paletteInstallation = showDressing && verifyInstalled && dota
+        ? inspectStaticPropPaletteInstallation(
+            new Set((await Vpk.open(dota.pak01DirVpk)).entries.keys()),
+          )
+        : null;
       const prefabs = await Promise.all(
         VALVE_PREFAB_RECIPES
           .filter((recipe) => !category || (category !== "volume" && recipe.category === category))
@@ -490,6 +502,8 @@ export function registerMapGenTools(server: McpServer) {
           volumeRecipes: !category || category === "volume" ? MAP_VOLUME_RECIPES : {},
           pointBlockerRecipes: !category || category === "base" ? POINT_BLOCKER_RECIPES : {},
           worldStructureRecipes: !category || category === "structure" ? WORLD_STRUCTURE_RECIPES : {},
+          staticPropPalettes: showDressing ? STATIC_PROP_PALETTES : {},
+          staticPropPaletteInstallation: paletteInstallation,
           prefabs,
           installVerified: verifyInstalled === true && Boolean(dota),
           recipeVerificationBaseline: RECIPE_VERIFICATION_BASELINE,
@@ -500,6 +514,8 @@ export function registerMapGenTools(server: McpServer) {
           `${prefabs.length} Valve prefab references, ` +
           `${!category || category === "volume" ? Object.keys(MAP_VOLUME_RECIPES).length : 0} checked volume recipes. ` +
           `${!category || category === "structure" ? Object.keys(WORLD_STRUCTURE_RECIPES).length : 0} checked structure recipes. ` +
+          `${showDressing ? Object.keys(STATIC_PROP_PALETTES).length : 0} static-prop palettes` +
+          `${paletteInstallation ? ` (${paletteInstallation.installedCount}/${paletteInstallation.modelCount} models installed). ` : ". "}` +
           `Baseline Dota build ${RECIPE_VERIFICATION_BASELINE.appBuildId}` +
           `${recipeVerification ? `; installed recipe status: ${recipeVerification.status}` : ""}.`,
       );

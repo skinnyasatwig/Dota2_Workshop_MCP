@@ -280,8 +280,9 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
   (or CLI flags `--screenshots --screenshot-method=engine`) for occlusion-proof Source 2 PNG evidence. Requested
   screenshots are pass/fail evidence: one renderer failure stops further screenshot commands and fails the run.
 - **`map_recipe_catalog`** — inspect the named terrain cores, Radiant/Dire cliff recipes, ramp-safe
-  fallbacks, checked solid-volume recipes, and official Valve prefab references used by the generator. `verifyInstalled:true` checks
-  the references against the current Workshop Tools install without opening Hammer. It also compares Steam/Dota/tools
+  fallbacks, checked solid-volume recipes, deterministic visual-dressing palettes, and official Valve prefab references
+  used by the generator. `category:"dressing"` returns the curated palette library. `verifyInstalled:true` checks the
+  prefab references and every palette model against the current Workshop Tools install without opening Hammer. It also compares Steam/Dota/tools
   versions and hashes of the official tilesets, PvP prefab, FGD, and compiler against the last proven baseline. A newer
   game build with unchanged recipe sources is reported as compatible; changed source/tools files request re-verification.
   `dota_doctor` includes the same concise compatibility status.
@@ -321,7 +322,7 @@ Transforms and team swaps compose at every level, while deferred `@local:` refer
 chain. Missing children, duplicate local placement names, cycles, and nesting deeper than 32 levels are rejected.
 
 For common gameplay structure, `dotaComponents` provides strongly checked `base`, `ancient`, `tower`, `fountain`,
-`shop`, `camp`, `bossPit`, `playerStart`, `gate`, `baseBlocker`, `fowBlocker`, `wall`, `staticPropSet`, `arch`, `profileArch`, `bridge`,
+`shop`, `camp`, `bossPit`, `playerStart`, `gate`, `baseBlocker`, `fowBlocker`, `wall`, `staticPropSet`, `staticPropPalette`, `arch`, `profileArch`, `bridge`,
 `bridgeApproach`, `ringPlatform`, `holedPlatform`, and `multiHoledPlatform` entries. It derives team numbers, official entity classes,
 stock unit/model names, tower tier names, shop/camp numeric values, base member transforms, and boss-pit terrain.
 See [`examples/dota-components.json`](examples/dota-components.json). A `camp` can include an optional checked
@@ -341,6 +342,12 @@ the assembly and overridden per placement; desired-state sync repairs scale drif
 real, decodable Valve PHYS geometry. Build, sync, compile, and validation stop before writing or expensive compiler work
 when that promise cannot be proven; unrelated legacy props are not retroactively gated. Optional tint and shadow controls
 use official `prop_static` properties. Whole-map model preflight verifies every resulting model as a separate existence check.
+`staticPropPalette` provides the same deterministic transforms and bounded scale for a named, curated group of models.
+Every placement explicitly selects a variant, so rebuilds never reshuffle scenery. The initial library contains five
+four-model palettes: `radiant-underbrush`, `river-wetland`, `rock-scatter`, `natural-cliffs`, and `dire-debris`.
+Palette models are deliberately non-solid visual dressing: gameplay blocking still comes from terrain, checked solids,
+or dedicated tree/blocker entities. Catalog installation checks and the repository compiler fixture prove availability
+and Source 2 compatibility, but a human must still judge appearance and final placement.
 The `arch` component is a checked rectangular opening assembled from two solid posts and one elevated lintel. Its
 origin is the center of the arch at ground level; width, depth, total height, opening width, opening height, yaw, and
 one preflighted visible material are explicit. Offline reachability uses a conservative 256-unit standing corridor,

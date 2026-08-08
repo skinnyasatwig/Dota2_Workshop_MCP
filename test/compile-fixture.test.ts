@@ -46,6 +46,8 @@ test("repository compile fixture is self-contained and structurally inspectable"
       ...Array.from({ length: 14 }, (_unused, index) =>
         `fixture_multi_hole_platform_triangle_${String(index + 1).padStart(3, "0")}_deck`),
       "fixture_nav_obstruction",
+      ...["cliffs", "debris", "rocks", "underbrush", "wetland"].flatMap((palette) =>
+        ["a", "b", "c", "d"].map((variant) => `fixture_palette_${palette}_${variant}`)),
       "fixture_polygon_no_wards",
       "fixture_profile_arch_arch_segment_01",
       "fixture_profile_arch_arch_segment_02",
@@ -105,6 +107,18 @@ test("repository compile fixture is self-contained and structurally inspectable"
   assert.equal(
     decorativeRocks.find((entity) => entity.targetname === "fixture_decorative_rocks_east")?.scales,
     "0.75 1 1.5",
+  );
+  const paletteProps = fixture.entities.filter((entity) => entity.targetname?.startsWith("fixture_palette_"));
+  assert.equal(paletteProps.length, 20);
+  assert.ok(paletteProps.every((entity) =>
+    entity.classname === "prop_static" && entity.properties.solid === "0"));
+  assert.equal(
+    paletteProps.find((entity) => entity.targetname === "fixture_palette_wetland_d")?.properties.model,
+    "models/props_nature/lily_pads001.vmdl",
+  );
+  assert.equal(
+    paletteProps.find((entity) => entity.targetname === "fixture_palette_cliffs_d")?.properties.model,
+    "models/props_nature/cliff_wall002.vmdl",
   );
   assert.equal(fixture.solids.length, 43);
   const concave = fixture.solids.find((solid) => solid.targetname === "fixture_concave_solid");

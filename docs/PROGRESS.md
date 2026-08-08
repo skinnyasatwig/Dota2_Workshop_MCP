@@ -337,11 +337,21 @@ Last updated: 2026-08-07
     Unit tests cover success, drift, absent PHYS, and incremental adoption; the installed `cap_point001` hull passed the
     new preflight, and the scaled decorative fixture passed Valve's converter and ResourceCompiler with Dota and Hammer closed.
 
+59. This milestone - added deterministic, compiler-proven visual-dressing palettes. `staticPropPalette` expands one
+    named palette into one to 256 explicit variant placements with reusable yaw, bounded uniform/XYZ scale, tint, and
+    shadow controls. Explicit variants make rebuilds stable; duplicate names, unknown variants, unbounded scales, and
+    collision requests fail before VMAP editing. The five initial palettes cover underbrush, wetlands, rock scatter,
+    natural cliff accents, and Dire debris with four Valve-authored models each. `map_recipe_catalog` exposes the
+    palettes under `category:"dressing"` and `verifyInstalled:true` checks every exact compiled model path in Dota's
+    VPK. All 20 resources are installed, and all 20 pass the repository's real converter/compiler fixture as non-solid
+    `prop_static` entities. The 3v3 acceptance contract remains a zero-change sync with four passable routes and zero
+    structural findings; no dressing was silently added to the map.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 323 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
-- MCP smoke suite: 203 passed, 0 failed, and 1 network-dependent Workshop search skipped.
+- Default suite: 326 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
+- MCP smoke suite: 204 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
 - The guided refresh runner completed all four safe checks in 33 seconds without opening Dota or Hammer. Because the
@@ -349,7 +359,8 @@ Last updated: 2026-08-07
 - Valve's installed `dmxconvert.exe` successfully round-trips generated camp, polygonal no-ward, player-clip, and
   sloped trigger volumes from text to binary VMAP and back during the integration suite, preserving exact corner heights.
 - `npm run test:compiler-fixture` successfully round-tripped and compiled the repository-owned acceptance payload,
-  including its two-prop preflighted decorative set with uniform and non-uniform entity scales, sloped trigger, flat and sloped concave L-shaped world solids, checked rectangular arch, checked bridge
+  including its two-prop preflighted decorative set with uniform and non-uniform entity scales, all 20 explicit variants
+  from the five curated visual-dressing palettes, sloped trigger, flat and sloped concave L-shaped world solids, checked rectangular arch, checked bridge
   deck/navigation twin, complete visible sloped bridge approach/navigation twin, three-material six-piece profile arch, eight-segment ring platform,
   eight-segment unequal-outline holed platform, 14-triangle two-hole platform, and explicit navigation obstruction,
   into a real VPK. The generated map uses Valve's installed blank template only as required hidden
