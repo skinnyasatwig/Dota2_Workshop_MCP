@@ -173,11 +173,18 @@ Last updated: 2026-08-07
     omitted all visible solids; real Dota connected a 3,015-unit arc across four navigation-wedge seams while both the
     center-hole and outer-void controls remained non-traversable with path length -1. DebugSDK 1.4.0 reached state 4,
     reported no console errors, and the runner shut down Dota and removed the isolated addon automatically.
+40. This milestone - allowed checked `dotaComponents` inside reusable named specification components. Recipes expand
+    into their local entities, terrain, solids, navigation surfaces, and volumes before the existing placement engine
+    applies namespacing, world/tile offsets, and mirroring. Exact generated references are localized automatically, so
+    placed neutral spawners point to their placed camp volumes and placed FoW nodes point to their placed partners.
+    Tests cover a mirrored camp/FoW/bridge-approach/boss-pit kit across every output family. The documented map example
+    now places mirrored ring recipes, and the real repository compiler fixture is routed through the nested recipe path;
+    Valve conversion and ResourceCompiler accepted the resulting arch, bridge, approach, and ring composition.
 
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 289 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 290 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 200 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
@@ -191,6 +198,8 @@ Last updated: 2026-08-07
   explicit navigation obstruction,
   into a real VPK. The generated map uses Valve's installed blank template only as required hidden
   infrastructure, depends on no private 3v3 file, stores no copied Valve VMAP, and leaves no temporary addon trees.
+  Its checked structures now originate inside one reusable component placement, proving the nested recipe path through
+  Valve's actual converter/compiler rather than only through unit tests.
 - `npm run test:compiler-bridge-nav-fixture` and `npm run test:engine-bridge-nav-fixture` passed on the installed
   Workshop Tools. The latter produced fresh DebugSDK 1.4.0 state-4 readiness, the expected positive/negative/height-
   alias results, zero console errors, automatic shutdown, and complete fixture cleanup.

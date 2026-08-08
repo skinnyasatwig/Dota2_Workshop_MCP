@@ -80,6 +80,18 @@
             "height": 512
           }
         }
+      ],
+      "dotaComponents": [
+        {
+          "kind": "ringPlatform",
+          "name": "overlook",
+          "center": [0, 0, 384],
+          "outerRadius": 512,
+          "innerRadius": 256,
+          "height": 64,
+          "sides": 4,
+          "material": "materials/dev/reflectivity_30.vmat"
+        }
       ]
     }
   },

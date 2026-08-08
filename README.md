@@ -220,7 +220,10 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
   register, and optionally compile it. The preferred `specification` object uses the same
   `managedTerrain` / `managedEntities` / `managedPaths` / `managedSolids` / `managedNavSurfaces` / `managedVolumes` vocabulary as `map_sync_contract`. A specification can
   also define reusable named `regions`, reusable `components`, and transformed `placements`; one component may
-  contain local entities, paths, terrain, checked world solids, checked navigation surfaces, and gameplay volumes, and every placement is automatically namespaced. Legacy
+  contain local entities, paths, terrain, checked world solids, checked navigation surfaces, gameplay volumes, and
+  checked `dotaComponents`. Every placement is automatically namespaced. Generated links such as a neutral camp's
+  spawn volume and a fog blocker's next node follow the placed names rather than silently pointing back to the local
+  template. Legacy
   `terrain` / `entities` / `paths` inputs remain compatible. See
   [`examples/map-specification.json`](examples/map-specification.json) for a complete starter. Pass
   `dryRun:true` to generate and report the plan without writing, registering, or compiling anything. The report also
@@ -336,6 +339,10 @@ outer and inner values are explicit vertex radii; the center, yaw, height, segme
 validated. The composition leaves a real central opening without allowing arbitrary mesh-with-holes input. Valve's
 compiler accepted the complete visible eight-segment ring. In a separate terrain-free engine fixture, Dota connected
 an arc across four wedge seams while both the center hole and the surrounding void remained non-traversable.
+These recipes can also live inside a named specification `component`. One local objective kit can therefore combine,
+for example, a camp, boss pit, fog blockers, bridge approach, and ring platform, then be placed or mirrored repeatedly
+with separate world/tile offsets. The MCP expands the recipes first and applies one namespacing/transform pass to all
+generated entities, terrain, solids, navigation surfaces, volumes, and their internal references.
 
 ## Learn from other custom games
 

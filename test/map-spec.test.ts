@@ -25,7 +25,8 @@ test("the documented map specification example stays valid", async () => {
   assert.equal(specification.map, "example_arena");
   assert.equal(specification.managedPaths?.length, 2);
   assert.equal(specification.managedTerrain?.length, 3);
-  assert.equal(specification.managedSolids?.length, 4);
+  assert.equal(specification.managedSolids?.length, 12);
+  assert.equal(specification.managedNavSurfaces?.length, 8);
 });
 
 test("parseMapSpecification exposes the contract terrain and path vocabulary", () => {
@@ -274,6 +275,117 @@ test("named regions can be reused and mirrored around a chosen tile point", () =
     { op: "height", level: 1, dome: undefined, shape: { kind: "rect", x0: 2, y0: 4, x1: 6, y1: 10 } },
     { op: "height", level: 1, dome: undefined, shape: { kind: "rect", x0: 26, y0: 4, x1: 30, y1: 10 } },
   ]);
+});
+
+test("reusable component definitions expand, namespace, and mirror checked Dota recipes", () => {
+  const specification = parseMapSpecification({
+    components: {
+      neutral_objective_kit: {
+        dotaComponents: [
+          {
+            kind: "camp",
+            name: "camp",
+            origin: [100, 200, 128],
+            size: "medium",
+            volumeName: "camp_bounds",
+            volume: { center: [100, 200, 192], size: [512, 384, 384] },
+          },
+          {
+            kind: "fowBlocker",
+            name: "fog",
+            points: [[0, -256, 128], [0, 256, 128]],
+          },
+          {
+            kind: "bridgeApproach",
+            name: "approach",
+            start: [-512, 0, 128],
+            end: [0, 0, 384],
+            width: 384,
+            thickness: 64,
+            material: "materials/dev/reflectivity_30.vmat",
+          },
+          {
+            kind: "bossPit",
+            name: "pit",
+            boss: "custom",
+            worldCenter: [0, 512, 128],
+            tileCenter: [0, 2],
+            radius: 2,
+            rimWidth: 1,
+            floorLevel: -1,
+            rimLevel: 0,
+            tileset: 1,
+            entrances: ["east"],
+            entranceWidth: 1,
+            noWardsRadius: 256,
+            noWardsSides: 8,
+            noWardsHeight: 512,
+          },
+        ],
+      },
+    },
+    placements: [
+      {
+        component: "neutral_objective_kit",
+        name: "west",
+        worldOffset: [-2000, 0, 0],
+        tileOffset: [8, 8],
+      },
+      {
+        component: "neutral_objective_kit",
+        name: "east",
+        worldOffset: [2000, 0, 0],
+        tileOffset: [24, 8],
+        mirrorAxis: "x",
+      },
+    ],
+  });
+
+  const westCamp = specification.managedEntities?.find((entity) => entity.targetname === "west_camp");
+  const eastCamp = specification.managedEntities?.find((entity) => entity.targetname === "east_camp");
+  assert.equal(westCamp?.origin, "-1900 200 128");
+  assert.equal(westCamp?.properties?.VolumeName, "west_camp_bounds");
+  assert.equal(eastCamp?.origin, "1900 200 128");
+  assert.equal(eastCamp?.properties?.VolumeName, "east_camp_bounds");
+  assert.equal(
+    specification.managedEntities?.find((entity) => entity.targetname === "west_fog_1")
+      ?.properties?.TargetNode,
+    "west_fog_2",
+  );
+  assert.equal(
+    specification.managedEntities?.find((entity) => entity.targetname === "east_fog_1")
+      ?.properties?.TargetNode,
+    "east_fog_2",
+  );
+  assert.equal(
+    specification.managedEntities?.find((entity) => entity.targetname === "west_pit_spawn")?.origin,
+    "-2000 512 128",
+  );
+  assert.equal(
+    specification.managedEntities?.find((entity) => entity.targetname === "east_pit_spawn")?.origin,
+    "2000 512 128",
+  );
+  assert.deepEqual(specification.managedSolids?.map((solid) => [solid.targetname, solid.center, solid.yaw]), [
+    ["west_approach_ramp", [-2256, 0, 256], 0],
+    ["east_approach_ramp", [2256, 0, 256], 180],
+  ]);
+  assert.deepEqual(specification.managedNavSurfaces?.map((surface) => surface.targetname), [
+    "west_approach_walkable",
+    "east_approach_walkable",
+  ]);
+  assert.deepEqual(specification.managedVolumes?.map((volume) => volume.targetname), [
+    "west_camp_bounds",
+    "west_pit_no_wards",
+    "east_camp_bounds",
+    "east_pit_no_wards",
+  ]);
+  assert.equal(specification.managedTerrain?.length, 10);
+  assert.deepEqual(specification.managedTerrain?.[0]?.shape, {
+    kind: "ring", cx: 8, cy: 10, rInner: 2, rOuter: 3,
+  });
+  assert.deepEqual(specification.managedTerrain?.[5]?.shape, {
+    kind: "ring", cx: 24, cy: 10, rInner: 2, rOuter: 3,
+  });
 });
 
 test("component placements namespace and transform entities, paths, references, terrain, and volumes", () => {

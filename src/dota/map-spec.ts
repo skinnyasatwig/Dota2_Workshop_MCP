@@ -21,6 +21,7 @@ import {
 } from "./map-terrain.js";
 import {
   dotaComponentInputSchema,
+  ExpandedDotaComponents,
   expandDotaComponents,
 } from "./dota-components.js";
 import {
@@ -183,6 +184,7 @@ export const componentDefinitionInputSchema = z.object({
   managedSolids: z.array(managedMapSolidInputSchema).optional(),
   managedNavSurfaces: z.array(managedMapNavSurfaceInputSchema).optional(),
   managedVolumes: z.array(managedMapVolumeInputSchema).optional(),
+  dotaComponents: z.array(dotaComponentInputSchema).optional(),
 }).strict();
 
 export const componentPlacementInputSchema = z.object({
@@ -581,6 +583,39 @@ function fieldPrefix(placement: ComponentPlacementInput): string {
   return `placement "${placement.name}"`;
 }
 
+/** Mark exact references between generated local objects for placement-time namespacing. */
+function localizeDotaComponentReferences(
+  expanded: ExpandedDotaComponents,
+): ExpandedDotaComponents {
+  const localNames = new Set([
+    ...expanded.managedEntities.map((entity) => entity.targetname),
+    ...expanded.managedSolids.map((solid) => solid.targetname),
+    ...expanded.managedNavSurfaces.map((surface) => surface.targetname),
+    ...expanded.managedVolumes.map((volume) => volume.targetname),
+  ]);
+  const properties = (value: Record<string, string> | undefined) => value
+    ? Object.fromEntries(Object.entries(value).map(([key, entry]) => [
+        key,
+        localNames.has(entry) ? `@local:${entry}` : entry,
+      ]))
+    : undefined;
+  return {
+    ...expanded,
+    managedEntities: expanded.managedEntities.map((entity) => ({
+      ...entity,
+      properties: properties(entity.properties),
+    })),
+    managedSolids: expanded.managedSolids.map((solid) => ({
+      ...solid,
+      properties: properties(solid.properties),
+    })),
+    managedVolumes: expanded.managedVolumes.map((volume) => ({
+      ...volume,
+      properties: properties(volume.properties),
+    })),
+  };
+}
+
 export function parseMapSpecification(value: unknown, path = "inline map specification"): MapContract {
   const parsed = mapSpecificationInputSchema.parse(value);
   const regions = resolveRegions(parsed.regions ?? {}, path);
@@ -590,11 +625,15 @@ export function parseMapSpecification(value: unknown, path = "inline map specifi
     if (!componentName.safeParse(name).success) {
       throw new Error(`Invalid component name "${name}": ${path}`);
     }
-    const managedTerrain = expandTerrainOperations(
+    const explicitTerrain = expandTerrainOperations(
       definition.managedTerrain,
       regions,
       `${path}, component "${name}"`,
     );
+    const localDotaComponents = localizeDotaComponentReferences(
+      expandDotaComponents(definition.dotaComponents ?? []),
+    );
+    const managedTerrain = [...explicitTerrain, ...localDotaComponents.managedTerrain];
     if (managedTerrain.some((operation) => operation.op === "fill")) {
       throw new Error(`Component "${name}" cannot contain a fill terrain operation: ${path}`);
     }
@@ -603,13 +642,25 @@ export function parseMapSpecification(value: unknown, path = "inline map specifi
       parseMapContract(
         {
           requiredEntities: [],
-          managedEntities: definition.managedEntities,
+          managedEntities: [
+            ...(definition.managedEntities ?? []),
+            ...localDotaComponents.managedEntities,
+          ],
           managedAbsentEntities: definition.managedAbsentEntities,
           managedPaths: definition.managedPaths,
           managedTerrain,
-          managedSolids: definition.managedSolids,
-          managedNavSurfaces: definition.managedNavSurfaces,
-          managedVolumes: definition.managedVolumes,
+          managedSolids: [
+            ...(definition.managedSolids ?? []),
+            ...localDotaComponents.managedSolids,
+          ],
+          managedNavSurfaces: [
+            ...(definition.managedNavSurfaces ?? []),
+            ...localDotaComponents.managedNavSurfaces,
+          ],
+          managedVolumes: [
+            ...(definition.managedVolumes ?? []),
+            ...localDotaComponents.managedVolumes,
+          ],
         },
         `${path}, component "${name}"`,
       ),

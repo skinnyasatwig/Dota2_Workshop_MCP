@@ -12,7 +12,7 @@ import {
 import { parseMapVolumes, reconcileMapVolumes } from "./map-volume.js";
 import { parseMapSolids, reconcileMapSolids } from "./map-solid.js";
 import { parseMapNavSurfaces, reconcileMapNavSurfaces } from "./map-nav-surface.js";
-import { expandDotaComponents } from "./dota-components.js";
+import { parseMapSpecification } from "./map-spec.js";
 
 /** Apply the repository-owned fixture payload to a valid blank VMAP structural seed. */
 export function buildRepositoryCompileFixtureText(baseText: string): string {
@@ -77,50 +77,57 @@ export function buildRepositoryCompileFixtureText(baseText: string): string {
       },
     },
   ]).text;
-  const structures = expandDotaComponents([
-    {
-      kind: "arch",
-      name: "fixture_arch",
-      origin: [-2048, 1024, 128],
-      yaw: 15,
-      width: 1024,
-      depth: 256,
-      height: 768,
-      openingWidth: 512,
-      openingHeight: 512,
-      material: "materials/dev/reflectivity_30.vmat",
+  const structures = parseMapSpecification({
+    components: {
+      checked_structures: {
+        dotaComponents: [
+          {
+            kind: "arch",
+            name: "arch",
+            origin: [-2048, 1024, 128],
+            yaw: 15,
+            width: 1024,
+            depth: 256,
+            height: 768,
+            openingWidth: 512,
+            openingHeight: 512,
+            material: "materials/dev/reflectivity_30.vmat",
+          },
+          {
+            kind: "bridge",
+            name: "bridge",
+            center: [-2048, -1024, 384],
+            yaw: -10,
+            length: 1024,
+            width: 384,
+            thickness: 64,
+            material: "materials/dev/reflectivity_30.vmat",
+          },
+          {
+            kind: "bridgeApproach",
+            name: "bridge_approach",
+            start: [1024, 0, 128],
+            end: [2048, 0, 384],
+            width: 384,
+            thickness: 64,
+            material: "materials/dev/reflectivity_30.vmat",
+          },
+          {
+            kind: "ringPlatform",
+            name: "ring_platform",
+            center: [0, 2048, 384],
+            yaw: 22.5,
+            outerRadius: 768,
+            innerRadius: 384,
+            height: 64,
+            sides: 8,
+            material: "materials/dev/reflectivity_30.vmat",
+          },
+        ],
+      },
     },
-    {
-      kind: "bridge",
-      name: "fixture_bridge",
-      center: [-2048, -1024, 384],
-      yaw: -10,
-      length: 1024,
-      width: 384,
-      thickness: 64,
-      material: "materials/dev/reflectivity_30.vmat",
-    },
-    {
-      kind: "bridgeApproach",
-      name: "fixture_bridge_approach",
-      start: [1024, 0, 128],
-      end: [2048, 0, 384],
-      width: 384,
-      thickness: 64,
-      material: "materials/dev/reflectivity_30.vmat",
-    },
-    {
-      kind: "ringPlatform",
-      name: "fixture_ring_platform",
-      center: [0, 2048, 384],
-      yaw: 22.5,
-      outerRadius: 768,
-      innerRadius: 384,
-      height: 64,
-      sides: 8,
-      material: "materials/dev/reflectivity_30.vmat",
-    },
-  ]);
+    placements: [{ component: "checked_structures", name: "fixture" }],
+  });
   text = reconcileMapSolids(text, [
     {
       targetname: "fixture_concave_solid",
@@ -147,9 +154,9 @@ export function buildRepositoryCompileFixtureText(baseText: string): string {
         top: [64, 192, 192, 128, 0, 0],
       },
     },
-    ...structures.managedSolids,
+    ...(structures.managedSolids ?? []),
   ]).text;
-  return reconcileMapNavSurfaces(text, structures.managedNavSurfaces).text;
+  return reconcileMapNavSurfaces(text, structures.managedNavSurfaces ?? []).text;
 }
 
 export function inspectRepositoryCompileFixture(text: string): {
