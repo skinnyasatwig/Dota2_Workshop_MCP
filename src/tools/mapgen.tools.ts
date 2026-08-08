@@ -1070,7 +1070,7 @@ export function registerMapGenTools(server: McpServer) {
         "Render a diagnostic top-down image without launching Dota: terrain contours, cliffs, ramps, water, currents, " +
         "entities, waypoint paths, tower ranges, camps, objectives, minimap bounds, checked trigger/blocker volumes, " +
         "cached model PHYS bounds, CRC-current curated visual-prop bounds, explicit Valve tree/obstruction proximity, " +
-        "unresolved solid props, terrain holes, and unreachable regions.",
+        "unresolved solid props, terrain holes, unreachable regions, and safe candidate ramp corridors.",
       inputSchema: {
         projectRoot: z.string().optional(),
         map: z.string(),
@@ -1086,6 +1086,9 @@ export function registerMapGenTools(server: McpServer) {
         showCurrents: z.boolean().optional(),
         showMinimapBounds: z.boolean().optional(),
         showReachability: z.boolean().optional(),
+        showRampSuggestions: z.boolean().optional().describe(
+          "Show safe candidate ramp corridors and the neutral recommended cell (default true with reachability).",
+        ),
         showVolumes: z.boolean().optional(),
         showVisionBlockers: z.boolean().optional(),
         showCollisionObstacles: z.boolean().optional(),
@@ -1112,6 +1115,7 @@ export function registerMapGenTools(server: McpServer) {
       showCurrents,
       showMinimapBounds,
       showReachability,
+      showRampSuggestions,
       showVolumes,
       showVisionBlockers,
       showCollisionObstacles,
@@ -1151,6 +1155,7 @@ export function registerMapGenTools(server: McpServer) {
         showCurrents,
         showMinimapBounds,
         showReachability,
+        showRampSuggestions,
         showVolumes,
         showVisionBlockers,
         showCollisionObstacles,
@@ -1173,12 +1178,14 @@ export function registerMapGenTools(server: McpServer) {
         approximatedCollisionObstacleCount: rendered.reachability.approximatedCollisionObstacleCount,
         unknownBoundsCollisionObstacleCount: rendered.reachability.unknownBoundsCollisionObstacleCount,
         modelCollisionBlockedCellCount: rendered.reachability.modelCollisionBlockedCellCount,
+        rampSuggestions: rendered.reachability.rampSuggestions,
         regions: rendered.reachability.regions,
         findings: rendered.reachability.findings,
       };
       const caption =
         `Diagnostic preview of "${map}" (${rendered.stats.width}x${rendered.stats.height}). ` +
         `${rendered.stats.cliffCells} cliff, ${rendered.stats.rampCells} ramp, ` +
+        `${rendered.stats.suggestedRamps} suggested ramp corridor(s), ` +
         `${rendered.stats.unreachableCells} unreachable, ${rendered.stats.holeCells} hole cells, ` +
         `${visualPropReport.footprintCount} CRC-current visual-prop footprint(s)` +
         `${visualPropReport.staleModelCount ? `; ${visualPropReport.staleModelCount} stale model snapshot(s) omitted` : ""}. ` +

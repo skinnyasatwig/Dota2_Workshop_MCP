@@ -30,6 +30,7 @@ export interface MapPreviewOptions {
   showCurrents?: boolean;
   showMinimapBounds?: boolean;
   showReachability?: boolean;
+  showRampSuggestions?: boolean;
   showVolumes?: boolean;
   showNavSurfaces?: boolean;
   showVisionBlockers?: boolean;
@@ -50,6 +51,7 @@ export interface MapPreviewStats {
   alternateTilesetCells: number;
   cliffCells: number;
   rampCells: number;
+  suggestedRamps: number;
   unreachableCells: number;
   holeCells: number;
   overlays: {
@@ -70,6 +72,7 @@ export interface MapPreviewStats {
     visionBlockers: number;
     collisionObstacles: number;
     visualProps: number;
+    rampSuggestions: number;
   };
   legend: Record<string, string>;
 }
@@ -203,6 +206,25 @@ function drawPreview(
     }
     if (options.showRamps !== false && cell.ramp) {
       line(imageX, imageY + scale - 1, imageX + scale - 1, imageY, [255, 216, 64], 0.95, 2);
+    }
+  }
+
+  const showRampSuggestions = showReachability && options.showRampSuggestions !== false;
+  if (showRampSuggestions) {
+    for (const suggestion of reachability.rampSuggestions) {
+      for (const [cellX, cellY] of suggestion.candidateCells) {
+        const imageX = cellX * scale;
+        const imageY = (grid.height - 1 - cellY) * scale;
+        line(imageX, imageY, imageX + scale - 1, imageY, [255, 70, 225]);
+        line(imageX, imageY + scale - 1, imageX + scale - 1, imageY + scale - 1, [255, 70, 225]);
+        line(imageX, imageY, imageX, imageY + scale - 1, [255, 70, 225]);
+        line(imageX + scale - 1, imageY, imageX + scale - 1, imageY + scale - 1, [255, 70, 225]);
+      }
+      const [cellX, cellY] = suggestion.recommendedCell;
+      const imageX = cellX * scale;
+      const imageY = (grid.height - 1 - cellY) * scale;
+      line(imageX, imageY, imageX + scale - 1, imageY + scale - 1, [65, 255, 255], 1, 2);
+      line(imageX, imageY + scale - 1, imageX + scale - 1, imageY, [65, 255, 255], 1, 2);
     }
   }
 
@@ -478,6 +500,7 @@ function drawPreview(
     alternateTilesetCells: grid.tileset.filter((value) => value !== 0).length,
     cliffCells: reachability.cliffCellCount,
     rampCells: reachability.rampCellCount,
+    suggestedRamps: reachability.rampSuggestions.length,
     unreachableCells: reachability.unreachableCellCount,
     holeCells: reachability.holeCellCount,
     overlays: {
@@ -498,11 +521,13 @@ function drawPreview(
       visionBlockers: visionBlockerSegments,
       collisionObstacles: reachability.collisionObstacleCount,
       visualProps: options.showVisualProps === false ? 0 : options.visualPropFootprints?.length ?? 0,
+      rampSuggestions: showRampSuggestions ? reachability.rampSuggestions.length : 0,
     },
     legend: {
       water: "blue",
       cliffs: "dark outlined cells",
       ramps: "yellow diagonal cells",
+      rampSuggestions: "magenta candidate cells; cyan X is the neutral recommendation",
       unreachable: "red hatched cells",
       holes: "magenta/black cells",
       paths: "teal Radiant, coral Dire",

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { renderTileGridPreview } from "../src/dota/map-preview.js";
-import { TileGrid } from "../src/dota/tilegrid.js";
+import { TileGrid, vIndex } from "../src/dota/tilegrid.js";
 import { ParsedMapEntity } from "../src/dota/vmap.js";
 import { decodePng } from "../src/util/imgmontage.js";
 import { ParsedMapVolume } from "../src/dota/map-volume.js";
@@ -23,6 +23,12 @@ function grid(width = 6, height = 4): TileGrid {
     configurations: new Array(width * height).fill(undefined).map(() => [5292, -1]),
     pathEdges: new Array(width * (height + 1) + (width + 1) * height).fill(0),
   };
+}
+
+function addVerticalCliff(tileGrid: TileGrid, cellX: number): void {
+  for (let y = 0; y < tileGrid.vh; y++) {
+    for (let x = cellX + 1; x < tileGrid.vw; x++) tileGrid.heights[vIndex(tileGrid, x, y)] = 1;
+  }
 }
 
 function entity(
@@ -152,4 +158,24 @@ test("diagnostic preview renders gameplay and navigation overlays", () => {
     colors.add(`${decoded.rgba[index]},${decoded.rgba[index + 1]},${decoded.rgba[index + 2]}`);
   }
   assert.ok(colors.size > 6);
+});
+
+test("diagnostic preview marks safe ramp corridors and the neutral recommendation", () => {
+  const tileGrid = grid(5, 3);
+  addVerticalCliff(tileGrid, 2);
+  const rendered = renderTileGridPreview(tileGrid, [
+    entity("radiant_spawn", "info_target", "128 384 128"),
+    entity("dragon_boss_spawn", "info_target", "1152 384 384"),
+  ], { scale: 4 });
+
+  assert.equal(rendered.stats.suggestedRamps, 1);
+  assert.equal(rendered.stats.overlays.rampSuggestions, 1);
+  assert.deepEqual(rendered.reachability.rampSuggestions[0].recommendedCell, [2, 1]);
+  const decoded = decodePng(rendered.png);
+  const colors = new Set<string>();
+  for (let index = 0; index < decoded.rgba.length; index += 4) {
+    colors.add(`${decoded.rgba[index]},${decoded.rgba[index + 1]},${decoded.rgba[index + 2]}`);
+  }
+  assert.ok(colors.has("255,70,225"));
+  assert.ok(colors.has("65,255,255"));
 });

@@ -325,6 +325,8 @@ export function registerMapTools(server: McpServer) {
       description:
         "Offline whole-map pathing preflight using the Dota tile grid. Detects missing terrain recipes, cliff-separated " +
         "regions, trapped spawns, blocked entrances, inaccessible objectives/camps, and small isolated walkable areas. " +
+        "For an important cliff-isolated region, it reports safe one-level candidate ramp corridors, a deterministic " +
+        "neutral recommendation, and a ready-to-copy managed-terrain ramp operation without changing the map. " +
         "Recognizes generated ramp cells, checked player-blocking volumes, and warning-only proximity to explicit Valve " +
         "tree/obstruction classes. It resolves and caches conservative physical hull bounds from real model PHYS blocks " +
         "without substituting render bounds. It does not launch Dota or Hammer; exact hull surfaces, dynamic collision, " +
@@ -375,6 +377,7 @@ export function registerMapTools(server: McpServer) {
           `Terrain: ${report.cliffCellCount} cliff, ${report.rampCellCount} ramp, ${report.waterCellCount} water, ` +
             `${report.holeCellCount} hole, ${report.volumeBlockedCellCount} volume-blocked, ` +
             `${report.unreachableCellCount} unreachable cells.`,
+          `Ramp access: ${report.rampSuggestions.length} safe candidate corridor(s).`,
           `Collision inventory: ${report.physicalBoundsCollisionObstacleCount} PHYS-bound prop(s), ` +
             `${report.exactHullProjectionCount} exact hull, ${report.meshVertexHullProjectionCount} mesh-envelope, ` +
             `${report.curvedPrimitiveProjectionCount} curved-primitive, and ` +

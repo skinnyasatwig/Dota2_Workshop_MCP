@@ -88,6 +88,21 @@ test("a cliff barrier exposes an inaccessible objective and unreachable region",
   assert.equal(report.regions.length, 2);
   assert.equal(report.unreachableCellCount, 6);
   assert.ok(report.findings.some((finding) => finding.code === "inaccessible-objective"));
+  assert.equal(report.rampSuggestions.length, 1);
+  assert.deepEqual(report.rampSuggestions[0], {
+    id: "ramp_access_c0_to_c1_1",
+    reachableComponent: 0,
+    inaccessibleComponent: 1,
+    candidateCellCount: 3,
+    candidateCells: [[2, 0], [2, 1], [2, 2]],
+    candidateCellsTruncated: false,
+    recommendedCell: [2, 1],
+    worldCenter: [640, 384],
+    reconnectsCells: 6,
+    inaccessibleTargets: ["dragon_boss_spawn"],
+    operation: { op: "ramp", shape: { kind: "rect", x0: 2, y0: 1, x1: 3, y1: 2 } },
+  });
+  assert.ok(report.findings.some((finding) => finding.code === "missing-ramp-access"));
 });
 
 test("a marked ramp reconnects both elevations", () => {
@@ -101,7 +116,36 @@ test("a marked ramp reconnects both elevations", () => {
 
   assert.equal(report.rampCellCount, 1);
   assert.equal(report.unreachableCellCount, 0);
+  assert.equal(report.rampSuggestions.length, 0);
   assert.equal(report.findings.some((finding) => finding.code === "inaccessible-objective"), false);
+  assert.equal(report.findings.some((finding) => finding.code === "missing-ramp-access"), false);
+});
+
+test("ramp suggestions do not turn deliberate empty off-map shelves into authoring noise", () => {
+  const grid = flatGrid();
+  addVerticalCliff(grid, 2);
+  const report = analyzeTileGridReachability(grid, [
+    entity("radiant_spawn", "info_target", 128, 384),
+  ]);
+
+  assert.equal(report.unreachableCellCount, 6);
+  assert.equal(report.rampSuggestions.length, 0);
+  assert.equal(report.findings.some((finding) => finding.code === "missing-ramp-access"), false);
+});
+
+test("ramp suggestions refuse cliffs that a one-level terrain ramp cannot safely bridge", () => {
+  const grid = flatGrid();
+  addVerticalCliff(grid, 2);
+  for (let y = 0; y < grid.vh; y++) {
+    for (let x = 3; x < grid.vw; x++) grid.heights[vIndex(grid, x, y)] = 2;
+  }
+  const report = analyzeTileGridReachability(grid, [
+    entity("radiant_spawn", "info_target", 128, 384),
+    entity("dragon_boss_spawn", "info_target", 1152, 384),
+  ]);
+
+  assert.ok(report.findings.some((finding) => finding.code === "inaccessible-objective"));
+  assert.equal(report.rampSuggestions.length, 0);
 });
 
 test("path segments crossing cliff cells are rejected unless a ramp opens them", () => {

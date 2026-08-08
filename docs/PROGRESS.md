@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-07
 
-## Current visual verification and wall milestone
+## Current access diagnostics milestone
 
 - Added `map_engine_visual_test`, a dry-run-first, single-launch minimap verifier that discovers native HUD geometry,
   clicks normalized probes, reads the exact client camera position, optionally attaches screenshots, and performs bounded shutdown.
@@ -453,10 +453,20 @@ Last updated: 2026-08-07
     specification, documented-example, and fixture tests pass, and Valve's real converter/compiler accepted a
     disposable two-segment sloped wall without launching Dota or Hammer.
 
+70. This milestone - turned inaccessible elevated objectives from a vague offline error into a bounded authoring
+    recommendation. Reachability now inspects one-level cliff cells that can join a spawn-connected component to an
+    isolated gameplay-relevant component, groups adjacent legal cells into corridors, and returns every bounded
+    candidate plus a deterministic neutral midpoint, world center, affected targets, recovered cell count, and an
+    exact ready-to-copy `managedTerrain` ramp operation. It rejects tall cliffs, occupied cells, and empty deliberate
+    off-map shelves, and never edits the map automatically. `map_preview` outlines candidate corridors in magenta and
+    marks the recommendation with a cyan X. The real 3v3 acceptance map reports zero candidate corridors because its
+    only disconnected land is the known empty off-map strip, proving the new check does not turn that boundary into
+    false authoring work. Focused analyzer and pixel-overlay tests pass without Dota or Hammer.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 359 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 362 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 208 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed palette-bound audit: 20 of 20 model CRCs and MDAT snapshots match the current Dota VPK.
 - Installed palette-gallery proof: the four-model `river-wetland` set passed exact CRC checks, decoded to textured GLBs,

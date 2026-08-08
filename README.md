@@ -252,7 +252,9 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
   sphere/capsule outlines), pink render-only footprints for curated palette models whose installed VPK CRC still
   matches the measured MDAT bounds, explicit Valve tree/obstruction broad phases,
   collision-enabled props whose physical bounds remain unknown,
-  and regions unreachable from player/creep spawns. Render-only footprints never feed collision or reachability.
+  regions unreachable from player/creep spawns, and safe one-level ramp corridors toward important isolated areas.
+  Candidate ramp cells are outlined in magenta and a deterministic neutral recommendation is marked with a cyan X.
+  Render-only footprints never feed collision or reachability.
   Every overlay family can be hidden.
 - **`map_reachability`** — analyze the whole tile grid offline and report missing terrain recipes,
   cliff-separated regions, trapped spawns, blocked entrances, inaccessible objectives or camps, and
@@ -267,7 +269,9 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
   waypoint approaches `ent_dota_tree` or `point_simple_obstruction`, using a deliberately small 64-unit broad phase
   because Valve does not publish those exact hulls in FGD. Concave mesh details, dynamic collision, team-selective
   collision, and Valve's final navmesh remain engine-test responsibilities. Set `resolveModelCollision:false` for a
-  faster terrain-only pass.
+  faster terrain-only pass. When a gameplay-relevant isolated region borders a safe one-level cliff corridor, the
+  report also returns every bounded candidate cell, a neutral midpoint recommendation, and an exact `managedTerrain`
+  `ramp` operation ready to copy into the unified specification. It never applies that design choice automatically.
 - **`map_engine_nav_test`** — close the offline-to-engine gap with one bounded Dota launch. It compiles
   or can attach to a preserved normally launched tools session. It reads routes from the unified map specification
   (or explicit input), asks Valve's real `GridNav` for endpoint and segment reachability/path lengths through compact

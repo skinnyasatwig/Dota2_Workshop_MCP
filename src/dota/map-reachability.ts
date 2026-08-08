@@ -2,6 +2,7 @@ import { cIndex, parseTileGrid, TileGrid, tileToWorld, vIndex } from "./tilegrid
 import { parseMapEntities, ParsedMapEntity } from "./vmap.js";
 import { parseMapVolumes, ParsedMapVolume } from "./map-volume.js";
 import { parseMapSolids, ParsedMapSolid } from "./map-solid.js";
+import type { ManagedTerrainOperation } from "./map-terrain.js";
 import {
   collectMapCollisionObstacles,
   distanceToSegment2d,
@@ -57,6 +58,7 @@ export interface ReachabilityFinding {
     | "inaccessible-objective"
     | "inaccessible-camp"
     | "isolated-region"
+    | "missing-ramp-access"
     | "entity-out-of-bounds"
     | "blocked-path-node"
     | "blocked-path-segment"
@@ -64,6 +66,20 @@ export interface ReachabilityFinding {
   targetname: string;
   detail: string;
   cells?: [number, number][];
+}
+
+export interface RampAccessSuggestion {
+  id: string;
+  reachableComponent: number;
+  inaccessibleComponent: number;
+  candidateCellCount: number;
+  candidateCells: [number, number][];
+  candidateCellsTruncated: boolean;
+  recommendedCell: [number, number];
+  worldCenter: [number, number];
+  reconnectsCells: number;
+  inaccessibleTargets: string[];
+  operation: Extract<ManagedTerrainOperation, { op: "ramp" }>;
 }
 
 export interface MapReachabilityOptions {
@@ -109,6 +125,7 @@ export interface MapReachabilityReport {
   spawnComponents: number[];
   regions: ReachabilityRegion[];
   entities: ReachabilityEntity[];
+  rampSuggestions: RampAccessSuggestion[];
   collisionObstacles: MapCollisionObstacle[];
   findings: ReachabilityFinding[];
   cells: ReachabilityCell[];
@@ -316,6 +333,94 @@ function groupedCells(grid: TileGrid, selected: Set<number>): [number, number][]
   return groups;
 }
 
+function compareCells(a: [number, number], b: [number, number]): number {
+  return a[1] - b[1] || a[0] - b[0];
+}
+
+function suggestRampAccess(
+  grid: TileGrid,
+  cells: ReachabilityCell[],
+  componentCells: number[][],
+  entities: ReachabilityEntity[],
+  reachableComponents: ReadonlySet<number>,
+  maxRampStep: number,
+): RampAccessSuggestion[] {
+  const targetsByComponent = new Map<number, string[]>();
+  for (const entity of entities) {
+    if (
+      entity.component === undefined ||
+      entity.reachableFromSpawn ||
+      entity.kind === "other"
+    ) continue;
+    const targets = targetsByComponent.get(entity.component) ?? [];
+    targets.push(entity.targetname);
+    targetsByComponent.set(entity.component, targets);
+  }
+  for (const targets of targetsByComponent.values()) targets.sort();
+
+  const cellsByPair = new Map<string, { reachable: number; inaccessible: number; cells: Set<number> }>();
+  for (let index = 0; index < cells.length; index++) {
+    const cell = cells[index];
+    if (
+      !cell.cliff ||
+      cell.hole ||
+      cell.blockingVolume !== undefined ||
+      cell.collisionObstacle !== undefined ||
+      cell.maxHeight - cell.minHeight > 1 + 1e-6
+    ) continue;
+
+    const adjacentComponents = new Set<number>();
+    for (const adjacentIndex of neighbors(grid, index)) {
+      const adjacent = cells[adjacentIndex];
+      if (
+        adjacent.walkable &&
+        adjacent.component !== undefined &&
+        Math.abs(cell.height - adjacent.height) <= maxRampStep + 1e-6
+      ) adjacentComponents.add(adjacent.component);
+    }
+    const reachable = [...adjacentComponents].filter((component) => reachableComponents.has(component)).sort((a, b) => a - b);
+    const inaccessible = [...adjacentComponents]
+      .filter((component) => !reachableComponents.has(component) && targetsByComponent.has(component))
+      .sort((a, b) => a - b);
+    for (const from of reachable) {
+      for (const to of inaccessible) {
+        const key = `${from}:${to}`;
+        const pair = cellsByPair.get(key) ?? { reachable: from, inaccessible: to, cells: new Set<number>() };
+        pair.cells.add(index);
+        cellsByPair.set(key, pair);
+      }
+    }
+  }
+
+  const suggestions: RampAccessSuggestion[] = [];
+  for (const pair of [...cellsByPair.values()].sort(
+    (a, b) => a.reachable - b.reachable || a.inaccessible - b.inaccessible,
+  )) {
+    const groups = groupedCells(grid, pair.cells)
+      .map((group) => group.sort(compareCells))
+      .sort((a, b) => compareCells(a[0], b[0]));
+    for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+      const group = groups[groupIndex];
+      const recommendedCell = group[Math.floor(group.length / 2)];
+      const [x, y] = recommendedCell;
+      suggestions.push({
+        id: `ramp_access_c${pair.reachable}_to_c${pair.inaccessible}_${groupIndex + 1}`,
+        reachableComponent: pair.reachable,
+        inaccessibleComponent: pair.inaccessible,
+        candidateCellCount: group.length,
+        candidateCells: group.slice(0, 256),
+        candidateCellsTruncated: group.length > 256,
+        recommendedCell,
+        worldCenter: tileToWorld(grid, x + 0.5, y + 0.5),
+        reconnectsCells: componentCells[pair.inaccessible]?.length ?? 0,
+        inaccessibleTargets: [...(targetsByComponent.get(pair.inaccessible) ?? [])],
+        operation: { op: "ramp", shape: { kind: "rect", x0: x, y0: y, x1: x + 1, y1: y + 1 } },
+      });
+    }
+  }
+  return suggestions;
+}
+
 export function analyzeTileGridReachability(
   grid: TileGrid,
   sourceEntities: ParsedMapEntity[],
@@ -477,6 +582,27 @@ export function analyzeTileGridReachability(
     }
   }
 
+  const rampSuggestions = suggestRampAccess(
+    grid,
+    cells,
+    componentCells,
+    entities,
+    reachableComponents,
+    maxRampStep,
+  );
+  for (const suggestion of rampSuggestions) {
+    findings.push({
+      severity: "warn",
+      code: "missing-ramp-access",
+      targetname: suggestion.id,
+      detail:
+        `${suggestion.candidateCellCount} safe one-level cliff cell(s) could reconnect ` +
+        `${suggestion.reconnectsCells} cell(s) containing ${suggestion.inaccessibleTargets.join(", ")}. ` +
+        `Neutral recommendation: tile ${suggestion.recommendedCell.join(",")}.`,
+      cells: suggestion.candidateCells,
+    });
+  }
+
   const paths = sourceEntities.filter(
     (entity) => PATH_CLASSES.has(entity.classname) && entity.targetname,
   );
@@ -609,6 +735,7 @@ export function analyzeTileGridReachability(
     spawnComponents: [...spawnComponents].sort((a, b) => a - b),
     regions,
     entities,
+    rampSuggestions,
     collisionObstacles,
     findings,
     cells,
