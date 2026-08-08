@@ -148,6 +148,48 @@ test("ramp suggestions refuse cliffs that a one-level terrain ramp cannot safely
   assert.equal(report.rampSuggestions.length, 0);
 });
 
+test("a gameplay spawn on a cliff gets one bounded nearest-flat placement suggestion", () => {
+  const grid = flatGrid();
+  addVerticalCliff(grid, 2);
+  const report = analyzeTileGridReachability(grid, [
+    entity("radiant_creep_spawn_north", "info_target", 640, 384),
+  ]);
+
+  assert.ok(report.findings.some((finding) => finding.code === "trapped-spawn"));
+  assert.deepEqual(report.placementSuggestions, [{
+    targetname: "radiant_creep_spawn_north",
+    classname: "info_target",
+    kind: "spawn",
+    reason: "cliff",
+    blockingSource: undefined,
+    originalCell: [2, 1],
+    originalOrigin: [640, 384, 128],
+    candidateCellCount: 6,
+    candidateCells: [[1, 1], [1, 0], [1, 2], [0, 1], [0, 0], [0, 2]],
+    candidateCellsTruncated: false,
+    recommendedCell: [1, 1],
+    recommendedOrigin: [384, 384, 128],
+    distanceTiles: 1,
+    distanceWorld: 256,
+  }]);
+  assert.ok(report.findings.some((finding) => finding.code === "suggested-entity-placement"));
+});
+
+test("placement suggestions stay within their explicit local search bound", () => {
+  const grid = flatGrid(7, 3);
+  for (let y = 0; y < grid.height; y++) {
+    grid.configurations[cIndex(grid, 2, y)] = [];
+    grid.configurations[cIndex(grid, 3, y)] = [];
+    grid.configurations[cIndex(grid, 4, y)] = [];
+  }
+  const report = analyzeTileGridReachability(grid, [
+    entity("radiant_creep_spawn_north", "info_target", 896, 384),
+  ], { maxPlacementSuggestionTiles: 1 });
+
+  assert.ok(report.findings.some((finding) => finding.code === "trapped-spawn"));
+  assert.equal(report.placementSuggestions.length, 0);
+});
+
 test("path segments crossing cliff cells are rejected unless a ramp opens them", () => {
   const blockedGrid = flatGrid();
   addVerticalCliff(blockedGrid, 2);

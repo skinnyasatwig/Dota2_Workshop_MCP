@@ -31,6 +31,7 @@ export interface MapPreviewOptions {
   showMinimapBounds?: boolean;
   showReachability?: boolean;
   showRampSuggestions?: boolean;
+  showPlacementSuggestions?: boolean;
   showVolumes?: boolean;
   showNavSurfaces?: boolean;
   showVisionBlockers?: boolean;
@@ -52,6 +53,7 @@ export interface MapPreviewStats {
   cliffCells: number;
   rampCells: number;
   suggestedRamps: number;
+  suggestedPlacements: number;
   unreachableCells: number;
   holeCells: number;
   overlays: {
@@ -73,6 +75,7 @@ export interface MapPreviewStats {
     collisionObstacles: number;
     visualProps: number;
     rampSuggestions: number;
+    placementSuggestions: number;
   };
   legend: Record<string, string>;
 }
@@ -225,6 +228,22 @@ function drawPreview(
       const imageY = (grid.height - 1 - cellY) * scale;
       line(imageX, imageY, imageX + scale - 1, imageY + scale - 1, [65, 255, 255], 1, 2);
       line(imageX, imageY + scale - 1, imageX + scale - 1, imageY, [65, 255, 255], 1, 2);
+    }
+  }
+
+  const showPlacementSuggestions = showReachability && options.showPlacementSuggestions !== false;
+  if (showPlacementSuggestions) {
+    for (const suggestion of reachability.placementSuggestions) {
+      for (const [cellX, cellY] of suggestion.candidateCells) {
+        const imageX = cellX * scale;
+        const imageY = (grid.height - 1 - cellY) * scale;
+        marker(imageX + (scale - 1) / 2, imageY + (scale - 1) / 2, [184, 255, 72], 1);
+      }
+      const [fromX, fromY] = worldPixel(suggestion.originalOrigin);
+      const [toX, toY] = worldPixel(suggestion.recommendedOrigin);
+      line(fromX, fromY, toX, toY, [184, 255, 72], 1, 2);
+      line(toX - 2, toY - 2, toX + 2, toY + 2, [184, 255, 72], 1, 2);
+      line(toX - 2, toY + 2, toX + 2, toY - 2, [184, 255, 72], 1, 2);
     }
   }
 
@@ -501,6 +520,7 @@ function drawPreview(
     cliffCells: reachability.cliffCellCount,
     rampCells: reachability.rampCellCount,
     suggestedRamps: reachability.rampSuggestions.length,
+    suggestedPlacements: reachability.placementSuggestions.length,
     unreachableCells: reachability.unreachableCellCount,
     holeCells: reachability.holeCellCount,
     overlays: {
@@ -522,12 +542,14 @@ function drawPreview(
       collisionObstacles: reachability.collisionObstacleCount,
       visualProps: options.showVisualProps === false ? 0 : options.visualPropFootprints?.length ?? 0,
       rampSuggestions: showRampSuggestions ? reachability.rampSuggestions.length : 0,
+      placementSuggestions: showPlacementSuggestions ? reachability.placementSuggestions.length : 0,
     },
     legend: {
       water: "blue",
       cliffs: "dark outlined cells",
       ramps: "yellow diagonal cells",
       rampSuggestions: "magenta candidate cells; cyan X is the neutral recommendation",
+      placementSuggestions: "lime candidate dots and line/X show a nearby safe entity position",
       unreachable: "red hatched cells",
       holes: "magenta/black cells",
       paths: "teal Radiant, coral Dire",

@@ -59,6 +59,7 @@ export interface ReachabilityFinding {
     | "inaccessible-camp"
     | "isolated-region"
     | "missing-ramp-access"
+    | "suggested-entity-placement"
     | "entity-out-of-bounds"
     | "blocked-path-node"
     | "blocked-path-segment"
@@ -82,10 +83,29 @@ export interface RampAccessSuggestion {
   operation: Extract<ManagedTerrainOperation, { op: "ramp" }>;
 }
 
+export interface EntityPlacementSuggestion {
+  targetname: string;
+  classname: string;
+  kind: ReachabilityEntityKind;
+  reason: "terrain-hole" | "cliff" | "blocking-volume" | "collision-obstacle" | "small-isolated-region";
+  blockingSource?: string;
+  originalCell: [number, number];
+  originalOrigin: [number, number, number];
+  candidateCellCount: number;
+  candidateCells: [number, number][];
+  candidateCellsTruncated: boolean;
+  recommendedCell: [number, number];
+  recommendedOrigin: [number, number, number];
+  distanceTiles: number;
+  distanceWorld: number;
+}
+
 export interface MapReachabilityOptions {
   maxFlatStep?: number;
   maxRampStep?: number;
   minRegionCells?: number;
+  /** Maximum tile-center distance for nearby entity placement suggestions (default 4, maximum 32). */
+  maxPlacementSuggestionTiles?: number;
   /** Conservative offline standing clearance above terrain (default 256 world units). */
   agentHeight?: number;
   blockingVolumes?: readonly BlockingMapShape[];
@@ -126,6 +146,7 @@ export interface MapReachabilityReport {
   regions: ReachabilityRegion[];
   entities: ReachabilityEntity[];
   rampSuggestions: RampAccessSuggestion[];
+  placementSuggestions: EntityPlacementSuggestion[];
   collisionObstacles: MapCollisionObstacle[];
   findings: ReachabilityFinding[];
   cells: ReachabilityCell[];
@@ -421,6 +442,93 @@ function suggestRampAccess(
   return suggestions;
 }
 
+function suggestEntityPlacements(
+  grid: TileGrid,
+  cells: ReachabilityCell[],
+  componentCells: number[][],
+  entities: ReachabilityEntity[],
+  reachableComponents: ReadonlySet<number>,
+  minRegionCells: number,
+  maxDistanceTiles: number,
+): EntityPlacementSuggestion[] {
+  const suggestions: EntityPlacementSuggestion[] = [];
+  for (const entity of entities) {
+    if (!entity.origin || !entity.cell || entity.kind === "other") continue;
+    const sourceIndex = cIndex(grid, entity.cell[0], entity.cell[1]);
+    const source = cells[sourceIndex];
+    const regionSize = entity.component === undefined ? 0 : componentCells[entity.component].length;
+    const smallRegion =
+      (entity.kind === "spawn" || entity.kind === "entrance") &&
+      entity.walkable &&
+      regionSize < minRegionCells;
+    if (entity.walkable && !smallRegion) continue;
+
+    let allowedComponents = new Set(
+      [...reachableComponents].filter(
+        (component) => component !== entity.component && componentCells[component].length >= minRegionCells,
+      ),
+    );
+    if (!allowedComponents.size && smallRegion) {
+      allowedComponents = new Set(
+        componentCells.flatMap((members, component) =>
+          component !== entity.component && members.length >= minRegionCells ? [component] : []),
+      );
+    }
+    if (!allowedComponents.size) continue;
+
+    const candidates = cells
+      .filter((cell) =>
+        cell.walkable &&
+        !cell.ramp &&
+        cell.component !== undefined &&
+        allowedComponents.has(cell.component) &&
+        cell.water === source.water)
+      .map((cell) => ({
+        cell,
+        distance: Math.hypot(cell.x - source.x, cell.y - source.y),
+        heightDifference: Math.abs(cell.height - source.height),
+      }))
+      .filter((candidate) => candidate.distance <= maxDistanceTiles + 1e-6)
+      .sort((a, b) =>
+        a.distance - b.distance ||
+        a.heightDifference - b.heightDifference ||
+        a.cell.y - b.cell.y ||
+        a.cell.x - b.cell.x,
+      );
+    if (!candidates.length) continue;
+
+    const recommended = candidates[0];
+    const [worldX, worldY] = tileToWorld(grid, recommended.cell.x + 0.5, recommended.cell.y + 0.5);
+    const worldZ = grid.origin[2] + 128 + recommended.cell.height * 256;
+    const reason = source.hole
+      ? "terrain-hole"
+      : source.cliff
+        ? "cliff"
+        : source.blockingVolume !== undefined
+          ? "blocking-volume"
+          : source.collisionObstacle !== undefined
+            ? "collision-obstacle"
+            : "small-isolated-region";
+    suggestions.push({
+      targetname: entity.targetname,
+      classname: entity.classname,
+      kind: entity.kind,
+      reason,
+      blockingSource: source.blockingVolume ?? source.collisionObstacle,
+      originalCell: entity.cell,
+      originalOrigin: entity.origin,
+      candidateCellCount: candidates.length,
+      candidateCells: candidates.slice(0, 32).map(({ cell }) => [cell.x, cell.y]),
+      candidateCellsTruncated: candidates.length > 32,
+      recommendedCell: [recommended.cell.x, recommended.cell.y],
+      recommendedOrigin: [worldX, worldY, worldZ],
+      distanceTiles: recommended.distance,
+      distanceWorld: recommended.distance * grid.tileSize,
+    });
+  }
+  return suggestions.sort((a, b) => a.targetname.localeCompare(b.targetname));
+}
+
 export function analyzeTileGridReachability(
   grid: TileGrid,
   sourceEntities: ParsedMapEntity[],
@@ -429,6 +537,10 @@ export function analyzeTileGridReachability(
   const maxFlatStep = Math.max(0, options.maxFlatStep ?? 0.25);
   const maxRampStep = Math.max(maxFlatStep, options.maxRampStep ?? 0.75);
   const minRegionCells = Math.max(1, Math.floor(options.minRegionCells ?? 4));
+  const maxPlacementSuggestionTiles = Math.max(
+    1,
+    Math.min(32, Math.floor(options.maxPlacementSuggestionTiles ?? 4)),
+  );
   const agentHeight = Math.max(1, options.agentHeight ?? 256);
   const collisionObstacles = [
     ...(options.collisionObstacles ?? collectMapCollisionObstacles(sourceEntities)),
@@ -603,6 +715,27 @@ export function analyzeTileGridReachability(
     });
   }
 
+  const placementSuggestions = suggestEntityPlacements(
+    grid,
+    cells,
+    componentCells,
+    entities,
+    reachableComponents,
+    minRegionCells,
+    maxPlacementSuggestionTiles,
+  );
+  for (const suggestion of placementSuggestions) {
+    findings.push({
+      severity: "warn",
+      code: "suggested-entity-placement",
+      targetname: suggestion.targetname,
+      detail:
+        `Nearest bounded safe tile is ${suggestion.recommendedCell.join(",")} at ` +
+        `${suggestion.recommendedOrigin.join(" ")} (${Math.round(suggestion.distanceWorld)} world units away).`,
+      cells: suggestion.candidateCells,
+    });
+  }
+
   const paths = sourceEntities.filter(
     (entity) => PATH_CLASSES.has(entity.classname) && entity.targetname,
   );
@@ -736,6 +869,7 @@ export function analyzeTileGridReachability(
     regions,
     entities,
     rampSuggestions,
+    placementSuggestions,
     collisionObstacles,
     findings,
     cells,

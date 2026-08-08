@@ -463,10 +463,20 @@ Last updated: 2026-08-07
     only disconnected land is the known empty off-map strip, proving the new check does not turn that boundary into
     false authoring work. Focused analyzer and pixel-overlay tests pass without Dota or Hammer.
 
+71. This milestone - made blocked gameplay-entity diagnostics actionable without silently redesigning the map. A
+    spawn, entrance, camp, or objective on a cliff, hole, checked blocking volume/model, or tiny trapped shelf now
+    receives a bounded search over flat walkable cells in a healthy component. The result preserves land/water state,
+    reports the blocking reason/source, returns up to 32 ordered candidates, and identifies one deterministic nearest
+    tile and exact ground-aligned world origin. The default four-tile radius is configurable but hard-capped at 32;
+    no local candidate means no fabricated repair. Preview draws candidate dots and a lime repair line/X. Tests prove
+    the historical cliff-spawn case and the bounded-refusal case without opening Dota or Hammer. The real 3v3
+    acceptance map returns zero placement suggestions, confirming that its current gameplay entities are already on
+    acceptable terrain and that the diagnostic adds no false repair work.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 362 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 365 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 208 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed palette-bound audit: 20 of 20 model CRCs and MDAT snapshots match the current Dota VPK.
 - Installed palette-gallery proof: the four-model `river-wetland` set passed exact CRC checks, decoded to textured GLBs,

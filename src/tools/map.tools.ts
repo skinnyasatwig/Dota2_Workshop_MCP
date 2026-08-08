@@ -327,6 +327,8 @@ export function registerMapTools(server: McpServer) {
         "regions, trapped spawns, blocked entrances, inaccessible objectives/camps, and small isolated walkable areas. " +
         "For an important cliff-isolated region, it reports safe one-level candidate ramp corridors, a deterministic " +
         "neutral recommendation, and a ready-to-copy managed-terrain ramp operation without changing the map. " +
+        "For a gameplay entity on a cliff, hole, blocker, or tiny trapped shelf, it can report bounded nearby flat " +
+        "candidate cells and a neutral nearest placement without moving the entity. " +
         "Recognizes generated ramp cells, checked player-blocking volumes, and warning-only proximity to explicit Valve " +
         "tree/obstruction classes. It resolves and caches conservative physical hull bounds from real model PHYS blocks " +
         "without substituting render bounds. It does not launch Dota or Hammer; exact hull surfaces, dynamic collision, " +
@@ -337,13 +339,25 @@ export function registerMapTools(server: McpServer) {
         maxFlatStep: z.number().min(0).optional().describe("Maximum center-height change between normal cells (default 0.25)."),
         maxRampStep: z.number().min(0).optional().describe("Maximum center-height change when a ramp participates (default 0.75)."),
         minRegionCells: z.number().int().min(1).optional().describe("Smaller isolated regions are warned about (default 4)."),
+        maxPlacementSuggestionTiles: z.number().int().min(1).max(32).optional().describe(
+          "Maximum tile-center distance for nearby blocked-entity placement suggestions (default 4).",
+        ),
         includeCells: z.boolean().optional().describe("Include every analyzed tile cell (default false; can be large)."),
         resolveModelCollision: z.boolean().optional().describe(
           "Resolve and cache real model PHYS bounds through VRF (default true; no Dota launch).",
         ),
       },
     },
-    guard(async ({ projectRoot, map, maxFlatStep, maxRampStep, minRegionCells, includeCells, resolveModelCollision }): Promise<ToolResult> => {
+    guard(async ({
+      projectRoot,
+      map,
+      maxFlatStep,
+      maxRampStep,
+      minRegionCells,
+      maxPlacementSuggestionTiles,
+      includeCells,
+      resolveModelCollision,
+    }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
       const p = projectMapPaths(dota, project, map);
@@ -360,6 +374,7 @@ export function registerMapTools(server: McpServer) {
         maxFlatStep,
         maxRampStep,
         minRegionCells,
+        maxPlacementSuggestionTiles,
         collisionObstacles,
       });
       const errors = report.findings.filter((finding) => finding.severity === "error").length;
@@ -378,6 +393,7 @@ export function registerMapTools(server: McpServer) {
             `${report.holeCellCount} hole, ${report.volumeBlockedCellCount} volume-blocked, ` +
             `${report.unreachableCellCount} unreachable cells.`,
           `Ramp access: ${report.rampSuggestions.length} safe candidate corridor(s).`,
+          `Entity placement: ${report.placementSuggestions.length} bounded repair suggestion(s).`,
           `Collision inventory: ${report.physicalBoundsCollisionObstacleCount} PHYS-bound prop(s), ` +
             `${report.exactHullProjectionCount} exact hull, ${report.meshVertexHullProjectionCount} mesh-envelope, ` +
             `${report.curvedPrimitiveProjectionCount} curved-primitive, and ` +

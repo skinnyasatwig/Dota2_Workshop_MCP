@@ -179,3 +179,21 @@ test("diagnostic preview marks safe ramp corridors and the neutral recommendatio
   assert.ok(colors.has("255,70,225"));
   assert.ok(colors.has("65,255,255"));
 });
+
+test("diagnostic preview draws bounded entity placement repairs", () => {
+  const tileGrid = grid(5, 3);
+  addVerticalCliff(tileGrid, 2);
+  const rendered = renderTileGridPreview(tileGrid, [
+    entity("radiant_creep_spawn_north", "info_target", "640 384 256"),
+  ], { scale: 6 });
+
+  assert.equal(rendered.stats.suggestedPlacements, 1);
+  assert.equal(rendered.stats.overlays.placementSuggestions, 1);
+  assert.deepEqual(rendered.reachability.placementSuggestions[0].recommendedCell, [1, 1]);
+  const decoded = decodePng(rendered.png);
+  const colors = new Set<string>();
+  for (let index = 0; index < decoded.rgba.length; index += 4) {
+    colors.add(`${decoded.rgba[index]},${decoded.rgba[index + 1]},${decoded.rgba[index + 2]}`);
+  }
+  assert.ok(colors.has("184,255,72"));
+});
