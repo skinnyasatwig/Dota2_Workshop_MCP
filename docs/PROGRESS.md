@@ -403,10 +403,22 @@ Last updated: 2026-08-07
     report. The hero-selection setup gate now uses the shared state constant, and the user-facing tool/README/capability
     text explains the distinction. This changes no map or gameplay and requires no Dota launch.
 
+65. This milestone - replaced guess-and-check animation framing with a bounded, correlated Panorama camera protocol.
+    DebugSDK 1.7.0 adds `mcp_frame`, which resolves one exact named entity on the server and accepts only numeric camera
+    distance, yaw, pitch, height offset, and a boolean hero-hide flag inside fixed safety bounds. The optional bridge
+    clears the local camera target, disables terrain adjustment, applies only camera methods present in the bundled
+    Panorama API catalog, waits a bounded interval, and reports observed look-at/camera positions plus the chosen focus
+    point's normalized screen projection. Host-side strict parsing rejects stale or malformed responses; assessment
+    stops before screenshots when the target name differs, the focus clamps to a screen edge, or the camera settles too
+    far away. The animation fixture now derives a cloth-height focus offset from its CRC-checked Dire-banner bounds,
+    installs the bridge only for the animation variant, and preserves its existing 6,000-warm-pixel gate. Unit tests,
+    the complete suite, smoke checks, and a real compiler-only disposable-addon run all pass. This protocol is
+    compiler-proven but intentionally not called runtime-proven until a future explicitly approved Dota launch.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 347 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 348 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 207 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed palette-bound audit: 20 of 20 model CRCs and MDAT snapshots match the current Dota VPK.
 - Installed palette-gallery proof: the four-model `river-wetland` set passed exact CRC checks, decoded to textured GLBs,

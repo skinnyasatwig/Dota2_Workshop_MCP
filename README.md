@@ -190,9 +190,11 @@ self-testing (no pixel guessing).
 
 Real navigation checks use the SDK's compact `mcp_nav` command. Requests carry unique IDs and long paths are chunked,
 so stale VConsole history and Source 2's short console-command limit cannot corrupt a new result.
-DebugSDK 1.6 also provides correlated `mcp_anim` samples for an exact named entity and `mcp_focus` for deterministic
-camera targeting. The disposable animation fixture uses those commands to verify model, sequence, cycle, game time,
-and camera focus before comparing two renderer-native PNGs.
+DebugSDK 1.7 also provides correlated `mcp_anim` samples for an exact named entity, `mcp_focus` for a simple server-side
+camera target, and `mcp_frame` for bounded Panorama framing. The latter fixes target position, distance, yaw, pitch, and
+height offset, then reports the observed camera and projected screen position before renderer evidence is allowed. The
+disposable animation fixture uses those commands to verify model, sequence, cycle, game time, and framing before
+comparing two renderer-native PNGs.
 
 The SDK also exposes `mcp_spawn`, `mcp_gold`, `mcp_level`, `mcp_item`, `mcp_event` (fire a custom UI event), `mcp_camera`
 (query the exact client camera/minimap geometry through the optional invisible Panorama bridge), `mcp_hud`

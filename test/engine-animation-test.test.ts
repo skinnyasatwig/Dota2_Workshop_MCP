@@ -3,13 +3,18 @@ import assert from "node:assert/strict";
 import {
   assessBannerFrameMotion,
   assessEngineAnimationSamples,
+  assessEngineFrame,
   buildEngineAnimationCommand,
+  buildEngineFrameCommand,
   buildEngineFocusCommand,
   compareAnimationFrames,
   parseEngineAnimationResponse,
+  parseEngineFrameResponse,
   parseEngineFocusResponse,
   requestEngineAnimationSample,
+  requestEngineFrame,
   requestEngineFocus,
+  type EngineFrameResult,
 } from "../src/dota/engine-animation-test.js";
 import { encodeRgbaPng } from "../src/util/png.js";
 import type { VConsoleClient } from "../src/dota/vconsole.js";
@@ -131,6 +136,64 @@ test("animation commands and responses are bounded and correlated", async () => 
     },
   } as unknown as VConsoleClient;
   assert.equal((await requestEngineFocus(focusFake, "banner", true, 1000)).heroHidden, true);
+});
+
+test("deterministic camera framing is bounded, correlated, and visibly assessed", async () => {
+  const settings = { distance: 1600, yaw: 90, pitch: 60, heightOffset: 530, hideHero: true };
+  assert.equal(
+    buildEngineFrameCommand("banner", settings, "frame_1"),
+    "mcp_frame frame_1 banner 1600 90 60 530 1",
+  );
+  assert.throws(
+    () => buildEngineFrameCommand("banner", { ...settings, distance: 9000 }, "frame_1"),
+    /Invalid engine frame settings/,
+  );
+  const payload: EngineFrameResult = {
+    targetName: "banner",
+    pid: 0,
+    heroHidden: true,
+    origin: [0, 350, 142],
+    focusPoint: [0, 350, 672],
+    lookAt: [0, 350, 670],
+    camera: [-800, -800, 1600],
+    screenUv: [0.5, 0.5],
+    settings: { distance: 1600, yaw: 90, pitch: 60, heightOffset: 530 },
+  };
+  assert.deepEqual(
+    parseEngineFrameResponse(`[MCP] FRAME_OK frame_1 ${JSON.stringify(payload)}`),
+    { requestId: "frame_1", result: payload },
+  );
+  assert.equal(assessEngineFrame(payload, "banner").passed, true);
+  const edge = assessEngineFrame({ ...payload, screenUv: [0, 0.5] }, "banner");
+  assert.equal(edge.passed, false);
+  assert.match(edge.issues.join(" "), /clamped screen edge/);
+
+  let pending:
+    | {
+        testLine: (line: { channel: number; text: string; at: number }) => boolean;
+        resolve: (line: { channel: number; text: string; at: number } | undefined) => void;
+      }
+    | undefined;
+  const fake = {
+    waitForLine(testLine: (line: { channel: number; text: string; at: number }) => boolean) {
+      return new Promise<{ channel: number; text: string; at: number } | undefined>((resolve) => {
+        pending = { testLine, resolve };
+      });
+    },
+    send(command: string) {
+      const [, requestId, targetName] = command.split(" ");
+      const responseLine = {
+        channel: 0,
+        text: `[MCP] FRAME_OK ${requestId} ${JSON.stringify({ ...payload, targetName })}`,
+        at: Date.now(),
+      };
+      queueMicrotask(() => {
+        const current = pending;
+        if (current) current.resolve(current.testLine(responseLine) ? responseLine : undefined);
+      });
+    },
+  } as unknown as VConsoleClient;
+  assert.equal((await requestEngineFrame(fake, "banner", settings, 1000)).screenUv[0], 0.5);
 });
 
 test("animation assessment recognizes forward motion and a loop wrap", () => {

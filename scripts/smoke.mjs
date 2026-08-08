@@ -352,7 +352,7 @@ async function main() {
     check(
       "DebugSDK lua registers correlated runtime commands",
       c.includes("mcp_ping") && c.includes("mcp_nav") && c.includes("mcp_anim") &&
-        c.includes("mcp_focus") && c.includes("Convars:RegisterCommand"),
+        c.includes("mcp_focus") && c.includes("mcp_frame") && c.includes("Convars:RegisterCommand"),
     );
   }
   const attachDry = await client.callTool({ name: "addon_attach_debug_sdk", arguments: { dryRun: true } });

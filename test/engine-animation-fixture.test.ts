@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   ENGINE_ANIMATION_CLIENT_TARGET,
   ENGINE_ANIMATION_FOCUS_TARGET,
+  ENGINE_ANIMATION_FRAME_SETTINGS,
   ENGINE_ANIMATION_MODEL,
   ENGINE_ANIMATION_SEQUENCE,
   ENGINE_ANIMATION_SERVER_TARGET,
@@ -37,6 +38,13 @@ test("animation fixture keeps one exact client target and one server cycle probe
   assert.equal(inspection.focus?.targetname, ENGINE_ANIMATION_FOCUS_TARGET);
   assert.equal(inspection.focus?.classname, "info_target");
   assert.equal(inspection.focus?.origin, "0 350 0");
+  assert.deepEqual(ENGINE_ANIMATION_FRAME_SETTINGS, {
+    distance: 1600,
+    yaw: 90,
+    pitch: 60,
+    heightOffset: 530,
+    hideHero: true,
+  });
 });
 
 test("animation fixture inspection fails closed on changed runtime properties", () => {

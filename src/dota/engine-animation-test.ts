@@ -40,6 +40,41 @@ const engineFocusResultSchema = z.object({
 
 export type EngineFocusResult = z.infer<typeof engineFocusResultSchema>;
 
+const engineFrameSettingsSchema = z.object({
+  distance: z.number().finite().min(400).max(5000),
+  yaw: z.number().finite().min(-360).max(360),
+  pitch: z.number().finite().min(20).max(89),
+  heightOffset: z.number().finite().min(-2048).max(2048),
+}).strict();
+
+const engineFrameRequestSettingsSchema = engineFrameSettingsSchema.extend({
+  hideHero: z.boolean().optional(),
+}).strict();
+
+const engineFrameResultSchema = z.object({
+  targetName: z.string().min(1),
+  pid: z.number().int().min(0).max(23),
+  heroHidden: z.boolean(),
+  origin: z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]),
+  focusPoint: z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]),
+  lookAt: z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]),
+  camera: z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]),
+  screenUv: z.tuple([z.number().finite(), z.number().finite()]),
+  settings: engineFrameSettingsSchema,
+}).strict();
+
+export type EngineFrameSettings = z.infer<typeof engineFrameRequestSettingsSchema>;
+
+export type EngineFrameResult = z.infer<typeof engineFrameResultSchema>;
+
+export interface EngineFrameAssessment {
+  passed: boolean;
+  targetMatched: boolean;
+  focusVisible: boolean;
+  lookAtError: number;
+  issues: string[];
+}
+
 export interface EngineAnimationExpectation {
   targetName: string;
   classname?: string;
@@ -96,6 +131,7 @@ export interface BannerFrameMotionThresholds {
 
 let animationRequestSequence = 0;
 let focusRequestSequence = 0;
+let frameRequestSequence = 0;
 
 function safeToken(value: string, label: string): string {
   if (!/^[A-Za-z0-9_.:-]+$/.test(value)) {
@@ -187,7 +223,7 @@ export function parseEngineFocusResponse(line: string): { requestId: string; res
   return { requestId, result: result.data };
 }
 
-/** Deterministically frame a named entity before renderer evidence is captured. */
+/** Apply the legacy server-side camera target; use requestEngineFrame for exact framing controls. */
 export async function requestEngineFocus(
   vc: VConsoleClient,
   targetName: string,
@@ -208,6 +244,105 @@ export async function requestEngineFocus(
     throw new Error(line.text.slice(line.text.indexOf(errorMarker) + errorMarker.length));
   }
   return parseEngineFocusResponse(line.text).result;
+}
+
+/** Build a numeric-only, bounded request for the optional Panorama camera bridge. */
+export function buildEngineFrameCommand(
+  targetName: string,
+  settings: EngineFrameSettings,
+  requestId = "frame",
+): string {
+  const parsed = engineFrameRequestSettingsSchema.safeParse(settings);
+  if (!parsed.success) {
+    throw new Error(`Invalid engine frame settings: ${parsed.error.issues.map((issue) => issue.message).join("; ")}`);
+  }
+  const values = parsed.data;
+  return [
+    "mcp_frame",
+    safeToken(requestId, "Frame request id"),
+    safeToken(targetName, "Frame targetname"),
+    values.distance,
+    values.yaw,
+    values.pitch,
+    values.heightOffset,
+    values.hideHero === true ? 1 : 0,
+  ].join(" ");
+}
+
+export function parseEngineFrameResponse(line: string): { requestId: string; result: EngineFrameResult } {
+  const marker = "[MCP] FRAME_OK ";
+  const markerIndex = line.indexOf(marker);
+  if (markerIndex < 0) throw new Error(`DebugSDK did not return FRAME_OK: ${line}`);
+  const payload = line.slice(markerIndex + marker.length);
+  const separator = payload.indexOf(" ");
+  if (separator < 1) throw new Error(`DebugSDK FRAME_OK response omitted its request id: ${line}`);
+  const requestId = payload.slice(0, separator);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payload.slice(separator + 1).trim());
+  } catch (error) {
+    throw new Error(`DebugSDK returned invalid frame JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const result = engineFrameResultSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new Error(`DebugSDK frame result had the wrong shape: ${result.error.issues.map((issue) => issue.message).join("; ")}`);
+  }
+  return { requestId, result: result.data };
+}
+
+/** Apply deterministic camera parameters and wait only for the matching client report. */
+export async function requestEngineFrame(
+  vc: VConsoleClient,
+  targetName: string,
+  settings: EngineFrameSettings,
+  timeoutMs = 5000,
+): Promise<EngineFrameResult> {
+  const requestId = `frame_${Date.now().toString(36)}_${(frameRequestSequence++).toString(36)}`;
+  const okMarker = `[MCP] FRAME_OK ${requestId} `;
+  const errorMarker = `[MCP] FRAME_ERR ${requestId} `;
+  const wait = vc.waitForLine(
+    (line) => line.text.includes(okMarker) || line.text.includes(errorMarker),
+    timeoutMs,
+  );
+  vc.send(buildEngineFrameCommand(targetName, settings, requestId));
+  const line = await wait;
+  if (!line) throw new Error(`DebugSDK did not answer frame request ${requestId} within ${timeoutMs}ms.`);
+  if (line.text.includes(errorMarker)) {
+    throw new Error(line.text.slice(line.text.indexOf(errorMarker) + errorMarker.length));
+  }
+  return parseEngineFrameResponse(line.text).result;
+}
+
+/** Reject a clamped screen edge or a camera that settled away from the requested focus point. */
+export function assessEngineFrame(
+  result: EngineFrameResult,
+  expectedTargetName: string,
+  screenMargin = 0.05,
+  maximumLookAtError = 128,
+): EngineFrameAssessment {
+  if (!Number.isFinite(screenMargin) || screenMargin < 0 || screenMargin >= 0.5) {
+    throw new Error("Frame screen margin must be from 0 up to (but not including) 0.5.");
+  }
+  if (!Number.isFinite(maximumLookAtError) || maximumLookAtError < 0 || maximumLookAtError > 4096) {
+    throw new Error("Maximum frame look-at error must be from 0 through 4096 world units.");
+  }
+  const issues: string[] = [];
+  const targetMatched = result.targetName === expectedTargetName;
+  if (!targetMatched) issues.push(`Camera framed ${result.targetName}; expected ${expectedTargetName}.`);
+  const [u, v] = result.screenUv;
+  const focusVisible = u >= screenMargin && u <= 1 - screenMargin && v >= screenMargin && v <= 1 - screenMargin;
+  if (!focusVisible) {
+    issues.push(`Requested focus point projected to clamped screen edge (${u.toFixed(4)}, ${v.toFixed(4)}).`);
+  }
+  const lookAtError = Math.hypot(
+    result.lookAt[0] - result.focusPoint[0],
+    result.lookAt[1] - result.focusPoint[1],
+    result.lookAt[2] - result.focusPoint[2],
+  );
+  if (lookAtError > maximumLookAtError) {
+    issues.push(`Camera look-at missed the requested focus point by ${lookAtError.toFixed(2)} world units.`);
+  }
+  return { passed: issues.length === 0, targetMatched, focusVisible, lookAtError, issues };
 }
 
 function forwardCycleDelta(before: number, after: number): number {

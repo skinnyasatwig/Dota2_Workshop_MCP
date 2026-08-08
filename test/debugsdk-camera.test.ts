@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { attachDebugSdk, detachDebugSdk } from "../src/dota/debugsdk.js";
 import { AddonProject } from "../src/dota/project.js";
+import { resolveDataPath } from "../src/util/datapath.js";
 
 test("DebugSDK camera bridge attach is idempotent and detach removes only marked assets", async () => {
   const root = await mkdtemp(join(tmpdir(), "mcp-camera-"));
@@ -34,7 +35,30 @@ test("DebugSDK camera bridge attach is idempotent and detach removes only marked
     const manifest = await readFile(first.cameraBridge!.manifestFile, "utf8");
     assert.equal((manifest.match(/mcp_debug_camera\.xml/g) ?? []).length, 1);
     assert.doesNotMatch(await readFile(first.cameraBridge!.copiedTo[0], "utf8"), /<Panel[^>]*\bid=/);
-    assert.match(await readFile(first.cameraBridge!.copiedTo[1], "utf8"), /GetCameraLookAtPosition/);
+    const bridgeScript = await readFile(first.cameraBridge!.copiedTo[1], "utf8");
+    assert.match(bridgeScript, /GetCameraLookAtPosition/);
+    assert.match(bridgeScript, /SetCameraTargetPosition/);
+    assert.match(bridgeScript, /SetCameraDistance/);
+    assert.match(bridgeScript, /SetCameraPitchMin/);
+    assert.match(bridgeScript, /WorldToScreenXYClamped/);
+    const panoramaApi = JSON.parse(await readFile(await resolveDataPath("panorama-api.json"), "utf8"));
+    const gameUi = panoramaApi.interfaces.find((entry: { name: string }) => entry.name === "CDOTA_PanoramaScript_GameUI");
+    const methodNames = new Set(gameUi.members.map((member: { name: string }) => member.name));
+    for (const method of [
+      "SetCameraTarget",
+      "SetCameraTargetPosition",
+      "SetCameraTerrainAdjustmentEnabled",
+      "SetCameraPitchMin",
+      "SetCameraPitchMax",
+      "SetCameraYaw",
+      "SetCameraDistance",
+      "SetCameraLookAtPositionHeightOffset",
+      "GetCameraLookAtPosition",
+      "GetCameraPosition",
+      "WorldToScreenXYClamped",
+    ]) {
+      assert.equal(methodNames.has(method), true, `${method} is absent from the checked Panorama API catalog`);
+    }
 
     const detached = await detachDebugSdk(project);
     assert.equal(detached.bootstrapCleaned, true);

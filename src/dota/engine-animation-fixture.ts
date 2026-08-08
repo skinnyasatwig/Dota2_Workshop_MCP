@@ -4,10 +4,11 @@
 // can independently prove that the checked sequence advances in the real engine.
 
 import { animatedPropRecipe } from "./animated-prop-recipes.js";
+import type { EngineFrameSettings } from "./engine-animation-test.js";
 import { parseMapEntities, reconcileMapEntities } from "./vmap.js";
 
 export const ENGINE_ANIMATION_FIXTURE_MAP = "mcp_animation_fixture";
-export const ENGINE_ANIMATION_FIXTURE_DEBUG_SDK_VERSION = "1.6.0";
+export const ENGINE_ANIMATION_FIXTURE_DEBUG_SDK_VERSION = "1.7.0";
 export const ENGINE_ANIMATION_CLIENT_TARGET = "fixture_banner_client";
 export const ENGINE_ANIMATION_SERVER_TARGET = "fixture_banner_server_probe";
 export const ENGINE_ANIMATION_FOCUS_TARGET = "fixture_banner_camera_anchor";
@@ -19,6 +20,15 @@ export const ENGINE_ANIMATION_FRAME_REGION = {
   width: 0.4,
   height: 0.7,
 } as const;
+export const ENGINE_ANIMATION_FRAME_SETTINGS: EngineFrameSettings = {
+  distance: 1600,
+  yaw: 90,
+  pitch: 60,
+  // Dire's CRC-checked bounds center is about 264.9 local Z; the fixture's
+  // 2x scale puts that center about 530 units above its entity origin.
+  heightOffset: 530,
+  hideHero: true,
+};
 
 function bannerProperties(animateOnServer: boolean): Record<string, string> {
   const recipe = animatedPropRecipe("dire-team-banner");

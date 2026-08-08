@@ -10,8 +10,8 @@ import {
   ENGINE_ANIMATION_CLIENT_TARGET,
   ENGINE_ANIMATION_FIXTURE_DEBUG_SDK_VERSION,
   ENGINE_ANIMATION_FIXTURE_MAP,
-  ENGINE_ANIMATION_FOCUS_TARGET,
   ENGINE_ANIMATION_FRAME_REGION,
+  ENGINE_ANIMATION_FRAME_SETTINGS,
   ENGINE_ANIMATION_MODEL,
   ENGINE_ANIMATION_SEQUENCE,
   ENGINE_ANIMATION_SERVER_TARGET,
@@ -21,9 +21,10 @@ import {
 import {
   assessBannerFrameMotion,
   assessEngineAnimationSamples,
+  assessEngineFrame,
   compareAnimationFrames,
   requestEngineAnimationSample,
-  requestEngineFocus,
+  requestEngineFrame,
 } from "../src/dota/engine-animation-test.js";
 import {
   BRIDGE_NAV_FIXTURE_DEBUG_SDK_VERSION,
@@ -179,7 +180,7 @@ async function main() {
       "utf8",
     );
     const project = fixtureProject(process.cwd(), addonName, gameAddon, contentAddon);
-    await attachDebugSdk(project, false);
+    await attachDebugSdk(project, false, { cameraBridge: animation });
 
     const compiled = await compileVmap(
       dota.resourceCompilerExe,
@@ -264,10 +265,19 @@ async function main() {
       if (!inGameReadiness.ready) {
         throw new Error("The animation fixture did not reach GAME_IN_PROGRESS after selecting Axe.");
       }
-      const focus = await requestEngineFocus(vc, ENGINE_ANIMATION_FOCUS_TARGET, true, 10_000);
-      // Let the camera finish its bounded transition to the named prop before
-      // sampling or capturing renderer evidence.
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 1500));
+      const framing = await requestEngineFrame(
+        vc,
+        ENGINE_ANIMATION_CLIENT_TARGET,
+        ENGINE_ANIMATION_FRAME_SETTINGS,
+        10_000,
+      );
+      const framingAssessment = assessEngineFrame(framing, ENGINE_ANIMATION_CLIENT_TARGET);
+      if (!framingAssessment.passed) {
+        throw new Error(`Deterministic camera framing failed: ${framingAssessment.issues.join(" ")}`);
+      }
+      // The correlated Panorama response arrives after its own bounded settle;
+      // leave a short extra interval before animation sampling and screenshots.
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
 
       const clientBefore = await requestEngineAnimationSample(vc, ENGINE_ANIMATION_CLIENT_TARGET, 10_000);
       const serverBefore = await requestEngineAnimationSample(vc, ENGINE_ANIMATION_SERVER_TARGET, 10_000);
@@ -340,7 +350,7 @@ async function main() {
         launch: { method: launch.method, fallbackUsed: launch.fallbackUsed },
         readiness: readiness.line,
         inGameReadiness: inGameReadiness.line,
-        focus,
+        framing: { result: framing, assessment: framingAssessment },
         client: { samples: [clientBefore, clientAfter], assessment: clientAssessment },
         serverProbe: { samples: [serverBefore, serverAfter], assessment: serverAssessment },
         renderer: {

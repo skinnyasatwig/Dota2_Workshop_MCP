@@ -40,7 +40,7 @@ export interface AttachResult {
 }
 
 export interface AttachDebugSdkOptions {
-  /** Install the tiny Panorama telemetry panel used by map_engine_visual_test. */
+  /** Install the tiny Panorama telemetry/framing panel used by engine visual tests. */
   cameraBridge?: boolean;
 }
 
@@ -148,7 +148,7 @@ export async function attachDebugSdk(
     }
     const cameraBridge = options.cameraBridge ? await attachCameraBridge(project, true) : undefined;
     if (cameraBridge) {
-      instructions.push(`[dry run] would install camera telemetry bridge -> ${cameraBridge.copiedTo.join(", ")}`);
+      instructions.push(`[dry run] would install camera telemetry/framing bridge -> ${cameraBridge.copiedTo.join(", ")}`);
     }
     return { copiedTo, bootstrapFile, bootstrapAction: "skipped (dryRun)", instructions, dryRun: true, cameraBridge };
   }
@@ -183,7 +183,7 @@ export async function attachDebugSdk(
 
   const cameraBridge = options.cameraBridge ? await attachCameraBridge(project, false) : undefined;
   if (cameraBridge) {
-    instructions.push("Camera telemetry bridge installed; compile addon content before using mcp_camera.");
+    instructions.push("Camera telemetry/framing bridge installed; compile addon content before using mcp_camera or mcp_frame.");
   }
 
   return { copiedTo, bootstrapFile, bootstrapAction, instructions, dryRun: false, cameraBridge };

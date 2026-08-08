@@ -15,7 +15,7 @@
   your addon by hand — re-attach to update.
 ]]
 
-local SDK_VERSION = "1.6.0"
+local SDK_VERSION = "1.7.0"
 
 ----------------------------------------------------------------------
 -- Tiny JSON encoder (no dependencies; handles the shapes we emit).
@@ -470,6 +470,135 @@ local function cmd_focus(_, requestId, targetName, hideHero)
   }))
 end
 
+local function boundedNumber(value, minimum, maximum)
+  local number = tonumber(value)
+  if number == nil or number ~= number or number < minimum or number > maximum then return nil end
+  return number
+end
+
+-- Deterministically frame one named entity through the optional Panorama camera
+-- bridge. Every camera parameter is numeric and bounded; no arbitrary script or
+-- console text crosses the bridge.
+-- Usage: mcp_frame <request-id> <targetname> <distance> <yaw> <pitch> <height-offset> [hide-hero:0|1]
+local function cmd_frame(_, requestId, targetName, distanceValue, yawValue, pitchValue, heightValue, hideHero)
+  requestId = tostring(requestId or "")
+  targetName = tostring(targetName or "")
+  if requestId == "" or not string.match(requestId, "^[A-Za-z0-9_.:-]+$") then
+    out("FRAME_ERR", requestId ~= "" and requestId or "unknown", "invalid or missing request id")
+    return
+  end
+  if targetName == "" or not string.match(targetName, "^[A-Za-z0-9_.:-]+$") then
+    out("FRAME_ERR", requestId, "invalid or missing targetname")
+    return
+  end
+  local distance = boundedNumber(distanceValue, 400, 5000)
+  local yaw = boundedNumber(yawValue, -360, 360)
+  local pitch = boundedNumber(pitchValue, 20, 89)
+  local heightOffset = boundedNumber(heightValue, -2048, 2048)
+  if distance == nil or yaw == nil or pitch == nil or heightOffset == nil then
+    out("FRAME_ERR", requestId, "camera settings are missing or outside their safe bounds")
+    return
+  end
+  local hideValue = tostring(hideHero or "0")
+  if hideValue ~= "0" and hideValue ~= "1" then
+    out("FRAME_ERR", requestId, "hide-hero must be 0 or 1")
+    return
+  end
+  local player, pid = firstPlayer()
+  if not player then
+    out("FRAME_ERR", requestId, "no connected player")
+    return
+  end
+  local entity = Entities:FindByName(nil, targetName)
+  if not entity or entity:IsNull() then
+    out("FRAME_ERR", requestId, "target entity was not found")
+    return
+  end
+  _G.__MCP_FRAME_REQUESTS = _G.__MCP_FRAME_REQUESTS or {}
+  if _G.__MCP_FRAME_REQUESTS[requestId] ~= nil then
+    out("FRAME_ERR", requestId, "duplicate pending request id")
+    return
+  end
+  local hero = PlayerResource:GetSelectedHeroEntity(pid)
+  local hidden = false
+  if hideValue == "1" and hero and not hero:IsNull() and hero.AddNoDraw then
+    hero:AddNoDraw()
+    hidden = true
+  end
+  local origin = entity:GetAbsOrigin()
+  _G.__MCP_FRAME_REQUESTS[requestId] = {
+    targetName = targetName,
+    pid = pid,
+    heroHidden = hidden,
+    origin = { origin.x, origin.y, origin.z },
+    distance = distance,
+    yaw = yaw,
+    pitch = pitch,
+    heightOffset = heightOffset,
+  }
+  CustomGameEventManager:Send_ServerToPlayer(player, "mcp_camera_frame_request", {
+    request_id = requestId,
+    target_name = targetName,
+    player_id = pid,
+    hero_hidden = hidden and 1 or 0,
+    origin_x = origin.x,
+    origin_y = origin.y,
+    origin_z = origin.z,
+    distance = distance,
+    yaw = yaw,
+    pitch = pitch,
+    height_offset = heightOffset,
+  })
+  out("FRAME_SENT", requestId, "target=" .. targetName)
+end
+
+if CustomGameEventManager and not _G.__MCP_CAMERA_FRAME_REPORT_LISTENER then
+  _G.__MCP_CAMERA_FRAME_REPORT_LISTENER = CustomGameEventManager:RegisterListener("mcp_camera_frame_report", function(_, payload)
+    local requestId = tostring(payload and payload.request_id or "unknown")
+    local pending = _G.__MCP_FRAME_REQUESTS and _G.__MCP_FRAME_REQUESTS[requestId] or nil
+    if pending == nil then
+      out("FRAME_ERR", requestId, "unexpected or expired camera-frame report")
+      return
+    end
+    _G.__MCP_FRAME_REQUESTS[requestId] = nil
+    if tostring(payload and payload.target_name or "") ~= pending.targetName then
+      out("FRAME_ERR", requestId, "camera-frame target did not match the pending request")
+      return
+    end
+    out("FRAME_OK", requestId, jsonEncode({
+      targetName = pending.targetName,
+      pid = pending.pid,
+      heroHidden = pending.heroHidden,
+      origin = pending.origin,
+      focusPoint = {
+        tonumber(payload and payload.focus_x),
+        tonumber(payload and payload.focus_y),
+        tonumber(payload and payload.focus_z),
+      },
+      lookAt = {
+        tonumber(payload and payload.look_at_x),
+        tonumber(payload and payload.look_at_y),
+        tonumber(payload and payload.look_at_z),
+      },
+      camera = {
+        tonumber(payload and payload.camera_x),
+        tonumber(payload and payload.camera_y),
+        tonumber(payload and payload.camera_z),
+      },
+      screenUv = {
+        tonumber(payload and payload.screen_u),
+        tonumber(payload and payload.screen_v),
+      },
+      settings = {
+        distance = pending.distance,
+        yaw = pending.yaw,
+        pitch = pending.pitch,
+        heightOffset = pending.heightOffset,
+      },
+    }))
+  end)
+end
+
 -- Ask the optional Panorama bridge for the local camera and minimap geometry.
 -- Usage: mcp_camera <request-id> [player-id]
 local function cmd_camera(_, requestId, requestedPid)
@@ -559,10 +688,11 @@ reg("mcp_level", cmd_level, "MCP: level a hero up to N (mcp_level <level> [pid])
 reg("mcp_item", cmd_item, "MCP: give an item (mcp_item <item> [pid])")
 reg("mcp_event", cmd_event, "MCP: fire a custom game event to clients (mcp_event <name> [json])")
 reg("mcp_focus", cmd_focus, "MCP: focus a player's camera on a named map entity")
+reg("mcp_frame", cmd_frame, "MCP: deterministically frame a named entity through the optional Panorama bridge")
 reg("mcp_camera", cmd_camera, "MCP: query local camera/minimap geometry through the optional Panorama bridge")
 reg("mcp_hud", cmd_hud, "MCP: toggle HUD visibility (mcp_hud <0|1>) for clean shots")
 reg("mcp_pause", cmd_pause, "MCP: pause/unpause (mcp_pause <0|1>)")
 
-out("DebugSDK", "loaded", "v=" .. SDK_VERSION, "(commands: mcp_ping mcp_state mcp_dump mcp_eval mcp_nav mcp_anim mcp_assert mcp_spawn mcp_gold mcp_level mcp_item mcp_event mcp_focus mcp_camera mcp_hud mcp_pause)")
+out("DebugSDK", "loaded", "v=" .. SDK_VERSION, "(commands: mcp_ping mcp_state mcp_dump mcp_eval mcp_nav mcp_anim mcp_assert mcp_spawn mcp_gold mcp_level mcp_item mcp_event mcp_focus mcp_frame mcp_camera mcp_hud mcp_pause)")
 
 return { version = SDK_VERSION }
