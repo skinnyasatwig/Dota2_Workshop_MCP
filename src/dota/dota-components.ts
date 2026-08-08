@@ -296,6 +296,71 @@ function pointStrictlyInsidePolygon(
   return inside;
 }
 
+function counterClockwiseOutline(points: [number, number][]): [number, number][] {
+  const ordered = signedPolygonArea(points) < 0
+    ? [points[0], ...points.slice(1).reverse()]
+    : [...points];
+  return ordered.map(([x, y]) => [normalizedNumber(x), normalizedNumber(y)]);
+}
+
+function outlinePerimeter(points: readonly [number, number][]): number {
+  return points.reduce((total, point, index) => {
+    const next = points[(index + 1) % points.length];
+    return total + Math.hypot(next[0] - point[0], next[1] - point[1]);
+  }, 0);
+}
+
+function outlineVertexFractions(points: readonly [number, number][]): number[] {
+  const perimeter = outlinePerimeter(points);
+  const fractions = [0];
+  let traversed = 0;
+  for (let index = 0; index < points.length - 1; index++) {
+    const next = points[index + 1];
+    traversed += Math.hypot(next[0] - points[index][0], next[1] - points[index][1]);
+    fractions.push(traversed / perimeter);
+  }
+  return fractions;
+}
+
+function sampleOutlineAtFraction(
+  points: readonly [number, number][],
+  fraction: number,
+): [number, number] {
+  const perimeter = outlinePerimeter(points);
+  const target = fraction * perimeter;
+  let traversed = 0;
+  for (let index = 0; index < points.length; index++) {
+    const start = points[index];
+    const end = points[(index + 1) % points.length];
+    const length = Math.hypot(end[0] - start[0], end[1] - start[1]);
+    if (target <= traversed + length + 1e-9) {
+      const ratio = Math.max(0, Math.min(1, (target - traversed) / length));
+      return [
+        normalizedNumber(start[0] + (end[0] - start[0]) * ratio),
+        normalizedNumber(start[1] + (end[1] - start[1]) * ratio),
+      ];
+    }
+    traversed += length;
+  }
+  return [...points[0]];
+}
+
+function pairedPlatformOutlines(
+  outerInput: [number, number][],
+  holeInput: [number, number][],
+): { outer: [number, number][]; hole: [number, number][] } {
+  const outer = counterClockwiseOutline(outerInput);
+  const hole = counterClockwiseOutline(holeInput);
+  if (outer.length === hole.length) return { outer, hole };
+  const fractions = [...outlineVertexFractions(outer), ...outlineVertexFractions(hole)]
+    .sort((left, right) => left - right)
+    .filter((value, index, all) => index === 0 || Math.abs(value - all[index - 1]) > 1e-9);
+  return {
+    outer: fractions.map((fraction) => sampleOutlineAtFraction(outer, fraction)),
+    hole: fractions.map((fraction) => sampleOutlineAtFraction(hole, fraction)),
+  };
+}
+
 function validatePairedPlatformOutlines(
   outer: [number, number][],
   hole: [number, number][],
@@ -305,13 +370,7 @@ function validatePairedPlatformOutlines(
   const holeError = simplePolygonError(hole);
   if (outerError) issues.push({ path: ["outer"], message: `outer outline ${outerError}` });
   if (holeError) issues.push({ path: ["hole"], message: `hole outline ${holeError}` });
-  if (outer.length !== hole.length) {
-    issues.push({
-      path: ["hole"],
-      message: "must contain the same number of corresponding points as outer",
-    });
-  }
-  if (outerError || holeError || outer.length !== hole.length) return issues;
+  if (outerError || holeError) return issues;
   const outerArea = signedPolygonArea(outer);
   const holeArea = signedPolygonArea(hole);
   if (Math.sign(outerArea) !== Math.sign(holeArea)) {
@@ -341,24 +400,29 @@ function validatePairedPlatformOutlines(
       }
     }
   }
-  const spokes = outer.map((point, index) => [point, hole[index]] as const);
+  const paired = pairedPlatformOutlines(outer, hole);
+  const spokes = paired.outer.map((point, index) => [point, paired.hole[index]] as const);
   for (let index = 0; index < spokes.length; index++) {
     const [from, to] = spokes[index];
     const midpoint: [number, number] = [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2];
-    if (!pointStrictlyInsidePolygon(midpoint, outer) || pointStrictlyInsidePolygon(midpoint, hole)) {
+    if (!pointStrictlyInsidePolygon(midpoint, paired.outer) || pointStrictlyInsidePolygon(midpoint, paired.hole)) {
       issues.push({
         path: ["hole", index],
         message: "must form a platform segment that stays between the outer and hole outlines",
       });
       return issues;
     }
-    for (let edge = 0; edge < outer.length; edge++) {
-      const next = (edge + 1) % outer.length;
-      if (edge !== index && next !== index && segmentsTouchOrIntersect(from, to, outer[edge], outer[next])) {
+    for (let edge = 0; edge < paired.outer.length; edge++) {
+      const next = (edge + 1) % paired.outer.length;
+      if (edge !== index && next !== index && segmentsTouchOrIntersect(
+        from, to, paired.outer[edge], paired.outer[next],
+      )) {
         issues.push({ path: ["hole", index], message: "corresponding spoke crosses the outer outline" });
         return issues;
       }
-      if (edge !== index && next !== index && segmentsTouchOrIntersect(from, to, hole[edge], hole[next])) {
+      if (edge !== index && next !== index && segmentsTouchOrIntersect(
+        from, to, paired.hole[edge], paired.hole[next],
+      )) {
         issues.push({ path: ["hole", index], message: "corresponding spoke crosses the hole outline" });
         return issues;
       }
@@ -370,14 +434,11 @@ function validatePairedPlatformOutlines(
       }
     }
   }
-  const reverse = outerArea < 0;
-  const normalizedOuter = reverse ? [...outer].reverse() : outer;
-  const normalizedHole = reverse ? [...hole].reverse() : hole;
   let segmentArea = 0;
-  for (let index = 0; index < normalizedOuter.length; index++) {
-    const next = (index + 1) % normalizedOuter.length;
+  for (let index = 0; index < paired.outer.length; index++) {
+    const next = (index + 1) % paired.outer.length;
     const segment: [number, number][] = [
-      normalizedOuter[index], normalizedOuter[next], normalizedHole[next], normalizedHole[index],
+      paired.outer[index], paired.outer[next], paired.hole[next], paired.hole[index],
     ];
     const segmentError = simplePolygonError(segment);
     const area = signedPolygonArea(segment);
@@ -407,7 +468,7 @@ const holedPlatformComponentSchema = z.object({
   /** World-space center of the complete platform prism. Outlines are local XY coordinates. */
   center: point3,
   yaw: yawSchema,
-  /** Paired simple outlines. Matching indexes define the checked segment seams. */
+  /** Simple outlines. Equal counts use explicit pairs; unequal counts are safely perimeter-subdivided. */
   outer: z.array(point2).min(3).max(64),
   hole: z.array(point2).min(3).max(64),
   height: z.number().finite().min(1).max(4096),
@@ -930,11 +991,7 @@ function pairedOutlinePlatformParts(component: {
   solids: ManagedMapSolid[];
   navSurfaces: ManagedMapNavSurface[];
 } {
-  const normalizeFootprint = (points: [number, number][]) =>
-    points.map(([x, y]) => [normalizedNumber(x), normalizedNumber(y)] as [number, number]);
-  const reverse = signedPolygonArea(component.outer) < 0;
-  const outer = normalizeFootprint(reverse ? [...component.outer].reverse() : component.outer);
-  const hole = normalizeFootprint(reverse ? [...component.hole].reverse() : component.hole);
+  const { outer, hole } = pairedPlatformOutlines(component.outer, component.hole);
   const solids: ManagedMapSolid[] = [];
   const navSurfaces: ManagedMapNavSurface[] = [];
   for (let index = 0; index < outer.length; index++) {

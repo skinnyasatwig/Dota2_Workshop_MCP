@@ -379,9 +379,25 @@ test("checked holed platforms compose paired irregular outlines without raw mesh
     expanded.managedNavSurfaces.map((surface) => surface.extrusion),
     expanded.managedSolids.map((solid) => solid.extrusion),
   );
-  assert.throws(
-    () => componentList.parse([{ ...platform, hole: hole.slice(0, 4) }]),
-    /same number of corresponding points/,
+  const [unequalPlatform] = componentList.parse([{ ...platform, hole: hole.slice(0, 4) }]);
+  const unequalSolids = expandDotaComponents([unequalPlatform]).managedSolids;
+  assert.equal(unequalSolids.length, 8);
+  const unequalOuterBoundary = unequalSolids.map((solid) => solid.extrusion.points[0]);
+  const unequalHoleBoundary = unequalSolids.map((solid) => solid.extrusion.points[3]);
+  assert.ok(outer.every((point) => unequalOuterBoundary.some((candidate) =>
+    candidate[0] === point[0] && candidate[1] === point[1])));
+  assert.ok(hole.slice(0, 4).every((point) => unequalHoleBoundary.some((candidate) =>
+    candidate[0] === point[0] && candidate[1] === point[1])));
+  const clockwiseOuter = [outer[0], ...outer.slice(1).reverse()];
+  const clockwiseHole = [hole[0], ...hole.slice(1).reverse()];
+  const [clockwisePlatform] = componentList.parse([{
+    ...platform,
+    outer: clockwiseOuter,
+    hole: clockwiseHole,
+  }]);
+  assert.deepEqual(
+    expandDotaComponents([clockwisePlatform]).managedSolids.map((solid) => solid.extrusion),
+    expanded.managedSolids.map((solid) => solid.extrusion),
   );
   assert.throws(
     () => componentList.parse([{
@@ -484,6 +500,6 @@ test("the documented Dota component assembly remains valid", async () => {
   assert.equal(specification.managedEntities?.filter((entity) => entity.classname === "npc_dota_fort").length, 2);
   assert.equal(specification.managedEntities?.filter((entity) => entity.classname === "npc_dota_tower").length, 5);
   assert.equal(specification.managedTerrain?.filter((operation) => operation.op === "ramp").length, 3);
-  assert.equal(specification.managedSolids?.length, 19);
-  assert.equal(specification.managedNavSurfaces?.length, 16);
+  assert.equal(specification.managedSolids?.length, 22);
+  assert.equal(specification.managedNavSurfaces?.length, 19);
 });

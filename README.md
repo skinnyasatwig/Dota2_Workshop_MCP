@@ -353,11 +353,14 @@ outer and inner values are explicit vertex radii; the center, yaw, height, segme
 validated. The composition leaves a real central opening without allowing raw mesh input. Valve's
 compiler accepted the complete visible eight-segment ring. In a separate terrain-free engine fixture, Dota connected
 an arc across four wedge seams while both the center hole and the surrounding void remained non-traversable.
-`holedPlatform` generalizes that composition to matching irregular outer and hole outlines. Corresponding point pairs
-define the checked seams; both outlines must have the same point count and winding. The validator proves each outline
-is simple, keeps the hole strictly inside, rejects crossing boundaries or spokes, and verifies that the generated
-segments partition the platform without gaps or overlaps. It then emits only ordinary checked solid/navigation pairs,
-not a user-authored triangle mesh. Valve's converter and ResourceCompiler accept the irregular five-segment fixture.
+`holedPlatform` generalizes that composition to irregular outer and hole outlines. Equal point counts define explicit
+seam pairs. When the counts differ, the MCP deterministically subdivides existing boundary edges at their combined
+normalized-perimeter positions; this preserves every supplied vertex and both exact outlines while producing paired
+seams. Both loops must use the same winding and point zero is the correspondence anchor. The validator proves each
+outline is simple, keeps the hole strictly inside, rejects crossing boundaries or spokes, and verifies that the
+generated segments partition the platform without gaps or overlaps after output rounding. It then emits only ordinary
+checked solid/navigation pairs, not a user-authored triangle mesh. Valve's converter and ResourceCompiler accept the
+unequal five-outer/four-hole fixture after its boundaries are safely expanded to eight segments.
 These recipes can also live inside a named specification `component`. One local objective kit can therefore combine,
 for example, a camp, boss pit, fog blockers, bridge approach, and ring platform, then be placed or mirrored repeatedly
 with separate world/tile offsets. The MCP expands the recipes first and applies one namespacing/transform pass to all
@@ -556,7 +559,7 @@ half-edge has exactly one opposite before writing the VMAP. Solids reconcile by 
 components, appear in `map_preview` with an uphill arrow when sloped, and block their true concave footprint in offline
 reachability when their vertical range intersects the standing corridor. The repository fixture round-trips flat and
 sloped L-shaped solids, a checked three-piece arch, a visible bridge deck, a complete sloped bridge approach, an
-eight-segment ring platform, and a five-segment irregular holed platform,
+eight-segment ring platform, and an eight-segment unequal-outline holed platform,
 each paired where appropriate with Valve navigation geometry,
 through Valve's converter and compiles them into a real VPK. The general map material preflight proves the selected visible material exists before a build,
 sync, or compile is allowed to spend work on it.
@@ -592,8 +595,8 @@ Then launch it: `addon_launch_custom_game map="<name>"`.
 
 > Limitation: the MCP can safely generate checked flat or per-corner-sloped extrusions with convex or concave outlines,
 > flat/sloped convex gameplay volumes, a rectangular arch assembled from three checked solids, and checked bridge
-> decks/approaches, regular ring platforms, and matching-outline irregular holed platforms paired with Valve
-> navigation-walkable geometry. Freeform 3D meshes, unmatched or multiple hole boundaries, curved or irregular
+> decks/approaches, regular ring platforms, and irregular holed platforms paired with Valve navigation-walkable
+> geometry. Freeform 3D meshes, multiple hole boundaries, curved or irregular
 > arches, curves, terrain props, and decorative cliff brushwork still require Hammer or
 > a future checked recipe. Because Valve GridNav aliases height at a shared X/Y location, independent stacked bridge
 > and underpass navigation is not represented by this API.

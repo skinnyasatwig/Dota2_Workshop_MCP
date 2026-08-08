@@ -237,6 +237,15 @@ Last updated: 2026-08-07
     new raw VMAP path. Unit tests cover invalid topology and the preserved opening. The repository fixture round-tripped
     and compiled an irregular five-segment platform successfully without launching Dota or Hammer.
 
+49. This follow-up - removed `holedPlatform`'s equal-point-count restriction without approximating either boundary.
+    Equal counts still use the author's explicit pairings. Unequal counts merge the two loops' normalized-perimeter
+    vertex positions, subdivide only existing edges, preserve every original vertex, and use point zero as the shared
+    anchor. The resulting rounded loops pass the same strict-inside, noncrossing-spoke, simple-segment, and total-area
+    proofs before any geometry is emitted; unsafe automatic correspondences fail closed. Tests cover a five-point outer
+    loop with a four-point hole, exact boundary preservation, clockwise normalization, and prior rejection cases. The
+    documented example and repository compiler fixture now exercise that unequal case as eight generated segment pairs;
+    Valve conversion and ResourceCompiler accepted it without launching Dota or Hammer.
+
 ## Current verification record
 
 - TypeScript build passes.
@@ -251,7 +260,7 @@ Last updated: 2026-08-07
 - `npm run test:compiler-fixture` successfully round-tripped and compiled the repository-owned acceptance payload,
   including its sloped trigger, flat and sloped concave L-shaped world solids, checked rectangular arch, checked bridge
   deck/navigation twin, complete visible sloped bridge approach/navigation twin, eight-segment ring platform,
-  five-segment irregular holed platform, and explicit navigation obstruction,
+  eight-segment unequal-outline holed platform, and explicit navigation obstruction,
   into a real VPK. The generated map uses Valve's installed blank template only as required hidden
   infrastructure, depends on no private 3v3 file, stores no copied Valve VMAP, and leaves no temporary addon trees.
   Its checked structures now originate inside one reusable component placement, proving the recipe path through
