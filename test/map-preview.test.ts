@@ -160,6 +160,44 @@ test("diagnostic preview renders gameplay and navigation overlays", () => {
   assert.ok(colors.size > 6);
 });
 
+test("diagnostic preview draws measured passing and failing spatial assertions", () => {
+  const rendered = renderTileGridPreview(grid(), [], {
+    scale: 4,
+    spatialAssertions: [
+      {
+        name: "passing_spacing",
+        kind: "pathSeparation",
+        passed: true,
+        actualDistance: 1024,
+        minimum: 1000,
+        references: ["north", "south"],
+        closestPoints: [[128, 128], [1152, 128]],
+        detail: "Minimum planar polyline separation 1024.00; required minimum 1000.",
+      },
+      {
+        name: "failing_spacing",
+        kind: "pathSeparation",
+        passed: false,
+        actualDistance: 512,
+        minimum: 1000,
+        references: ["near", "nearer"],
+        closestPoints: [[128, 768], [640, 768]],
+        detail: "Minimum planar polyline separation 512.00; required minimum 1000.",
+      },
+    ],
+  });
+
+  assert.equal(rendered.stats.overlays.spatialAssertions, 2);
+  assert.equal(rendered.stats.overlays.failedSpatialAssertions, 1);
+  const decoded = decodePng(rendered.png);
+  const colors = new Set<string>();
+  for (let index = 0; index < decoded.rgba.length; index += 4) {
+    colors.add(`${decoded.rgba[index]},${decoded.rgba[index + 1]},${decoded.rgba[index + 2]}`);
+  }
+  assert.ok(colors.has("116,255,91"));
+  assert.ok(colors.has("255,61,61"));
+});
+
 test("diagnostic preview marks safe ramp corridors and the neutral recommendation", () => {
   const tileGrid = grid(5, 3);
   addVerticalCliff(tileGrid, 2);

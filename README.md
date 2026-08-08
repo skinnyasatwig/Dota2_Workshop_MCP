@@ -629,6 +629,9 @@ checks all expanded entities. `spatialAssertions` turns important layout intent 
 nodes), while `pathSeparation` measures the true closest points along two complete managed polylines rather than only
 comparing waypoints. Assertions are named, reference-checked, component-aware, and namespaced through reusable
 placements. Build/sync refuses a violated assertion; validation reports the measured distance without writing.
+`map_preview` draws each measurement between its deterministic closest world points: bright green means the rule passes,
+red means it fails, and a red X identifies a zero-distance crossing. The same witness coordinates and measurements are
+returned as structured data, so automation and humans inspect the identical result.
 `managedTerrain` is an ordered list of the same idempotent tile-grid
 operations accepted by `map_terrain`: `fill`, `height`, `water`, `tileset`, and `ramp`, using `rect`,
 `circle`, `ring`, `path`, `polygon`, reusable `region`, or `managedPath` shapes in tile coordinates. Contract sync previews exact height-vertex,

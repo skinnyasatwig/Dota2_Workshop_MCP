@@ -1083,7 +1083,7 @@ export function registerMapGenTools(server: McpServer) {
         "entities, waypoint paths, tower ranges, camps, objectives, minimap bounds, checked trigger/blocker volumes, " +
         "cached model PHYS bounds, CRC-current curated visual-prop bounds, explicit Valve tree/obstruction proximity, " +
         "unresolved solid props, terrain holes, unreachable regions, safe candidate ramp corridors, and bounded " +
-        "nearby placement repairs for gameplay entities on blocked terrain.",
+        "nearby placement repairs for gameplay entities on blocked terrain, and measured contract spatial assertions.",
       inputSchema: {
         projectRoot: z.string().optional(),
         map: z.string(),
@@ -1111,6 +1111,9 @@ export function registerMapGenTools(server: McpServer) {
         showVisualProps: z.boolean().optional().describe(
           "Show CRC-current render-only bounds for curated palette models (default true; never affects pathing).",
         ),
+        showSpatialAssertions: z.boolean().optional().describe(
+          "Show passing/failing measured entity-distance and path-separation rules from the map contract (default true).",
+        ),
         resolveModelCollision: z.boolean().optional().describe(
           "Resolve and cache real model PHYS bounds through VRF (default true; no Dota launch).",
         ),
@@ -1137,6 +1140,7 @@ export function registerMapGenTools(server: McpServer) {
       showVisionBlockers,
       showCollisionObstacles,
       showVisualProps,
+      showSpatialAssertions,
       resolveModelCollision,
     }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
@@ -1145,6 +1149,10 @@ export function registerMapGenTools(server: McpServer) {
       if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}.`);
       const mapText = await vmapToText(dota.dmxconvertExe, p.contentVmap);
       const parsedEntities = parseMapEntities(mapText);
+      const resolvedContract = await loadMapContract(project.root, map, undefined, parseMapSpecification);
+      const spatialAssertions = resolvedContract
+        ? evaluateSpatialAssertions(resolvedContract.contract)
+        : [];
       let visualPropReport = emptyMapVisualPropReport();
       if (showVisualProps !== false && curatedVisualPropCandidateCount(parsedEntities) > 0) {
         visualPropReport = await resolveProjectCuratedVisualPropFootprints(
@@ -1178,8 +1186,10 @@ export function registerMapGenTools(server: McpServer) {
         showVisionBlockers,
         showCollisionObstacles,
         showVisualProps,
+        showSpatialAssertions,
         collisionObstacles,
         visualPropFootprints: visualPropReport.footprints,
+        spatialAssertions,
       });
       const reachability = {
         walkableCellCount: rendered.reachability.walkableCellCount,
@@ -1207,6 +1217,8 @@ export function registerMapGenTools(server: McpServer) {
         `${rendered.stats.suggestedRamps} suggested ramp corridor(s), ` +
         `${rendered.stats.suggestedPlacements} suggested entity placement(s), ` +
         `${rendered.stats.unreachableCells} unreachable, ${rendered.stats.holeCells} hole cells, ` +
+        `${rendered.stats.overlays.spatialAssertions} spatial assertion(s) shown ` +
+        `(${rendered.stats.overlays.failedSpatialAssertions} failing), ` +
         `${visualPropReport.footprintCount} CRC-current visual-prop footprint(s)` +
         `${visualPropReport.staleModelCount ? `; ${visualPropReport.staleModelCount} stale model snapshot(s) omitted` : ""}. ` +
         `${visualPropReport.shadowedModelCount ? `${visualPropReport.shadowedModelCount} addon-shadowed model(s) omitted. ` : ""}` +
@@ -1217,7 +1229,7 @@ export function registerMapGenTools(server: McpServer) {
           { type: "text", text: caption },
           { type: "image", data: rendered.png.toString("base64"), mimeType: "image/png" },
         ],
-        structuredContent: { map, stats: rendered.stats, reachability, visualProps: visualPropReport },
+        structuredContent: { map, stats: rendered.stats, reachability, spatialAssertions, visualProps: visualPropReport },
       };
     }),
   );

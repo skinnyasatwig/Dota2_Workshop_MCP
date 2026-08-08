@@ -35,24 +35,26 @@ export interface SpatialAssertionResult {
   minimum?: number;
   maximum?: number;
   references: [string, string];
+  /** Closest planar points, in world units, used to explain and preview the measurement. */
+  closestPoints?: [Point2, Point2];
   detail: string;
 }
 
-type Point2 = [number, number];
+export type Point2 = [number, number];
 
 function parseOrigin(entity: ManagedMapEntity): Point2 | undefined {
   const values = entity.origin.trim().split(/\s+/).map(Number);
   return values.length === 3 && values.every(Number.isFinite) ? [values[0], values[1]] : undefined;
 }
 
-function pointSegmentDistance(point: Point2, from: Point2, to: Point2): number {
+function closestPointOnSegment(point: Point2, from: Point2, to: Point2): Point2 {
   const dx = to[0] - from[0];
   const dy = to[1] - from[1];
   const lengthSquared = dx * dx + dy * dy;
-  if (lengthSquared === 0) return Math.hypot(point[0] - from[0], point[1] - from[1]);
+  if (lengthSquared === 0) return [from[0], from[1]];
   const amount = Math.max(0, Math.min(1,
     ((point[0] - from[0]) * dx + (point[1] - from[1]) * dy) / lengthSquared));
-  return Math.hypot(point[0] - (from[0] + dx * amount), point[1] - (from[1] + dy * amount));
+  return [from[0] + dx * amount, from[1] + dy * amount];
 }
 
 function orientation(a: Point2, b: Point2, c: Point2): number {
@@ -76,14 +78,39 @@ function segmentsIntersect(a0: Point2, a1: Point2, b0: Point2, b1: Point2): bool
     onSegment(a0, b0, b1) || onSegment(a1, b0, b1);
 }
 
-function segmentDistance(a0: Point2, a1: Point2, b0: Point2, b1: Point2): number {
-  if (segmentsIntersect(a0, a1, b0, b1)) return 0;
-  return Math.min(
-    pointSegmentDistance(a0, b0, b1),
-    pointSegmentDistance(a1, b0, b1),
-    pointSegmentDistance(b0, a0, a1),
-    pointSegmentDistance(b1, a0, a1),
-  );
+export interface DistanceWitness {
+  distance: number;
+  points: [Point2, Point2];
+}
+
+function sharedSegmentPoint(a0: Point2, a1: Point2, b0: Point2, b1: Point2): Point2 | undefined {
+  for (const point of [a0, a1, b0, b1]) {
+    if (onSegment(point, a0, a1) && onSegment(point, b0, b1)) return [point[0], point[1]];
+  }
+  const aDx = a1[0] - a0[0];
+  const aDy = a1[1] - a0[1];
+  const bDx = b1[0] - b0[0];
+  const bDy = b1[1] - b0[1];
+  const denominator = aDx * bDy - aDy * bDx;
+  if (Math.abs(denominator) <= 1e-6) return undefined;
+  const amount = ((b0[0] - a0[0]) * bDy - (b0[1] - a0[1]) * bDx) / denominator;
+  return [a0[0] + amount * aDx, a0[1] + amount * aDy];
+}
+
+function segmentDistanceWitness(a0: Point2, a1: Point2, b0: Point2, b1: Point2): DistanceWitness {
+  if (segmentsIntersect(a0, a1, b0, b1)) {
+    const point = sharedSegmentPoint(a0, a1, b0, b1) ?? [a0[0], a0[1]] as Point2;
+    return { distance: 0, points: [point, [point[0], point[1]]] };
+  }
+  const candidates: [Point2, Point2][] = [
+    [a0, closestPointOnSegment(a0, b0, b1)],
+    [a1, closestPointOnSegment(a1, b0, b1)],
+    [closestPointOnSegment(b0, a0, a1), b0],
+    [closestPointOnSegment(b1, a0, a1), b1],
+  ];
+  return candidates
+    .map((points) => ({ distance: Math.hypot(points[1][0] - points[0][0], points[1][1] - points[0][1]), points }))
+    .reduce((best, candidate) => candidate.distance < best.distance ? candidate : best);
 }
 
 function pathSegments(path: ManagedMapPath): [Point2, Point2][] {
@@ -96,13 +123,18 @@ function pathSegments(path: ManagedMapPath): [Point2, Point2][] {
 }
 
 export function minimumPathSeparation(a: ManagedMapPath, b: ManagedMapPath): number {
-  let minimum = Number.POSITIVE_INFINITY;
+  return minimumPathSeparationWitness(a, b).distance;
+}
+
+export function minimumPathSeparationWitness(a: ManagedMapPath, b: ManagedMapPath): DistanceWitness {
+  let minimum: DistanceWitness | undefined;
   for (const [a0, a1] of pathSegments(a)) {
     for (const [b0, b1] of pathSegments(b)) {
-      minimum = Math.min(minimum, segmentDistance(a0, a1, b0, b1));
+      const candidate = segmentDistanceWitness(a0, a1, b0, b1);
+      if (!minimum || candidate.distance < minimum.distance) minimum = candidate;
     }
   }
-  return minimum;
+  return minimum ?? { distance: Number.POSITIVE_INFINITY, points: [[0, 0], [0, 0]] };
 }
 
 export function parseSpatialAssertions(
@@ -182,6 +214,7 @@ export function evaluateSpatialAssertions(contract: MapContract): SpatialAsserti
         minimum: assertion.min,
         maximum: assertion.max,
         references: [assertion.from, assertion.to],
+        closestPoints: [from, to],
         detail: `Planar distance ${actualDistance.toFixed(2)}; required ` +
           `${assertion.min === undefined ? "no minimum" : `minimum ${assertion.min}`}, ` +
           `${assertion.max === undefined ? "no maximum" : `maximum ${assertion.max}`}.`,
@@ -201,7 +234,8 @@ export function evaluateSpatialAssertions(contract: MapContract): SpatialAsserti
         detail: `Missing managed path reference(s): ${missing}.`,
       };
     }
-    const actualDistance = minimumPathSeparation(pathA, pathB);
+    const witness = minimumPathSeparationWitness(pathA, pathB);
+    const actualDistance = witness.distance;
     return {
       name: assertion.name,
       kind: assertion.kind,
@@ -209,6 +243,7 @@ export function evaluateSpatialAssertions(contract: MapContract): SpatialAsserti
       actualDistance,
       minimum: assertion.min,
       references: [assertion.pathA, assertion.pathB],
+      closestPoints: witness.points,
       detail: `Minimum planar polyline separation ${actualDistance.toFixed(2)}; required minimum ${assertion.min}.`,
     };
   });

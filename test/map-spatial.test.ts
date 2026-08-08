@@ -5,6 +5,7 @@ import {
   assertSpatialAssertions,
   evaluateSpatialAssertions,
   minimumPathSeparation,
+  minimumPathSeparationWitness,
 } from "../src/dota/map-spatial.js";
 
 test("spatial assertions measure entity distance and true polyline separation", () => {
@@ -36,11 +37,17 @@ test("spatial assertions measure entity distance and true polyline separation", 
 });
 
 test("path separation checks segment interiors rather than waypoint pairs only", () => {
+  const a = { name: "a", points: [[-512, -512, 128], [512, 512, 128]] };
+  const b = { name: "b", points: [[-512, 512, 128], [512, -512, 128]] };
   const separation = minimumPathSeparation(
-    { name: "a", points: [[-512, -512, 128], [512, 512, 128]] },
-    { name: "b", points: [[-512, 512, 128], [512, -512, 128]] },
+    a,
+    b,
   );
   assert.equal(separation, 0);
+  assert.deepEqual(minimumPathSeparationWitness(a, b), {
+    distance: 0,
+    points: [[0, 0], [0, 0]],
+  });
 });
 
 test("violated spatial assertions fail before map reconciliation", () => {

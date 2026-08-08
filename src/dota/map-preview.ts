@@ -16,6 +16,7 @@ import {
 } from "./map-nav-surface.js";
 import { MapCollisionObstacle } from "./map-collision.js";
 import { MapVisualPropFootprint } from "./map-visual-props.js";
+import type { SpatialAssertionResult } from "./map-spatial.js";
 
 export interface MapPreviewOptions {
   scale?: number;
@@ -37,10 +38,13 @@ export interface MapPreviewOptions {
   showVisionBlockers?: boolean;
   showCollisionObstacles?: boolean;
   showVisualProps?: boolean;
+  showSpatialAssertions?: boolean;
   /** Pre-resolved physical/class collision inventory supplied by the async tools. */
   collisionObstacles?: readonly MapCollisionObstacle[];
   /** CRC-current curated render bounds. Visual context only; never passed to reachability. */
   visualPropFootprints?: readonly MapVisualPropFootprint[];
+  /** Pre-evaluated contract measurements supplied by the async preview tool. */
+  spatialAssertions?: readonly SpatialAssertionResult[];
 }
 
 export interface MapPreviewStats {
@@ -76,6 +80,8 @@ export interface MapPreviewStats {
     visualProps: number;
     rampSuggestions: number;
     placementSuggestions: number;
+    spatialAssertions: number;
+    failedSpatialAssertions: number;
   };
   legend: Record<string, string>;
 }
@@ -433,6 +439,23 @@ function drawPreview(
     }
   }
 
+  const visibleSpatialAssertions = options.showSpatialAssertions === false ? [] : options.spatialAssertions ?? [];
+  let drawnSpatialAssertions = 0;
+  for (const assertion of visibleSpatialAssertions) {
+    if (!assertion.closestPoints) continue;
+    const from = worldPixel([assertion.closestPoints[0][0], assertion.closestPoints[0][1], 0]);
+    const to = worldPixel([assertion.closestPoints[1][0], assertion.closestPoints[1][1], 0]);
+    const color: Color = assertion.passed ? [116, 255, 91] : [255, 61, 61];
+    line(from[0], from[1], to[0], to[1], color, 0.95, 2);
+    marker(from[0], from[1], color, 2);
+    marker(to[0], to[1], color, 2);
+    if (assertion.actualDistance !== undefined && assertion.actualDistance <= 1e-6) {
+      line(from[0] - 4, from[1] - 4, from[0] + 4, from[1] + 4, color, 1, 2);
+      line(from[0] - 4, from[1] + 4, from[0] + 4, from[1] - 4, color, 1, 2);
+    }
+    drawnSpatialAssertions++;
+  }
+
   const visionNodes = named.filter((entity) => entity.classname === "ent_fow_blocker_node");
   const visionByName = new Map(visionNodes.map((entity) => [entity.targetname!, entity]));
   let visionBlockerSegments = 0;
@@ -543,6 +566,8 @@ function drawPreview(
       visualProps: options.showVisualProps === false ? 0 : options.visualPropFootprints?.length ?? 0,
       rampSuggestions: showRampSuggestions ? reachability.rampSuggestions.length : 0,
       placementSuggestions: showPlacementSuggestions ? reachability.placementSuggestions.length : 0,
+      spatialAssertions: drawnSpatialAssertions,
+      failedSpatialAssertions: visibleSpatialAssertions.filter((assertion) => !assertion.passed).length,
     },
     legend: {
       water: "blue",
@@ -563,6 +588,7 @@ function drawPreview(
       visionBlockers: "purple linked lines",
       collisionObstacles: "bright cyan exact PHYS hulls; medium cyan mesh envelopes; green-cyan conservative curved primitives; muted cyan PHYS bounds; dark green/orange class approximations; white X means model bounds unknown",
       visualProps: "pink outlines are CRC-current curated static or animated render bounds for placement context only; they never block pathing",
+      spatialAssertions: "bright green measured connectors pass declared layout rules; red connectors fail them; an X marks zero-distance overlap",
     },
   };
   return { png: encodeRgbaPng(width, height, rgba), stats, reachability, navSurfaceClearance };

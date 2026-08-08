@@ -486,10 +486,18 @@ Last updated: 2026-08-07
     cover exact 1,024-unit route spacing, segment-interior crossing, violations, unsafe input, missing references,
     component placement, and comparison drift without launching Dota or Hammer.
 
+73. This milestone - made contract measurements visually inspectable in the existing offline map preview. Spatial
+    evaluation now returns deterministic closest-point witness coordinates for both entity and full-polyline checks,
+    including exact segment-interior crossings. The preview draws bright-green pass connectors, red failure connectors,
+    and a same-point X for zero-distance overlap; its structured result includes every measured assertion. The project
+    preview runner loads the canonical 3v3 contract and forwards the same results. A real 640x640 acceptance preview
+    shows both route-spacing bars, both passing at 1,024 units against the 1,000-unit rule, with zero failed assertions.
+    Focused geometry and raster-color tests pass without launching Dota or Hammer.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 371 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 372 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 208 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed palette-bound audit: 20 of 20 model CRCs and MDAT snapshots match the current Dota VPK.
 - Installed palette-gallery proof: the four-model `river-wetland` set passed exact CRC checks, decoded to textured GLBs,
