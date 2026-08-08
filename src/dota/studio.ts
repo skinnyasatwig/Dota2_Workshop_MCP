@@ -53,6 +53,27 @@ export interface StudioOptions {
   sounds?: number;
   textures?: number;
   title?: string;
+  /** Exact compiled models to decode instead of fuzzy reference-library search. */
+  exactModels?: readonly StudioExactModel[];
+}
+
+/** A trusted, already-resolved compiled model used by deterministic galleries. */
+export interface StudioExactModel {
+  id: string;
+  title: string;
+  path: string;
+  archivePath: string;
+  name?: string;
+}
+
+interface StudioSearchHit {
+  id: string;
+  title: string;
+  path: string;
+}
+
+function isExactModel(model: StudioExactModel | StudioSearchHit): model is StudioExactModel {
+  return "archivePath" in model;
 }
 
 export interface ManifestEntry {
@@ -72,7 +93,7 @@ export interface StudioResult {
   counts: { particles: number; models: number; sounds: number; textures: number };
 }
 
-async function gather(ext: string, query: string | undefined, id: string | undefined, n: number) {
+async function gather(ext: string, query: string | undefined, id: string | undefined, n: number): Promise<StudioSearchHit[]> {
   const queries = query ? [query, ...FALLBACK] : FALLBACK;
   const out: { id: string; title: string; path: string }[] = [];
   const seen = new Set<string>();
@@ -91,7 +112,7 @@ async function gather(ext: string, query: string | undefined, id: string | undef
 export async function buildStudioGallery(opts: StudioOptions = {}): Promise<StudioResult> {
   const want = {
     particles: opts.particles ?? 10,
-    models: opts.models ?? 8,
+    models: opts.models ?? opts.exactModels?.length ?? 8,
     sounds: opts.sounds ?? 10,
     textures: opts.textures ?? 10,
   };
@@ -155,10 +176,12 @@ export async function buildStudioGallery(opts: StudioOptions = {}): Promise<Stud
 
   // --- models -> glb (with embedded/sibling textures) ---
   {
-    const cands = await gather("vmdl_c", opts.query, opts.id, want.models);
+    const cands: Array<StudioExactModel | StudioSearchHit> = opts.exactModels
+      ? [...opts.exactModels].slice(0, want.models)
+      : await gather("vmdl_c", opts.query, opts.id, want.models);
     for (const h of cands) {
       if (data.models.length >= want.models) break;
-      const vpk = await resolveVpk(h.id);
+      const vpk = isExactModel(h) ? h.archivePath : await resolveVpk(h.id);
       if (!vpk) continue;
       const i = data.models.length;
       // Decode into a KEPT per-model dir: VRF emits the .glb plus its textures as sibling
@@ -168,7 +191,9 @@ export async function buildStudioGallery(opts: StudioOptions = {}): Promise<Stud
       const glb = produced.find((f) => f.endsWith(".glb"));
       if (!glb) { await rm(mdir, { recursive: true, force: true }).catch(() => {}); continue; }
       const rel = `m${i}/` + relative(mdir, glb).split(sep).join("/");
-      const name = h.path.split("/").pop()!.replace(/\.\w+_c$/, "");
+      const name = (isExactModel(h) && h.name)
+        ? h.name
+        : h.path.split("/").pop()!.replace(/\.\w+_c$/, "");
       const id = `M${data.models.length + 1}`;
       data.models.push({ id, name, game: h.title, glb: rel });
       manifest.push({ id, kind: "model", name, game: h.title, gameId: h.id, path: h.path, file: rel });

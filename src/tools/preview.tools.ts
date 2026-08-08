@@ -17,6 +17,8 @@ import { decodePng, montage, Rgba } from "../util/imgmontage.js";
 import { encodeRgbaPng } from "../util/png.js";
 import { parseWav, renderWaveform, fmtDuration, detectAudio, mp3DurationSec, speakerTile } from "../util/waveform.js";
 import { buildStudioGallery, ManifestEntry } from "../dota/studio.js";
+import { buildStaticPropPalettePreview } from "../dota/palette-preview.js";
+import { STATIC_PROP_PALETTE_IDS } from "../dota/static-prop-palettes.js";
 import { serveDir, StaticServer } from "../dota/serve.js";
 import { startQuickTunnel, Tunnel } from "../dota/tunnel.js";
 import { json, error, guard, ToolResult } from "../util/result.js";
@@ -475,6 +477,60 @@ export function registerPreviewTools(server: McpServer) {
         `${legend}\n\n` +
         `Stays up until preview_studio_stop. Local: ${srv.url}`;
       return json({ url, local: srv.url, shared: !!tun, counts: c, dir: r.dir, manifest: r.manifest }, summary);
+    }),
+  );
+
+  server.registerTool(
+    "palette_preview",
+    {
+      title: "Preview one checked scenery palette in interactive 3D",
+      description:
+        "Decode exactly one curated static-prop palette from the installed Dota base VPK and open it as a bounded " +
+        "four-model interactive 3D gallery without launching Dota or Hammer. The tool verifies every model's current " +
+        "VPK CRC before decoding, refuses incomplete or stale palettes, and never treats these visual-only props as " +
+        "gameplay collision. By default the gallery is local-only; share=true creates a temporary public tunnel.",
+      inputSchema: {
+        palette: z.enum(STATIC_PROP_PALETTE_IDS).describe("Checked palette id from map_recipe_catalog."),
+        share: z.boolean().optional().describe("Create a temporary public Cloudflare URL (default false)."),
+      },
+    },
+    guard(async ({ palette, share }): Promise<ToolResult> => {
+      await stopLive();
+      const r = await buildStaticPropPalettePreview(palette);
+      const srv = await serveDir(r.dir);
+      let url = srv.url;
+      let tun: Tunnel | undefined;
+      let shareNote = "local-only review; pass share=true for a temporary phone/friend link";
+      if (share === true) {
+        try {
+          tun = await startQuickTunnel(srv.url);
+          url = tun.url;
+          shareNote = "temporary public Cloudflare tunnel — stop it with preview_studio_stop";
+        } catch (e) {
+          shareNote = `tunnel failed (${e instanceof Error ? e.message : e}); serving locally instead`;
+        }
+      }
+      live = { srv, tun, url, manifest: r.manifest, dir: r.dir };
+      const legend = r.plan.items
+        .map((item, index) => `  M${index + 1}  ${item.variant}: ${item.label} — ${item.model}`)
+        .join("\n");
+      const summary =
+        `${r.plan.label} palette: ${url}\n` +
+        `${shareNote}\n` +
+        `${r.audit.currentCount}/${r.plan.items.length} exact installed models passed CRC checks and decoded to 3D.\n` +
+        `Intended use: ${r.plan.intendedUse}\n` +
+        `Collision: none — these are visual dressing, not walls or path blockers.\n\n${legend}\n\n` +
+        `Rotate and zoom each model in the browser. Use preview_pick or the card buttons to resolve a choice. ` +
+        `The gallery stays up until preview_studio_stop.`;
+      return json({
+        palette: r.plan,
+        audit: r.audit,
+        url,
+        local: srv.url,
+        shared: !!tun,
+        dir: r.dir,
+        manifest: r.manifest,
+      }, summary);
     }),
   );
 

@@ -81,7 +81,7 @@ async function main() {
     "dota_window", "dota_focus_window", "dota_click", "dota_type", "dota_input", "dota_status", "dota_wait_for", "dota_selftest",
     "addon_attach_debug_sdk", "addon_detach_debug_sdk", "dota_lua_eval", "dota_debug_dump",
     "ref_harvest", "ref_list", "ref_search", "ref_inspect", "ref_get", "ref_curate", "ref_stats", "ref_passport", "ref_find",
-    "asset_preview",
+    "asset_preview", "palette_preview",
     "scaffold_notifications", "scaffold_nettable_binding", "scaffold_rpc", "panorama_decompile",
     "scaffold_save_codes", "scaffold_hud_panel", "scaffold_wave_system",
     "addon_audit", "ref_recipe", "dota_perf", "scaffold_shop", "scaffold_talent_tree", "ref_harvest_top",

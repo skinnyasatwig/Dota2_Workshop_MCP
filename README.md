@@ -42,7 +42,7 @@ fallback for non-tstl addons.
 | **Maps** | `map_create`, `map_add_entity`, `map_inspect`, `map_patch_entities`, `map_sync_contract`, `map_rewrite_path`, `map_to_text`, `map_from_text`, `map_compile`, `map_list`, `map_validate`, `map_engine_readiness_probe`, `map_engine_nav_test`, `map_engine_visual_test` |
 | **Map generation** | `map_build`, `map_compare_specifications`, `map_terrain`, `map_preview`, `map_tile_to_world`, `map_recipe_catalog`, `entity_catalog`, `scaffold_td` |
 | **Reference games** | `workshop_search`, `workshop_download`, `workshop_list`, `workshop_inspect`, `workshop_read`, `workshop_grep`, `panorama_decompile` |
-| **Asset preview (out of engine)** | `asset_preview` (particles/textures/models → inline contact-sheet image + HTML gallery), `sound_preview` (sounds → inline waveform/icon image + playable HTML soundboard + inline audio), `preview_studio` / `preview_studio_stop` (interactive gallery + public share link: animated particles, 3D models, audio players, click-to-select), `preview_pick` / `preview_selections` (resolve the IDs the user picked/clicked → game + asset path) — decoded via ValveResourceFormat, no Dota launch |
+| **Asset preview (out of engine)** | `asset_preview` (particles/textures/models → inline contact-sheet image + HTML gallery), `sound_preview` (sounds → inline waveform/icon image + playable HTML soundboard + inline audio), `preview_studio` / `preview_studio_stop` (interactive gallery + optional public share link: animated particles, 3D models, audio players, click-to-select), `palette_preview` (exact CRC-checked four-model scenery palette → local interactive 3D gallery; optional temporary share link), `preview_pick` / `preview_selections` (resolve the IDs the user picked/clicked → game + asset path) — decoded via ValveResourceFormat, no Dota launch |
 | **Sounds & KV3** | `soundevents_list`, `soundevents_get`, `soundevents_upsert`, `kv3_read` |
 | **Assets & base game** | `assets_list`, `assets_search`, `vpk_find`, `vpk_read`, `base_kv_entry` |
 | **Events & net tables** | `scaffold_custom_event`, `scaffold_net_table` |
@@ -354,7 +354,9 @@ each prop's pitch/yaw/roll and uniform/non-uniform scale, giving accurate top-do
 collision. A loose or packed addon override at the same model path suppresses the base-game outline instead of borrowing
 the wrong bounds. `npm run test:palette-bounds` re-extracts all 20 installed bounds with ValveResourceFormat and fails if a
 snapshot is stale. Catalog checks and the repository compiler fixture prove availability and Source 2 compatibility,
-but a human must still judge appearance and final placement.
+but a human must still judge appearance and final placement. Use `palette_preview`
+`{ "palette": "river-wetland" }` to inspect one exact four-model set as textured, rotatable 3D without Dota or Hammer.
+It is local-only by default; add `"share": true` only when a temporary public review link is wanted.
 The `arch` component is a checked rectangular opening assembled from two solid posts and one elevated lintel. Its
 origin is the center of the arch at ground level; width, depth, total height, opening width, opening height, yaw, and
 one preflighted visible material are explicit. Offline reachability uses a conservative 256-unit standing corridor,

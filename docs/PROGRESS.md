@@ -359,12 +359,23 @@ Last updated: 2026-08-07
     preview regenerated with zero visual footprints because its current contract contains no curated palette models;
     no map dressing or gameplay change was invented.
 
+61. This milestone - made curated scenery visually reviewable without Hammer or Dota. The new `palette_preview` tool
+    accepts only one of the five checked palette ids, verifies all four exact base-VPK resources against their saved
+    CRCs, and fails closed on a missing, changed, or partially decoded model. It reuses the existing ValveResourceFormat
+    and self-hosted `<model-viewer>` pipeline to produce a local, textured, rotatable 3D gallery; a temporary public
+    tunnel is explicit opt-in. The normal fuzzy asset search remains unchanged. A real installed-resource proof decoded
+    the complete `river-wetland` palette, produced all four GLBs plus textures, loaded the local viewer, and visually
+    rendered three distinct cattail variants and lily pads in the browser. The models remain visual-only and do not
+    acquire collision semantics merely because they can now be inspected.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 332 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
-- MCP smoke suite: 204 passed, 0 failed, and 1 network-dependent Workshop search skipped.
+- Default suite: 334 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
+- MCP smoke suite: 205 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed palette-bound audit: 20 of 20 model CRCs and MDAT snapshots match the current Dota VPK.
+- Installed palette-gallery proof: the four-model `river-wetland` set passed exact CRC checks, decoded to textured GLBs,
+  loaded through the self-hosted browser renderer, and was visually confirmed without Hammer or Dota.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
 - The guided refresh runner completed all four safe checks in 33 seconds without opening Dota or Hammer. Because the
