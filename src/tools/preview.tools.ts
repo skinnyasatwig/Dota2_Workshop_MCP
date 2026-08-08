@@ -19,6 +19,8 @@ import { parseWav, renderWaveform, fmtDuration, detectAudio, mp3DurationSec, spe
 import { buildStudioGallery, ManifestEntry } from "../dota/studio.js";
 import { buildStaticPropPalettePreview } from "../dota/palette-preview.js";
 import { STATIC_PROP_PALETTE_IDS } from "../dota/static-prop-palettes.js";
+import { buildAnimatedPropPreview } from "../dota/animated-prop-preview.js";
+import { ANIMATED_PROP_RECIPE_IDS } from "../dota/animated-prop-recipes.js";
 import { serveDir, StaticServer } from "../dota/serve.js";
 import { startQuickTunnel, Tunnel } from "../dota/tunnel.js";
 import { json, error, guard, ToolResult } from "../util/result.js";
@@ -524,6 +526,61 @@ export function registerPreviewTools(server: McpServer) {
         `The gallery stays up until preview_studio_stop.`;
       return json({
         palette: r.plan,
+        audit: r.audit,
+        url,
+        local: srv.url,
+        shared: !!tun,
+        dir: r.dir,
+        manifest: r.manifest,
+      }, summary);
+    }),
+  );
+
+  server.registerTool(
+    "animated_prop_preview",
+    {
+      title: "Preview one checked animated prop recipe",
+      description:
+        "Decode one curated prop_dynamic recipe from the installed Dota base VPK, include each checked looping " +
+        "sequence in an autoplaying interactive 3D gallery, and refuse stale model metadata by exact VPK CRC. " +
+        "These first recipes are client-animated, non-solid, and navigation-neutral. Dota and Hammer stay closed. " +
+        "By default the gallery is local-only; share=true creates a temporary public tunnel.",
+      inputSchema: {
+        recipe: z.enum(ANIMATED_PROP_RECIPE_IDS).describe("Checked animated recipe id from map_recipe_catalog."),
+        share: z.boolean().optional().describe("Create a temporary public Cloudflare URL (default false)."),
+      },
+    },
+    guard(async ({ recipe, share }): Promise<ToolResult> => {
+      await stopLive();
+      const r = await buildAnimatedPropPreview(recipe);
+      const srv = await serveDir(r.dir);
+      let url = srv.url;
+      let tun: Tunnel | undefined;
+      let shareNote = "local-only review; pass share=true for a temporary phone/friend link";
+      if (share === true) {
+        try {
+          tun = await startQuickTunnel(srv.url);
+          url = tun.url;
+          shareNote = "temporary public Cloudflare tunnel - stop it with preview_studio_stop";
+        } catch (e) {
+          shareNote = `tunnel failed (${e instanceof Error ? e.message : e}); serving locally instead`;
+        }
+      }
+      live = { srv, tun, url, manifest: r.manifest, dir: r.dir };
+      const legend = r.plan.items
+        .map((item, index) => `  M${index + 1}  ${item.label}: ${item.sequence} (looping)`)
+        .join("\n");
+      const summary =
+        `${r.plan.label} animated prop: ${url}\n` +
+        `${shareNote}\n` +
+        `The exact installed model passed CRC ${r.audit.expectedCrc}; ${r.plan.items.length} checked loops decoded.\n` +
+        `Intended use: ${r.plan.intendedUse}\n` +
+        `Collision/navigation: none - solid=0, nav-ignore, and CreateNavObstacle=0.\n` +
+        `Animation: client-side only; AnimateOnServer=0.\n\n${legend}\n\n` +
+        `Each card autoplays one exact sequence. Use preview_pick or the card buttons to resolve a choice. ` +
+        `The gallery stays up until preview_studio_stop.`;
+      return json({
+        recipe: r.plan,
         audit: r.audit,
         url,
         local: srv.url,

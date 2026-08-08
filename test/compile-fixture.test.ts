@@ -23,6 +23,10 @@ test("repository compile fixture is self-contained and structurally inspectable"
   assert.deepEqual(
     fixture.entities.map((entity) => entity.targetname).sort(),
     [
+      "fixture_animated_dire_banner_alternate",
+      "fixture_animated_dire_banner_primary",
+      "fixture_animated_radiant_banner_alternate",
+      "fixture_animated_radiant_banner_primary",
       "fixture_arch_left_post",
       "fixture_arch_lintel",
       "fixture_arch_right_post",
@@ -119,6 +123,27 @@ test("repository compile fixture is self-contained and structurally inspectable"
   assert.equal(
     paletteProps.find((entity) => entity.targetname === "fixture_palette_cliffs_d")?.properties.model,
     "models/props_nature/cliff_wall002.vmdl",
+  );
+  const animatedProps = fixture.entities.filter((entity) => entity.targetname?.startsWith("fixture_animated_"));
+  assert.equal(animatedProps.length, 4);
+  assert.ok(animatedProps.every((entity) =>
+    entity.classname === "prop_dynamic" &&
+    entity.properties.solid === "0" &&
+    entity.properties.spawnflags === "512" &&
+    entity.properties.CreateNavObstacle === "0" &&
+    entity.properties.use_animgraph === "0" &&
+    entity.properties.StartingAnimationLoopMode === "ANIM_LOOP_MODE_USE_SEQUENCE_SETTINGS" &&
+    entity.properties.AnimationLoopMode === "ANIM_LOOP_MODE_USE_SEQUENCE_SETTINGS" &&
+    entity.properties.AnimateOnServer === "0"));
+  assert.equal(
+    animatedProps.find((entity) => entity.targetname === "fixture_animated_radiant_banner_alternate")
+      ?.properties.StartingAnim,
+    "banner_radiant_idle2",
+  );
+  assert.equal(
+    animatedProps.find((entity) => entity.targetname === "fixture_animated_dire_banner_primary")
+      ?.properties.IdleAnim,
+    "banner_dire_idle",
   );
   assert.equal(fixture.solids.length, 43);
   const concave = fixture.solids.find((solid) => solid.targetname === "fixture_concave_solid");

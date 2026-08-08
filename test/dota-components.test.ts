@@ -355,6 +355,100 @@ test("static prop palettes expand explicit visual-only variants deterministicall
   }]), /unrecognized key/i);
 });
 
+test("animated prop sets expose only checked client-side visual loops", () => {
+  const [component] = componentList.parse([{
+    kind: "animatedPropSet",
+    name: "radiant_banners",
+    origin: [1000, 2000, 128],
+    yaw: 90,
+    recipe: "radiant-team-banner",
+    scale: 1.25,
+    castShadows: false,
+    tint: [224, 255, 224],
+    randomizeCycle: true,
+    placements: [
+      { name: "primary", offset: [100, 0, 0], yaw: 15 },
+      {
+        name: "alternate",
+        offset: [-200, 0, 16],
+        sequence: "banner_radiant_idle2",
+        scale: [0.75, 1, 1.5],
+        randomizeCycle: false,
+      },
+    ],
+  }]);
+  const entities = expandDotaComponents([component]).managedEntities;
+  assert.deepEqual(entities.map((entity) => ({
+    targetname: entity.targetname,
+    classname: entity.classname,
+    origin: entity.origin,
+    angles: entity.angles,
+    scales: entity.scales,
+    properties: entity.properties,
+  })), [
+    {
+      targetname: "radiant_banners_primary",
+      classname: "prop_dynamic",
+      origin: "1000 2100 128",
+      angles: "0 105 0",
+      scales: "1.25 1.25 1.25",
+      properties: {
+        model: "models/props_teams/banner_radiant.vmdl",
+        solid: "0",
+        spawnflags: "512",
+        CreateNavObstacle: "0",
+        use_animgraph: "0",
+        StartingAnim: "banner_radiant_idle",
+        StartingAnimationLoopMode: "ANIM_LOOP_MODE_USE_SEQUENCE_SETTINGS",
+        IdleAnim: "banner_radiant_idle",
+        AnimationLoopMode: "ANIM_LOOP_MODE_USE_SEQUENCE_SETTINGS",
+        randomizecycle: "1",
+        AnimateOnServer: "0",
+        disableshadows: "1",
+        rendercolor: "224 255 224",
+      },
+    },
+    {
+      targetname: "radiant_banners_alternate",
+      classname: "prop_dynamic",
+      origin: "1000 1800 144",
+      angles: "0 90 0",
+      scales: "0.75 1 1.5",
+      properties: {
+        model: "models/props_teams/banner_radiant.vmdl",
+        solid: "0",
+        spawnflags: "512",
+        CreateNavObstacle: "0",
+        use_animgraph: "0",
+        StartingAnim: "banner_radiant_idle2",
+        StartingAnimationLoopMode: "ANIM_LOOP_MODE_USE_SEQUENCE_SETTINGS",
+        IdleAnim: "banner_radiant_idle2",
+        AnimationLoopMode: "ANIM_LOOP_MODE_USE_SEQUENCE_SETTINGS",
+        randomizecycle: "0",
+        AnimateOnServer: "0",
+        disableshadows: "1",
+        rendercolor: "224 255 224",
+      },
+    },
+  ]);
+
+  assert.throws(() => componentList.parse([{
+    kind: "animatedPropSet",
+    name: "invented_sequence",
+    origin: [0, 0, 0],
+    recipe: "dire-team-banner",
+    placements: [{ name: "one", offset: [0, 0, 0], sequence: "banner_radiant_idle" }],
+  }]), /not a checked sequence/);
+  assert.throws(() => componentList.parse([{
+    kind: "animatedPropSet",
+    name: "implicit_collision",
+    origin: [0, 0, 0],
+    recipe: "dire-team-banner",
+    collision: "vphysics",
+    placements: [{ name: "one", offset: [0, 0, 0] }],
+  }]), /unrecognized key/i);
+});
+
 test("checked arches expand into two posts and one elevated lintel", () => {
   const [arch] = componentList.parse([{
     kind: "arch",

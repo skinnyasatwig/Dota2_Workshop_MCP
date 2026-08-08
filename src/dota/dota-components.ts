@@ -25,6 +25,11 @@ import {
   StaticPropScale,
   staticPropPaletteVariant,
 } from "./static-prop-palettes.js";
+import {
+  ANIMATED_PROP_RECIPE_IDS,
+  animatedPropRecipe,
+  animatedPropSequence,
+} from "./animated-prop-recipes.js";
 
 const point2 = z.tuple([z.number().finite(), z.number().finite()]);
 const point3 = z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]);
@@ -280,6 +285,51 @@ const staticPropPaletteComponentSchema = z.object({
         code: z.ZodIssueCode.custom,
         path: ["placements", index, "variant"],
         message: `is not a variant in palette "${set.palette}"`,
+      });
+    }
+  });
+});
+
+const animatedPropPlacementSchema = staticPropPlacementSchema.extend({
+  /** Optional checked sequence override; omitted means the recipe's default loop. */
+  sequence: nameSchema.optional(),
+  randomizeCycle: z.boolean().optional(),
+}).strict();
+
+const animatedPropSetComponentSchema = z.object({
+  kind: z.literal("animatedPropSet"),
+  name: nameSchema,
+  /** World-space origin for the reusable set. */
+  origin: point3,
+  yaw: yawSchema,
+  /** Checked model plus exact installed looping-sequence metadata. */
+  recipe: z.enum(ANIMATED_PROP_RECIPE_IDS),
+  scale: entityScaleSchema.optional(),
+  castShadows: z.boolean().optional(),
+  tint: z.tuple([
+    z.number().int().min(0).max(255),
+    z.number().int().min(0).max(255),
+    z.number().int().min(0).max(255),
+  ]).optional(),
+  randomizeCycle: z.boolean().optional(),
+  placements: z.array(animatedPropPlacementSchema).min(1).max(64),
+}).strict().superRefine((set, context) => {
+  const seen = new Set<string>();
+  set.placements.forEach((placement, index) => {
+    const key = placement.name.toLowerCase();
+    if (seen.has(key)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["placements", index, "name"],
+        message: "must be unique within the animated prop set (case-insensitive)",
+      });
+    }
+    seen.add(key);
+    if (placement.sequence && !animatedPropSequence(set.recipe, placement.sequence)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["placements", index, "sequence"],
+        message: `is not a checked sequence in animated prop recipe "${set.recipe}"`,
       });
     }
   });
@@ -780,6 +830,7 @@ export const dotaComponentInputSchema = z.union([
   wallComponentSchema,
   staticPropSetComponentSchema,
   staticPropPaletteComponentSchema,
+  animatedPropSetComponentSchema,
   archComponentSchema,
   profileArchComponentSchema,
   bridgeComponentSchema,
@@ -826,6 +877,11 @@ export const WORLD_STRUCTURE_RECIPES = {
     parts: ["placement_*"],
     purpose: "Deterministic visual-only dressing selected from installed and compiler-proven Dota model palettes.",
     source: "Curated Valve pak01 model inventory plus repository model preflight and compiler fixture",
+  },
+  animatedPropSet: {
+    parts: ["placement_*"],
+    purpose: "Bounded non-solid animated dressing using CRC-gated Valve models and checked looping sequences.",
+    source: "Valve prop_dynamic FGD plus installed pak01 ANIM metadata and repository compiler fixture",
   },
   arch: {
     parts: ["left_post", "right_post", "lintel"],
@@ -1577,6 +1633,40 @@ function expandStaticPropPalette(
   });
 }
 
+function expandAnimatedPropSet(
+  component: z.infer<typeof animatedPropSetComponentSchema>,
+): ManagedMapEntity[] {
+  const yaw = component.yaw ?? 0;
+  const recipe = animatedPropRecipe(component.recipe);
+  return component.placements.map((placement) => {
+    const sequence = placement.sequence ?? recipe.defaultSequence;
+    return {
+      targetname: `${component.name}_${placement.name}`,
+      classname: "prop_dynamic",
+      origin: originString(addPoint(component.origin, rotateOffset(placement.offset, yaw))),
+      angles: angleString(yaw + (placement.yaw ?? 0)),
+      scales: scaleString(placement.scale ?? component.scale ?? recipe.defaultScale),
+      properties: {
+        model: recipe.model,
+        solid: "0",
+        spawnflags: "512",
+        CreateNavObstacle: "0",
+        use_animgraph: "0",
+        StartingAnim: sequence,
+        StartingAnimationLoopMode: "ANIM_LOOP_MODE_USE_SEQUENCE_SETTINGS",
+        IdleAnim: sequence,
+        AnimationLoopMode: "ANIM_LOOP_MODE_USE_SEQUENCE_SETTINGS",
+        randomizecycle: (placement.randomizeCycle ?? component.randomizeCycle) ? "1" : "0",
+        AnimateOnServer: "0",
+        ...(component.castShadows === undefined
+          ? {}
+          : { disableshadows: component.castShadows ? "0" : "1" }),
+        ...(component.tint ? { rendercolor: component.tint.join(" ") } : {}),
+      },
+    };
+  });
+}
+
 function expandBase(component: z.infer<typeof baseComponentSchema>): ManagedMapEntity[] {
   const yaw = component.yaw ?? 0;
   const at = (offset: Point3): Point3 => addPoint(component.origin, rotateOffset(offset, yaw));
@@ -1694,6 +1784,9 @@ export function expandDotaComponents(components: DotaComponentInput[]): Expanded
         break;
       case "staticPropPalette":
         managedEntities.push(...expandStaticPropPalette(component));
+        break;
+      case "animatedPropSet":
+        managedEntities.push(...expandAnimatedPropSet(component));
         break;
       case "arch":
         managedSolids.push(...archSolids(component));

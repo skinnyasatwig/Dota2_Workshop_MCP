@@ -50,6 +50,11 @@ import {
   STATIC_PROP_PALETTES,
   validateStaticPropPaletteLibrary,
 } from "../dota/static-prop-palettes.js";
+import {
+  ANIMATED_PROP_RECIPES,
+  inspectAnimatedPropRecipeInstallation,
+  validateAnimatedPropRecipeLibrary,
+} from "../dota/animated-prop-recipes.js";
 import { openDotaVpk } from "../dota/vpk.js";
 import {
   buildRecipeRefreshReport,
@@ -477,12 +482,22 @@ export function registerMapGenTools(server: McpServer) {
       },
     },
     guard(async ({ category, verifyInstalled }): Promise<ToolResult> => {
-      const errors = [...validateTerrainRecipeLibrary(), ...validateStaticPropPaletteLibrary()];
+      const errors = [
+        ...validateTerrainRecipeLibrary(),
+        ...validateStaticPropPaletteLibrary(),
+        ...validateAnimatedPropRecipeLibrary(),
+      ];
       const dota = verifyInstalled ? await resolveDotaPaths() : undefined;
       const recipeVerification = dota ? await verifyInstalledRecipeVersion(dota) : null;
       const showDressing = !category || category === "dressing";
-      const paletteInstallation = showDressing && verifyInstalled && dota
-        ? inspectStaticPropPaletteInstallation((await openDotaVpk(dota.pak01DirVpk)).entries)
+      const vpkEntries = showDressing && verifyInstalled && dota
+        ? (await openDotaVpk(dota.pak01DirVpk)).entries
+        : null;
+      const paletteInstallation = vpkEntries
+        ? inspectStaticPropPaletteInstallation(vpkEntries)
+        : null;
+      const animatedInstallation = vpkEntries
+        ? inspectAnimatedPropRecipeInstallation(vpkEntries)
         : null;
       const prefabs = await Promise.all(
         VALVE_PREFAB_RECIPES
@@ -507,6 +522,8 @@ export function registerMapGenTools(server: McpServer) {
           worldStructureRecipes: !category || category === "structure" ? WORLD_STRUCTURE_RECIPES : {},
           staticPropPalettes: showDressing ? STATIC_PROP_PALETTES : {},
           staticPropPaletteInstallation: paletteInstallation,
+          animatedPropRecipes: showDressing ? ANIMATED_PROP_RECIPES : {},
+          animatedPropRecipeInstallation: animatedInstallation,
           prefabs,
           installVerified: verifyInstalled === true && Boolean(dota),
           recipeVerificationBaseline: RECIPE_VERIFICATION_BASELINE,
@@ -520,6 +537,8 @@ export function registerMapGenTools(server: McpServer) {
           `${showDressing ? Object.keys(STATIC_PROP_PALETTES).length : 0} static-prop palettes` +
           `${paletteInstallation ? ` (${paletteInstallation.installedCount}/${paletteInstallation.modelCount} models installed). ` : ". "}` +
           `${paletteInstallation?.visualBoundsVerified ? `${paletteInstallation.currentVisualBoundsCount}/${paletteInstallation.modelCount} visual bounds current. ` : ""}` +
+          `${showDressing ? Object.keys(ANIMATED_PROP_RECIPES).length : 0} animated-prop recipes` +
+          `${animatedInstallation ? ` (${animatedInstallation.installedCount}/${animatedInstallation.modelCount} models installed; ${animatedInstallation.currentCount}/${animatedInstallation.modelCount} metadata current). ` : ". "}` +
           `Baseline Dota build ${RECIPE_VERIFICATION_BASELINE.appBuildId}` +
           `${recipeVerification ? `; installed recipe status: ${recipeVerification.status}` : ""}.`,
       );

@@ -5,6 +5,7 @@ import {
   resolveProjectCuratedVisualPropFootprints,
 } from "../src/dota/map-visual-props.js";
 import { STATIC_PROP_PALETTES } from "../src/dota/static-prop-palettes.js";
+import { ANIMATED_PROP_RECIPES } from "../src/dota/animated-prop-recipes.js";
 import { ParsedMapEntity } from "../src/dota/vmap.js";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -38,6 +39,25 @@ test("curated visual props project CRC-current render bounds without becoming co
   assert.equal(report.footprints[0].variant, "bush-round");
   assert.equal(report.footprints[0].points.length, 4);
   assert.ok(report.footprints[0].points.every((point) => point.every(Number.isFinite)));
+});
+
+test("checked animated props reuse CRC-current visual bounds without entering pathing", () => {
+  const banner = ANIMATED_PROP_RECIPES["radiant-team-banner"];
+  const report = resolveCuratedVisualPropFootprints([entity({
+    classname: "prop_dynamic",
+    targetname: "preview_banner",
+    properties: {
+      model: banner.model,
+      solid: "0",
+      StartingAnim: "banner_radiant_idle2",
+    },
+  })], new Map([[`${banner.model}_c`, { crc: banner.compiledCrc }]]));
+  assert.equal(report.matchedEntityCount, 1);
+  assert.equal(report.footprintCount, 1);
+  assert.equal(report.footprints[0].family, "animated-recipe");
+  assert.equal(report.footprints[0].recipe, "radiant-team-banner");
+  assert.equal(report.footprints[0].sequence, "banner_radiant_idle2");
+  assert.equal(report.footprints[0].palette, undefined);
 });
 
 test("curated visual props fail closed on stale bounds and malformed transforms", () => {

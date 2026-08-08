@@ -42,7 +42,7 @@ fallback for non-tstl addons.
 | **Maps** | `map_create`, `map_add_entity`, `map_inspect`, `map_patch_entities`, `map_sync_contract`, `map_rewrite_path`, `map_to_text`, `map_from_text`, `map_compile`, `map_list`, `map_validate`, `map_engine_readiness_probe`, `map_engine_nav_test`, `map_engine_visual_test` |
 | **Map generation** | `map_build`, `map_compare_specifications`, `map_terrain`, `map_preview`, `map_tile_to_world`, `map_recipe_catalog`, `entity_catalog`, `scaffold_td` |
 | **Reference games** | `workshop_search`, `workshop_download`, `workshop_list`, `workshop_inspect`, `workshop_read`, `workshop_grep`, `panorama_decompile` |
-| **Asset preview (out of engine)** | `asset_preview` (particles/textures/models → inline contact-sheet image + HTML gallery), `sound_preview` (sounds → inline waveform/icon image + playable HTML soundboard + inline audio), `preview_studio` / `preview_studio_stop` (interactive gallery + optional public share link: animated particles, 3D models, audio players, click-to-select), `palette_preview` (exact CRC-checked four-model scenery palette → local interactive 3D gallery; optional temporary share link), `preview_pick` / `preview_selections` (resolve the IDs the user picked/clicked → game + asset path) — decoded via ValveResourceFormat, no Dota launch |
+| **Asset preview (out of engine)** | `asset_preview` (particles/textures/models → inline contact-sheet image + HTML gallery), `sound_preview` (sounds → inline waveform/icon image + playable HTML soundboard + inline audio), `preview_studio` / `preview_studio_stop` (interactive gallery + optional public share link: animated particles, 3D models, audio players, click-to-select), `palette_preview` (exact CRC-checked four-model scenery palette → local interactive 3D gallery), `animated_prop_preview` (exact CRC-checked animated recipe → autoplaying per-sequence 3D gallery), `preview_pick` / `preview_selections` (resolve the IDs the user picked/clicked → game + asset path) — decoded via ValveResourceFormat, no Dota launch |
 | **Sounds & KV3** | `soundevents_list`, `soundevents_get`, `soundevents_upsert`, `kv3_read` |
 | **Assets & base game** | `assets_list`, `assets_search`, `vpk_find`, `vpk_read`, `base_kv_entry` |
 | **Events & net tables** | `scaffold_custom_event`, `scaffold_net_table` |
@@ -325,7 +325,7 @@ Transforms and team swaps compose at every level, while deferred `@local:` refer
 chain. Missing children, duplicate local placement names, cycles, and nesting deeper than 32 levels are rejected.
 
 For common gameplay structure, `dotaComponents` provides strongly checked `base`, `ancient`, `tower`, `fountain`,
-`shop`, `camp`, `bossPit`, `playerStart`, `gate`, `baseBlocker`, `fowBlocker`, `wall`, `staticPropSet`, `staticPropPalette`, `arch`, `profileArch`, `bridge`,
+`shop`, `camp`, `bossPit`, `playerStart`, `gate`, `baseBlocker`, `fowBlocker`, `wall`, `staticPropSet`, `staticPropPalette`, `animatedPropSet`, `arch`, `profileArch`, `bridge`,
 `bridgeApproach`, `ringPlatform`, `holedPlatform`, and `multiHoledPlatform` entries. It derives team numbers, official entity classes,
 stock unit/model names, tower tier names, shop/camp numeric values, base member transforms, and boss-pit terrain.
 See [`examples/dota-components.json`](examples/dota-components.json). A `camp` can include an optional checked
@@ -357,6 +357,14 @@ snapshot is stale. Catalog checks and the repository compiler fixture prove avai
 but a human must still judge appearance and final placement. Use `palette_preview`
 `{ "palette": "river-wetland" }` to inspect one exact four-model set as textured, rotatable 3D without Dota or Hammer.
 It is local-only by default; add `"share": true` only when a temporary public review link is wanted.
+`animatedPropSet` is a deliberately narrow first dynamic-scenery recipe. It accepts only the CRC-fingerprinted
+`radiant-team-banner` and `dire-team-banner` models and only the two looping sequences actually read from each installed
+Valve ANIM block. It emits `prop_dynamic` entities with `solid=0`, nav-ignore, `CreateNavObstacle=0`, animgraphs disabled,
+and `AnimateOnServer=0`; collision, arbitrary model paths, arbitrary sequence names, and server-side animation are not
+accepted. Named placements retain the same checked transforms and bounded scale as static sets and may desynchronize
+their loop cycle. `animated_prop_preview` exports exactly one requested loop per GLB and autoplays each card outside the
+engine. The repository fixture proves all four generated entities through Valve conversion and compilation; an engine
+visual test is still required before claiming observed Source 2 runtime playback.
 The `arch` component is a checked rectangular opening assembled from two solid posts and one elevated lintel. Its
 origin is the center of the arch at ground level; width, depth, total height, opening width, opening height, yaw, and
 one preflighted visible material are explicit. Offline reachability uses a conservative 256-unit standing corridor,

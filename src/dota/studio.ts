@@ -64,6 +64,8 @@ export interface StudioExactModel {
   path: string;
   archivePath: string;
   name?: string;
+  /** Export and autoplay this exact checked sequence in the browser gallery. */
+  animationName?: string;
 }
 
 interface StudioSearchHit {
@@ -187,7 +189,12 @@ export async function buildStudioGallery(opts: StudioOptions = {}): Promise<Stud
       // Decode into a KEPT per-model dir: VRF emits the .glb plus its textures as sibling
       // .png files the glb references by relative uri — they must travel together and be served.
       const mdir = join(dir, `m${i}`);
-      const produced = await vrfDecode(vpk, h.path, mdir, { glb: true }).catch(() => [] as string[]);
+      const animationName = isExactModel(h) ? h.animationName : undefined;
+      const produced = await vrfDecode(vpk, h.path, mdir, {
+        glb: true,
+        animations: Boolean(animationName),
+        animationList: animationName ? [animationName] : undefined,
+      }).catch(() => [] as string[]);
       const glb = produced.find((f) => f.endsWith(".glb"));
       if (!glb) { await rm(mdir, { recursive: true, force: true }).catch(() => {}); continue; }
       const rel = `m${i}/` + relative(mdir, glb).split(sep).join("/");
@@ -195,7 +202,7 @@ export async function buildStudioGallery(opts: StudioOptions = {}): Promise<Stud
         ? h.name
         : h.path.split("/").pop()!.replace(/\.\w+_c$/, "");
       const id = `M${data.models.length + 1}`;
-      data.models.push({ id, name, game: h.title, glb: rel });
+      data.models.push({ id, name, game: h.title, glb: rel, animationName });
       manifest.push({ id, kind: "model", name, game: h.title, gameId: h.id, path: h.path, file: rel });
     }
   }

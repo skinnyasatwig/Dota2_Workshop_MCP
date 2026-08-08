@@ -368,14 +368,30 @@ Last updated: 2026-08-07
     rendered three distinct cattail variants and lily pads in the browser. The models remain visual-only and do not
     acquire collision semantics merely because they can now be inspected.
 
+62. This milestone - added the first deliberately narrow animated-scenery recipe without weakening resource,
+    collision, or navigation guarantees. `animatedPropSet` exposes only CRC-fingerprinted Radiant and Dire team-banner
+    models and the four looping sequence names read from their installed Valve ANIM blocks. It rejects arbitrary models,
+    unknown sequences, implicit collision, and more than 64 placements. Generated `prop_dynamic` entities are fixed to
+    `solid=0`, nav-ignore, `CreateNavObstacle=0`, animgraphs disabled, and client-side animation only. Checked visual
+    bounds now appear in map previews but never participate in reachability. `animated_prop_preview` CRC-checks one exact
+    model, exports one requested sequence per GLB with ValveResourceFormat, and autoplays each card in the self-hosted
+    gallery. Real installed-resource proof produced four GLBs whose animation arrays contained exactly the requested
+    loops. The installed Valve FGD catalog recognized all generated properties with zero findings; Valve's
+    converter/compiler accepted all four banner/sequence combinations, and the real 3v3 map
+    remained a zero-change sync with all four paths passable and no structural findings. Actual Source 2 runtime motion
+    remains an explicit future engine-visual fact rather than an inferred claim.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 334 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
-- MCP smoke suite: 205 passed, 0 failed, and 1 network-dependent Workshop search skipped.
+- Default suite: 341 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
+- MCP smoke suite: 207 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed palette-bound audit: 20 of 20 model CRCs and MDAT snapshots match the current Dota VPK.
 - Installed palette-gallery proof: the four-model `river-wetland` set passed exact CRC checks, decoded to textured GLBs,
   loaded through the self-hosted browser renderer, and was visually confirmed without Hammer or Dota.
+- Installed animated-prop proof: both team-banner CRCs match the current Dota VPK; all four checked loops exported as
+  separate textured GLBs containing exactly one requested animation each. The browser gallery marks only those cards
+  for autoplay, while non-animated model galleries remain unchanged.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
 - The guided refresh runner completed all four safe checks in 33 seconds without opening Dota or Hammer. Because the
@@ -384,6 +400,7 @@ Last updated: 2026-08-07
   sloped trigger volumes from text to binary VMAP and back during the integration suite, preserving exact corner heights.
 - `npm run test:compiler-fixture` successfully round-tripped and compiled the repository-owned acceptance payload,
   including its two-prop preflighted decorative set with uniform and non-uniform entity scales, all 20 explicit variants
+  plus four checked non-solid/nav-neutral `prop_dynamic` team-banner loops,
   from the five curated visual-dressing palettes, sloped trigger, flat and sloped concave L-shaped world solids, checked rectangular arch, checked bridge
   deck/navigation twin, complete visible sloped bridge approach/navigation twin, three-material six-piece profile arch, eight-segment ring platform,
   eight-segment unequal-outline holed platform, 14-triangle two-hole platform, and explicit navigation obstruction,

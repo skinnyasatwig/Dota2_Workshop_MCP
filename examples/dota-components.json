@@ -147,6 +147,18 @@
       ]
     },
     {
+      "kind": "animatedPropSet",
+      "name": "radiant_gate_banners",
+      "origin": [-4352, 0, 256],
+      "yaw": 90,
+      "recipe": "radiant-team-banner",
+      "randomizeCycle": true,
+      "placements": [
+        { "name": "north", "offset": [0, 384, 0] },
+        { "name": "south", "offset": [0, -384, 0], "sequence": "banner_radiant_idle2" }
+      ]
+    },
+    {
       "kind": "arch",
       "name": "radiant_north_arch",
       "origin": [-4352, 2304, 128],

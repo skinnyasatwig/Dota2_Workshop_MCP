@@ -30,7 +30,7 @@
     { "name": "env_tonemap_controller", "category": "env", "purpose": "Exposure/tonemapping.", "keyValues": "(tonemap params)" },
 
     { "name": "prop_static", "category": "prop", "purpose": "Non-moving baked prop (cheapest decoration).", "keyValues": "model, skin, solid" },
-    { "name": "prop_dynamic", "category": "prop", "purpose": "Movable/animatable prop.", "keyValues": "model, defaultanim, solid, targetname" },
+    { "name": "prop_dynamic", "category": "prop", "purpose": "Movable/animatable prop; prefer checked animatedPropSet recipes for known scenery loops.", "keyValues": "model, StartingAnim, StartingAnimationLoopMode, IdleAnim, AnimationLoopMode, solid, use_animgraph, CreateNavObstacle, AnimateOnServer, targetname" },
     { "name": "ent_dota_tree", "category": "prop", "purpose": "Destructible Dota tree (gameplay obstacle).", "keyValues": "(position; default tree model)" },
     { "name": "ent_dota_fountain", "category": "dota", "purpose": "Team fountain (heal/regen zone).", "keyValues": "teamnumber" },
     { "name": "ent_dota_shop", "category": "dota", "purpose": "Shop entity.", "keyValues": "shoptype, teamnumber" },

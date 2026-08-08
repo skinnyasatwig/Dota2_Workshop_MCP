@@ -163,6 +163,29 @@ export function buildRepositoryCompileFixtureText(baseText: string): string {
             ],
           },
           {
+            kind: "animatedPropSet",
+            name: "animated_radiant_banner",
+            origin: [-512, 3072, 128],
+            recipe: "radiant-team-banner",
+            randomizeCycle: true,
+            placements: [
+              { name: "primary", offset: [-128, 0, 0] },
+              { name: "alternate", offset: [128, 0, 0], sequence: "banner_radiant_idle2" },
+            ],
+          },
+          {
+            kind: "animatedPropSet",
+            name: "animated_dire_banner",
+            origin: [512, 3072, 128],
+            yaw: 180,
+            recipe: "dire-team-banner",
+            randomizeCycle: true,
+            placements: [
+              { name: "primary", offset: [-128, 0, 0] },
+              { name: "alternate", offset: [128, 0, 0], sequence: "banner_dire_idle2" },
+            ],
+          },
+          {
             kind: "arch",
             name: "arch",
             origin: [-2048, 1024, 128],

@@ -60,7 +60,12 @@ const OUT_EXT: Record<string, string> = { vtex_c: "png", vmdl_c: "glb", vpcf_c: 
  * Decompile a single resource from a VPK to `outDir`. Returns the produced output file
  * path(s) (e.g. the .png / .glb). `innerPath` may omit the trailing `_c` — VRF path-matches.
  */
-export async function vrfDecode(vpk: string, innerPath: string, outDir: string, opts: { glb?: boolean } = {}): Promise<string[]> {
+export async function vrfDecode(
+  vpk: string,
+  innerPath: string,
+  outDir: string,
+  opts: { glb?: boolean; animations?: boolean; animationList?: readonly string[] } = {},
+): Promise<string[]> {
   const exe = await ensureVrf();
   if (!innerPath || innerPath.length < 4) throw new Error("vrfDecode: refusing empty inner path (would dump the whole VPK).");
   await mkdir(outDir, { recursive: true });
@@ -70,6 +75,10 @@ export async function vrfDecode(vpk: string, innerPath: string, outDir: string, 
     // Embed materials + textures in the GLB so models render with their skins (not white),
     // and adapt textures to the glTF spec (e.g. split metallic maps).
     args.push("--gltf_export_format", "glb", "--gltf_export_materials", "--gltf_textures_adapt");
+    if (opts.animations) {
+      args.push("--gltf_export_animations");
+      if (opts.animationList?.length) args.push("--gltf_animation_list", opts.animationList.join(","));
+    }
   }
   await run(exe, args, { timeoutMs: 180_000, maxOutputChars: 200_000 });
   const after = await walk(outDir);

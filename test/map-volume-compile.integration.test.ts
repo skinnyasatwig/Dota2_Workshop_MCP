@@ -95,6 +95,23 @@ test(
         entity.properties.model === "models/props_nature/lily_pads001.vmdl"));
       assert.ok(paletteProps.some((entity) =>
         entity.properties.model === "models/props_nature/cliff_wall002.vmdl"));
+      const animatedProps = parseMapEntities(roundTripped)
+        .filter((entity) => entity.targetname?.startsWith("fixture_animated_"));
+      assert.equal(animatedProps.length, 4);
+      assert.ok(animatedProps.every((entity) =>
+        entity.classname === "prop_dynamic" &&
+        entity.properties.solid === "0" &&
+        entity.properties.spawnflags === "512" &&
+        entity.properties.CreateNavObstacle === "0" &&
+        entity.properties.use_animgraph === "0" &&
+        entity.properties.StartingAnimationLoopMode === "ANIM_LOOP_MODE_USE_SEQUENCE_SETTINGS" &&
+        entity.properties.AnimationLoopMode === "ANIM_LOOP_MODE_USE_SEQUENCE_SETTINGS" &&
+        entity.properties.AnimateOnServer === "0"));
+      assert.equal(
+        animatedProps.find((entity) => entity.targetname === "fixture_animated_radiant_banner_alternate")
+          ?.properties.StartingAnim,
+        "banner_radiant_idle2",
+      );
       assert.match(roundTripped, /MCP Nav Surface: fixture_bridge_walkable/);
       assert.match(roundTripped, /MCP Nav Surface: fixture_irregular_platform_segment_01_walkable/);
       assert.match(roundTripped, /MCP Nav Surface: fixture_multi_hole_platform_triangle_001_walkable/);
@@ -144,8 +161,8 @@ test(
       assert.ok(models.models.some((model) =>
         model.model === "models/props_debris/rock_debris001.vmdl" && model.state === "resolved"));
       const visualProps = resolveCuratedVisualPropFootprints(parseMapEntities(roundTripped), dotaPak.entries);
-      assert.equal(visualProps.matchedEntityCount, 22);
-      assert.equal(visualProps.footprintCount, 22);
+      assert.equal(visualProps.matchedEntityCount, 26);
+      assert.equal(visualProps.footprintCount, 26);
       assert.equal(visualProps.staleModelCount, 0);
       assert.equal(visualProps.malformedTransformCount, 0);
       const compiled = await compileVmap(compiler, dotaGame, contentMap, gameVpk, true);

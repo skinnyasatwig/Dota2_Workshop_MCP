@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { pathExists } from "../util/fsx.js";
 import { transformModelBoundsFootprints } from "./map-collision.js";
 import { STATIC_PROP_PALETTES, StaticPropPaletteId } from "./static-prop-palettes.js";
+import { ANIMATED_PROP_RECIPES, AnimatedPropRecipeId } from "./animated-prop-recipes.js";
 import { ParsedMapEntity } from "./vmap.js";
 import { Vpk } from "./vpk.js";
 
@@ -10,8 +11,11 @@ export interface MapVisualPropFootprint {
   sourceIndex: number;
   targetname?: string;
   model: string;
-  palette: StaticPropPaletteId;
-  variant: string;
+  family: "static-palette" | "animated-recipe";
+  palette?: StaticPropPaletteId;
+  variant?: string;
+  recipe?: AnimatedPropRecipeId;
+  sequence?: string;
   points: [number, number][];
   minZ: number;
   maxZ: number;
@@ -36,14 +40,19 @@ export interface MapVisualPropReport {
 }
 
 const modelVariants = new Map<string, {
-  palette: StaticPropPaletteId;
-  variant: string;
+  classname: "prop_static" | "prop_dynamic";
+  family: "static-palette" | "animated-recipe";
+  palette?: StaticPropPaletteId;
+  variant?: string;
+  recipe?: AnimatedPropRecipeId;
   compiledCrc: number;
   visualBounds: { min: [number, number, number]; max: [number, number, number] };
 }>();
 for (const [palette, definition] of Object.entries(STATIC_PROP_PALETTES)) {
   for (const [variant, entry] of Object.entries(definition.variants)) {
     modelVariants.set(entry.model.toLowerCase(), {
+      classname: "prop_static",
+      family: "static-palette",
       palette: palette as StaticPropPaletteId,
       variant,
       compiledCrc: entry.compiledCrc,
@@ -51,19 +60,32 @@ for (const [palette, definition] of Object.entries(STATIC_PROP_PALETTES)) {
     });
   }
 }
+for (const [recipe, entry] of Object.entries(ANIMATED_PROP_RECIPES)) {
+  modelVariants.set(entry.model.toLowerCase(), {
+    classname: "prop_dynamic",
+    family: "animated-recipe",
+    recipe: recipe as AnimatedPropRecipeId,
+    compiledCrc: entry.compiledCrc,
+    visualBounds: entry.visualBounds,
+  });
+}
+
+function curatedModelForEntity(entity: ParsedMapEntity) {
+  const model = entity.properties.model;
+  if (!model) return undefined;
+  const curated = modelVariants.get(model.toLowerCase());
+  return curated?.classname === entity.classname ? curated : undefined;
+}
 
 export function curatedVisualPropCandidateCount(entities: readonly ParsedMapEntity[]): number {
-  return entities.filter((entity) =>
-    entity.classname === "prop_static" &&
-    !!entity.properties.model &&
-    modelVariants.has(entity.properties.model.toLowerCase())).length;
+  return entities.filter((entity) => !!curatedModelForEntity(entity)).length;
 }
 
 export function curatedVisualPropModels(entities: readonly ParsedMapEntity[]): string[] {
   const models = new Map<string, string>();
   for (const entity of entities) {
     const model = entity.properties.model;
-    if (entity.classname === "prop_static" && model && modelVariants.has(model.toLowerCase())) {
+    if (model && curatedModelForEntity(entity)) {
       models.set(model.toLowerCase(), model);
     }
   }
@@ -98,10 +120,9 @@ export function resolveCuratedVisualPropFootprints(
   const malformedEntities: string[] = [];
   let matchedEntityCount = 0;
   entities.forEach((entity, sourceIndex) => {
-    if (entity.classname !== "prop_static") return;
     const model = entity.properties.model;
     if (!model) return;
-    const curated = modelVariants.get(model.toLowerCase());
+    const curated = curatedModelForEntity(entity);
     if (!curated) return;
     matchedEntityCount++;
     if (shadowedInput.has(model.toLowerCase())) {
@@ -131,8 +152,11 @@ export function resolveCuratedVisualPropFootprints(
       sourceIndex,
       targetname: entity.targetname,
       model,
+      family: curated.family,
       palette: curated.palette,
       variant: curated.variant,
+      recipe: curated.recipe,
+      sequence: curated.family === "animated-recipe" ? entity.properties.StartingAnim : undefined,
       points: footprint.points,
       minZ: footprint.minZ,
       maxZ: footprint.maxZ,

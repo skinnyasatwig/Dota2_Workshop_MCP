@@ -515,7 +515,7 @@ function drawPreview(
       navSurfaces: "bright green Valve navigation-walkable deck outlines; pale arrows point uphill",
       visionBlockers: "purple linked lines",
       collisionObstacles: "bright cyan exact PHYS hulls; medium cyan mesh envelopes; green-cyan conservative curved primitives; muted cyan PHYS bounds; dark green/orange class approximations; white X means model bounds unknown",
-      visualProps: "pink outlines are CRC-current curated render bounds for placement context only; they never block pathing",
+      visualProps: "pink outlines are CRC-current curated static or animated render bounds for placement context only; they never block pathing",
     },
   };
   return { png: encodeRgbaPng(width, height, rgba), stats, reachability, navSurfaceClearance };
