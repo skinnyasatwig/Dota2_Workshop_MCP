@@ -26,6 +26,8 @@
     "test:engine-bridge-nav-fixture": "node --import tsx scripts/test-engine-nav-fixture.mjs --bridge",
     "test:compiler-ring-nav-fixture": "node --import tsx scripts/test-engine-nav-fixture.mjs --ring --compile-only",
     "test:engine-ring-nav-fixture": "node --import tsx scripts/test-engine-nav-fixture.mjs --ring",
+    "test:compiler-animation-fixture": "node --import tsx scripts/test-engine-nav-fixture.mjs --animation --compile-only",
+    "test:engine-animation-fixture": "node --import tsx scripts/test-engine-nav-fixture.mjs --animation",
     "test:engine-nav-map": "node scripts/run-map-engine-nav.mjs",
     "test:engine-visual-map": "node scripts/run-map-engine-visual.mjs",
     "recipe:refresh-report": "node --import tsx scripts/recipe-refresh-report.ts",

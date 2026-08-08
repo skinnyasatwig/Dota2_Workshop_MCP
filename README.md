@@ -190,6 +190,9 @@ self-testing (no pixel guessing).
 
 Real navigation checks use the SDK's compact `mcp_nav` command. Requests carry unique IDs and long paths are chunked,
 so stale VConsole history and Source 2's short console-command limit cannot corrupt a new result.
+DebugSDK 1.6 also provides correlated `mcp_anim` samples for an exact named entity and `mcp_focus` for deterministic
+camera targeting. The disposable animation fixture uses those commands to verify model, sequence, cycle, game time,
+and camera focus before comparing two renderer-native PNGs.
 
 The SDK also exposes `mcp_spawn`, `mcp_gold`, `mcp_level`, `mcp_item`, `mcp_event` (fire a custom UI event), `mcp_camera`
 (query the exact client camera/minimap geometry through the optional invisible Panorama bridge), `mcp_hud`
@@ -363,8 +366,10 @@ Valve ANIM block. It emits `prop_dynamic` entities with `solid=0`, nav-ignore, `
 and `AnimateOnServer=0`; collision, arbitrary model paths, arbitrary sequence names, and server-side animation are not
 accepted. Named placements retain the same checked transforms and bounded scale as static sets and may desynchronize
 their loop cycle. `animated_prop_preview` exports exactly one requested loop per GLB and autoplays each card outside the
-engine. The repository fixture proves all four generated entities through Valve conversion and compilation; an engine
-visual test is still required before claiming observed Source 2 runtime playback.
+engine. The repository fixture proves all four generated entities through Valve conversion and compilation. Real Dota
+runs then proved that both checked banner models play their exact checked sequence and advance their animation cycle on
+the client-safe prop, with an isolated server-animated control agreeing. A strict cloth-pixel attribution run remains
+pending one explicitly approved launch; the automation deliberately rejected broad scene-motion false positives.
 The `arch` component is a checked rectangular opening assembled from two solid posts and one elevated lintel. Its
 origin is the center of the arch at ground level; width, depth, total height, opening width, opening height, yaw, and
 one preflighted visible material are explicit. Offline reachability uses a conservative 256-unit standing corridor,

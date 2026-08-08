@@ -381,10 +381,25 @@ Last updated: 2026-08-07
     remained a zero-change sync with all four paths passable and no structural findings. Actual Source 2 runtime motion
     remains an explicit future engine-visual fact rather than an inferred claim.
 
+63. This milestone - added correlated real-engine animation inspection and a disposable visual-motion fixture.
+    DebugSDK 1.6.0 now exposes bounded `mcp_anim` and `mcp_focus` commands: the first reports the exact named entity,
+    class, model, sequence, cycle, duration, completion state, and game time; the second frames an exact named target and
+    can hide the local hero before renderer evidence. Host-side parsers reject stale request ids and malformed payloads,
+    compare two animation samples across loop wrap, and inspect a declared PNG region with both general-motion and
+    warm-cloth thresholds. The fixture uses one production-safe client-animated banner, one isolated server-animated
+    control, and one camera anchor, then compiles, launches, selects a hero, waits for map-render state 7, captures two
+    Source 2 PNGs, scans console errors, shuts down, and removes both temporary addon trees in `finally`.
+    Multiple live runs proved both checked team-banner models play the expected sequence and advance their cycles on
+    the exact target while the server control agrees. They also exposed and rejected three misleading visual states:
+    the loading hero grid, Valve's team showcase, and unrelated hero/ember motion. A focused strict run still placed
+    the cloth outside the viewport, so cloth-specific pixels are not claimed. The final ground-anchor variant is
+    converter/compiler-clean and keeps the 6,000-warm-pixel gate unchanged; another live attempt was correctly stopped
+    by the project's three-retry rule and now requires explicit future approval.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 341 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 346 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 207 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed palette-bound audit: 20 of 20 model CRCs and MDAT snapshots match the current Dota VPK.
 - Installed palette-gallery proof: the four-model `river-wetland` set passed exact CRC checks, decoded to textured GLBs,

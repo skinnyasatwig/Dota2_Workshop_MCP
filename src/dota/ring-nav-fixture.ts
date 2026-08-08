@@ -11,7 +11,7 @@ import { parseTileGrid, TileGrid } from "./tilegrid.js";
 import { buildEntityBlock, insertEntity, maxNodeId } from "./vmap.js";
 
 export const RING_NAV_FIXTURE_MAP = "ring_nav_fixture";
-export const RING_NAV_FIXTURE_DEBUG_SDK_VERSION = "1.4.0";
+export const RING_NAV_FIXTURE_DEBUG_SDK_VERSION = "1.6.0";
 
 export interface RingNavigationFixtureLayout {
   center: [number, number];

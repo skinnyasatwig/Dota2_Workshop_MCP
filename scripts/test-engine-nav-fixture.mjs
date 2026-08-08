@@ -5,6 +5,26 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { registerMapInAddonInfo } from "../src/dota/addoninfo.js";
 import { buildRepositoryCompileFixtureText } from "../src/dota/compile-fixture.js";
+import { captureEngineScreenshot } from "../src/dota/engine-screenshot.js";
+import {
+  ENGINE_ANIMATION_CLIENT_TARGET,
+  ENGINE_ANIMATION_FIXTURE_DEBUG_SDK_VERSION,
+  ENGINE_ANIMATION_FIXTURE_MAP,
+  ENGINE_ANIMATION_FOCUS_TARGET,
+  ENGINE_ANIMATION_FRAME_REGION,
+  ENGINE_ANIMATION_MODEL,
+  ENGINE_ANIMATION_SEQUENCE,
+  ENGINE_ANIMATION_SERVER_TARGET,
+  buildEngineAnimationFixtureText,
+  inspectEngineAnimationFixture,
+} from "../src/dota/engine-animation-fixture.js";
+import {
+  assessBannerFrameMotion,
+  assessEngineAnimationSamples,
+  compareAnimationFrames,
+  requestEngineAnimationSample,
+  requestEngineFocus,
+} from "../src/dota/engine-animation-test.js";
 import {
   BRIDGE_NAV_FIXTURE_DEBUG_SDK_VERSION,
   BRIDGE_NAV_FIXTURE_MAP,
@@ -32,6 +52,7 @@ import {
 import {
   ensureEngineNavigationMapReady,
   executeEngineNavigationChecks,
+  waitForEngineNavigationReady,
 } from "../src/dota/engine-nav-test.js";
 import { waitForEngineWindow } from "../src/dota/engine-window.js";
 import { restartGame, shutdownGame } from "../src/dota/game-session.js";
@@ -44,6 +65,7 @@ const args = new Set(process.argv.slice(2));
 const probe = args.has("--probe");
 const bridge = args.has("--bridge");
 const ring = args.has("--ring");
+const animation = args.has("--animation");
 const compileOnly = args.has("--compile-only");
 const launchStrategy = args.has("--direct") ? "direct" : "steam";
 const port = Number(process.env.DOTA2_VCONPORT || 29000);
@@ -75,7 +97,9 @@ function fixtureProject(root, addonName, gameDir, contentDir) {
 }
 
 async function main() {
-  if (bridge && ring) throw new Error("Choose only one isolated fixture: --bridge or --ring.");
+  if ([bridge, ring, animation].filter(Boolean).length > 1) {
+    throw new Error("Choose only one isolated fixture: --bridge, --ring, or --animation.");
+  }
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`Invalid VConsole port: ${port}`);
   if (await isProcessRunning("dota2.exe")) {
     throw new Error("Dota is already running. The disposable fixture refuses to replace a user session.");
@@ -85,13 +109,17 @@ async function main() {
   const template = join(dota.contentDotaAddons, "addon_template", "maps", "template_map.vmap");
   if (!existsSync(template)) throw new Error(`Valve's blank-map template is missing: ${template}`);
 
-  const fixtureMap = ring
+  const fixtureMap = animation
+    ? ENGINE_ANIMATION_FIXTURE_MAP
+    : ring
     ? RING_NAV_FIXTURE_MAP
     : bridge ? BRIDGE_NAV_FIXTURE_MAP : ENGINE_NAV_FIXTURE_MAP;
-  const debugSdkVersion = ring
+  const debugSdkVersion = animation
+    ? ENGINE_ANIMATION_FIXTURE_DEBUG_SDK_VERSION
+    : ring
     ? RING_NAV_FIXTURE_DEBUG_SDK_VERSION
     : bridge ? BRIDGE_NAV_FIXTURE_DEBUG_SDK_VERSION : ENGINE_NAV_FIXTURE_DEBUG_SDK_VERSION;
-  const fixtureKind = ring ? "ring_nav" : bridge ? "bridge_nav" : "nav";
+  const fixtureKind = animation ? "animation" : ring ? "ring_nav" : bridge ? "bridge_nav" : "nav";
   const addonName = `codex_mcp_${fixtureKind}_${process.pid}_${Date.now()}`;
   const contentAddon = join(dota.contentDotaAddons, addonName);
   const gameAddon = join(dota.gameDotaAddons, addonName);
@@ -108,13 +136,20 @@ async function main() {
     const structuralSeed = await vmapToText(dota.dmxconvertExe, template);
     await textToVmap(
       dota.dmxconvertExe,
-      ring
+      animation
+        ? buildEngineAnimationFixtureText(structuralSeed)
+        : ring
         ? buildRingNavigationFixtureText(structuralSeed)
         : bridge ? buildBridgeNavigationFixtureText(structuralSeed) : buildRepositoryCompileFixtureText(structuralSeed),
       contentMap,
     );
     const roundTripped = await vmapToText(dota.dmxconvertExe, contentMap);
-    if (bridge) {
+    if (animation) {
+      const inspection = inspectEngineAnimationFixture(roundTripped);
+      if (!inspection.passed) {
+        throw new Error(`The animation fixture did not survive Valve's VMAP conversion: ${JSON.stringify(inspection.issues)}`);
+      }
+    } else if (bridge) {
       const inspection = inspectBridgeNavigationFixture(roundTripped);
       if ((inspection.terrainCenterDistance ?? 0) < 40000 ||
           inspection.navigationSurfaceNames.length !== 3 ||
@@ -163,8 +198,11 @@ async function main() {
         map: fixtureMap,
         bridge,
         ring,
+        animation,
         compileOnly: true,
-        inspection: ring
+        inspection: animation
+          ? inspectEngineAnimationFixture(roundTripped)
+          : ring
           ? inspectRingNavigationFixture(roundTripped)
           : bridge ? inspectBridgeNavigationFixture(roundTripped) : undefined,
         passed: true,
@@ -218,6 +256,117 @@ async function main() {
     }
 
     vc.clearRing();
+    if (animation) {
+      vc.send("dota_select_hero npc_dota_hero_axe");
+      // PRE_GAME (6) can still render Valve's full-screen team showcase. Require
+      // GAME_IN_PROGRESS (7) before treating renderer pixels as map evidence.
+      const inGameReadiness = await waitForEngineNavigationReady(vc, 7, 120_000);
+      if (!inGameReadiness.ready) {
+        throw new Error("The animation fixture did not reach GAME_IN_PROGRESS after selecting Axe.");
+      }
+      const focus = await requestEngineFocus(vc, ENGINE_ANIMATION_FOCUS_TARGET, true, 10_000);
+      // Let the camera finish its bounded transition to the named prop before
+      // sampling or capturing renderer evidence.
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 1500));
+
+      const clientBefore = await requestEngineAnimationSample(vc, ENGINE_ANIMATION_CLIENT_TARGET, 10_000);
+      const serverBefore = await requestEngineAnimationSample(vc, ENGINE_ANIMATION_SERVER_TARGET, 10_000);
+      const frameBefore = await captureEngineScreenshot({
+        screenshotsDir: dota.screenshotsDir,
+        sendCommand: (command) => vc.send(command),
+        format: "png",
+        timeoutMs: 10_000,
+      });
+      if (!frameBefore.buf) throw new Error(`First correlated renderer frame failed: ${frameBefore.error || "no PNG returned"}`);
+
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 900));
+
+      const frameAfter = await captureEngineScreenshot({
+        screenshotsDir: dota.screenshotsDir,
+        sendCommand: (command) => vc.send(command),
+        format: "png",
+        timeoutMs: 10_000,
+      });
+      if (!frameAfter.buf) throw new Error(`Second correlated renderer frame failed: ${frameAfter.error || "no PNG returned"}`);
+      const clientAfter = await requestEngineAnimationSample(vc, ENGINE_ANIMATION_CLIENT_TARGET, 10_000);
+      const serverAfter = await requestEngineAnimationSample(vc, ENGINE_ANIMATION_SERVER_TARGET, 10_000);
+
+      const clientAssessment = assessEngineAnimationSamples(
+        [clientBefore, clientAfter],
+        {
+          targetName: ENGINE_ANIMATION_CLIENT_TARGET,
+          classname: "prop_dynamic",
+          model: ENGINE_ANIMATION_MODEL,
+          sequence: ENGINE_ANIMATION_SEQUENCE,
+          requireCycleProgress: false,
+        },
+      );
+      const serverAssessment = assessEngineAnimationSamples(
+        [serverBefore, serverAfter],
+        {
+          targetName: ENGINE_ANIMATION_SERVER_TARGET,
+          classname: "prop_dynamic",
+          model: ENGINE_ANIMATION_MODEL,
+          sequence: ENGINE_ANIMATION_SEQUENCE,
+          requireCycleProgress: true,
+        },
+      );
+      const frameMotion = assessBannerFrameMotion(
+        compareAnimationFrames(
+          frameBefore.buf,
+          frameAfter.buf,
+          ENGINE_ANIMATION_FRAME_REGION,
+        ),
+        {
+          minimumWarmEligiblePixels: 6000,
+          minimumWarmChangedPixels: 1000,
+          minimumWarmChangedFraction: 0.01,
+        },
+      );
+      const consoleErrors = vc.recent(1000)
+        .map((line) => line.text)
+        .filter((line) => /(script error|stack traceback|assertion failed|lua runtime error|\.lua:\d+:)/i.test(line));
+      const issues = [
+        ...clientAssessment.issues,
+        ...serverAssessment.issues,
+        ...frameMotion.issues,
+        ...consoleErrors.map((line) => `console: ${line}`),
+      ];
+      const passed = issues.length === 0;
+      console.log(JSON.stringify({
+        addonName,
+        map: fixtureMap,
+        animation: true,
+        launch: { method: launch.method, fallbackUsed: launch.fallbackUsed },
+        readiness: readiness.line,
+        inGameReadiness: inGameReadiness.line,
+        focus,
+        client: { samples: [clientBefore, clientAfter], assessment: clientAssessment },
+        serverProbe: { samples: [serverBefore, serverAfter], assessment: serverAssessment },
+        renderer: {
+          region: ENGINE_ANIMATION_FRAME_REGION,
+          frameBefore: {
+            sourcePath: frameBefore.sourcePath,
+            dimensions: frameBefore.dimensions,
+            correlated: frameBefore.correlated,
+            quality: frameBefore.quality,
+          },
+          frameAfter: {
+            sourcePath: frameAfter.sourcePath,
+            dimensions: frameAfter.dimensions,
+            correlated: frameAfter.correlated,
+            quality: frameAfter.quality,
+          },
+          motion: frameMotion,
+        },
+        consoleErrors,
+        passed,
+        issues,
+      }, null, 2));
+      if (!passed) throw new Error(`Engine animation fixture failed:\n${issues.join("\n")}`);
+      return;
+    }
+
     const routes = ring
       ? ringNavigationFixtureRoutesFromText(roundTripped)
       : bridge ? bridgeNavigationFixtureRoutesFromText(roundTripped) : ENGINE_NAV_FIXTURE_ROUTES;
@@ -241,6 +390,7 @@ async function main() {
       map: fixtureMap,
       bridge,
       ring,
+      animation,
       probe,
       launch: { method: launch.method, fallbackUsed: launch.fallbackUsed },
       readiness: readiness.line,

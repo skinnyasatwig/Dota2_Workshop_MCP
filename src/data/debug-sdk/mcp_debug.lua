@@ -15,7 +15,7 @@
   your addon by hand — re-attach to update.
 ]]
 
-local SDK_VERSION = "1.4.0"
+local SDK_VERSION = "1.6.0"
 
 ----------------------------------------------------------------------
 -- Tiny JSON encoder (no dependencies; handles the shapes we emit).
@@ -305,6 +305,53 @@ local function cmd_nav(_, requestId, routeName, mode, encodedPoints)
   out("NAV_OK", requestId, jsonEncode(result))
 end
 
+-- Correlated animation-state query for a named map entity. This keeps the Lua
+-- expression out of the console command and lets automated tests reject stale
+-- responses from an earlier launch.
+-- Usage: mcp_anim <request-id> <targetname>
+local function cmd_anim(_, requestId, targetName)
+  requestId = tostring(requestId or "")
+  targetName = tostring(targetName or "")
+  if requestId == "" or not string.match(requestId, "^[A-Za-z0-9_.:-]+$") then
+    out("ANIM_ERR", requestId ~= "" and requestId or "unknown", "invalid or missing request id")
+    return
+  end
+  if targetName == "" or not string.match(targetName, "^[A-Za-z0-9_.:-]+$") then
+    out("ANIM_ERR", requestId, "invalid or missing targetname")
+    return
+  end
+
+  local ok, result = pcall(function()
+    local entity = Entities:FindByName(nil, targetName)
+    if not entity or entity:IsNull() then
+      return {
+        targetName = targetName,
+        found = false,
+        gameTime = GameRules:GetGameTime(),
+      }
+    end
+    if not entity.GetCycle or not entity.GetSequence then
+      error("entity does not expose CBaseAnimatingActivity")
+    end
+    return {
+      targetName = targetName,
+      found = true,
+      classname = entity:GetClassname(),
+      model = entity.GetModelName and entity:GetModelName() or nil,
+      sequence = entity:GetSequence(),
+      cycle = entity:GetCycle(),
+      duration = entity.ActiveSequenceDuration and entity:ActiveSequenceDuration() or nil,
+      finished = entity.IsSequenceFinished and entity:IsSequenceFinished() or nil,
+      gameTime = GameRules:GetGameTime(),
+    }
+  end)
+  if not ok then
+    out("ANIM_ERR", requestId, tostring(result))
+    return
+  end
+  out("ANIM_OK", requestId, jsonEncode(result))
+end
+
 local function cmd_assert(args)
   local code = joinArgs(args, 2)
   if code == "" then out("ASSERT", "FAIL", "(no expression)"); return end
@@ -380,6 +427,47 @@ local function firstPlayer()
     end
   end
   return nil, nil
+end
+
+-- Point the local player's camera at a named map entity. This is intentionally
+-- narrow: it cannot execute arbitrary Lua, and its correlated response lets a
+-- renderer test prove that framing completed before taking evidence screenshots.
+-- Usage: mcp_focus <request-id> <targetname> [hide-hero:0|1]
+local function cmd_focus(_, requestId, targetName, hideHero)
+  requestId = tostring(requestId or "")
+  targetName = tostring(targetName or "")
+  if requestId == "" or not string.match(requestId, "^[A-Za-z0-9_.:-]+$") then
+    out("FOCUS_ERR", requestId ~= "" and requestId or "unknown", "invalid or missing request id")
+    return
+  end
+  if targetName == "" or not string.match(targetName, "^[A-Za-z0-9_.:-]+$") then
+    out("FOCUS_ERR", requestId, "invalid or missing targetname")
+    return
+  end
+  local _, pid = firstPlayer()
+  if pid == nil then
+    out("FOCUS_ERR", requestId, "no connected player")
+    return
+  end
+  local entity = Entities:FindByName(nil, targetName)
+  if not entity or entity:IsNull() then
+    out("FOCUS_ERR", requestId, "target entity was not found")
+    return
+  end
+  local hero = PlayerResource:GetSelectedHeroEntity(pid)
+  local hidden = false
+  if tostring(hideHero) == "1" and hero and not hero:IsNull() and hero.AddNoDraw then
+    hero:AddNoDraw()
+    hidden = true
+  end
+  PlayerResource:SetCameraTarget(pid, entity)
+  local origin = entity:GetAbsOrigin()
+  out("FOCUS_OK", requestId, jsonEncode({
+    targetName = targetName,
+    pid = pid,
+    heroHidden = hidden,
+    origin = { origin.x, origin.y, origin.z },
+  }))
 end
 
 -- Ask the optional Panorama bridge for the local camera and minimap geometry.
@@ -463,16 +551,18 @@ reg("mcp_state", function() cmd_state() end, "MCP: dump high-level game state as
 reg("mcp_dump", cmd_dump, "MCP: dump a section (state|heroes|units|nettables) as JSON")
 reg("mcp_eval", cmd_eval, "MCP: eval Lua and print the JSON-encoded result")
 reg("mcp_nav", cmd_nav, "MCP: run a compact, correlated GridNav route query")
+reg("mcp_anim", cmd_anim, "MCP: query a named animated entity with a correlated response")
 reg("mcp_assert", cmd_assert, "MCP: evaluate a boolean Lua expression; prints PASS/FAIL")
 reg("mcp_spawn", cmd_spawn, "MCP: spawn units near a hero (mcp_spawn <unit> [count] [team])")
 reg("mcp_gold", cmd_gold, "MCP: grant gold (mcp_gold <amount> [pid])")
 reg("mcp_level", cmd_level, "MCP: level a hero up to N (mcp_level <level> [pid])")
 reg("mcp_item", cmd_item, "MCP: give an item (mcp_item <item> [pid])")
 reg("mcp_event", cmd_event, "MCP: fire a custom game event to clients (mcp_event <name> [json])")
+reg("mcp_focus", cmd_focus, "MCP: focus a player's camera on a named map entity")
 reg("mcp_camera", cmd_camera, "MCP: query local camera/minimap geometry through the optional Panorama bridge")
 reg("mcp_hud", cmd_hud, "MCP: toggle HUD visibility (mcp_hud <0|1>) for clean shots")
 reg("mcp_pause", cmd_pause, "MCP: pause/unpause (mcp_pause <0|1>)")
 
-out("DebugSDK", "loaded", "v=" .. SDK_VERSION, "(commands: mcp_ping mcp_state mcp_dump mcp_eval mcp_nav mcp_assert mcp_spawn mcp_gold mcp_level mcp_item mcp_event mcp_camera mcp_hud mcp_pause)")
+out("DebugSDK", "loaded", "v=" .. SDK_VERSION, "(commands: mcp_ping mcp_state mcp_dump mcp_eval mcp_nav mcp_anim mcp_assert mcp_spawn mcp_gold mcp_level mcp_item mcp_event mcp_focus mcp_camera mcp_hud mcp_pause)")
 
 return { version = SDK_VERSION }
