@@ -295,7 +295,9 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
   bounded camera bridge, waits for actual map-render state 7, frames the exact entity, samples its correlated sequence
   and cycle twice, scans script errors, and always shuts down the session it launched. Optional `pixelCheck:"warm"`
   adds two renderer-native PNGs and the deliberately strict warm-colour motion gate; structured cycle proof is the safe
-  default because broad scene motion is not object-specific evidence.
+  default because broad scene motion is not object-specific evidence. The animation and minimap tools share one tested
+  owned-session lifecycle for launch, VConsole connection, exact-watchdog handling, window readiness, retained console
+  evidence, and bounded shutdown; the navigation tool shares the watchdog policy while preserving its separate attach mode.
 - **`map_recipe_catalog`** — inspect the named terrain cores, Radiant/Dire cliff recipes, ramp-safe
   fallbacks, checked solid-volume recipes, deterministic visual-dressing palettes, and official Valve prefab references
   used by the generator. `category:"dressing"` returns the curated palette library. `verifyInstalled:true` checks the

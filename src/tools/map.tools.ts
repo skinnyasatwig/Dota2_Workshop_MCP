@@ -49,6 +49,11 @@ import {
   waitForEngineNavigationReady,
 } from "../dota/engine-nav-test.js";
 import { attachDebugSdk } from "../dota/debugsdk.js";
+import {
+  dismissTransientEngineStalls,
+  EngineSessionBlockedError,
+  runOwnedEngineSession,
+} from "../dota/engine-owned-session.js";
 import { restartGame, shutdownGame } from "../dota/game-session.js";
 import { defaultVconPort, getVConsole } from "../dota/vconsole.js";
 import { isProcessRunning } from "../dota/process.js";
@@ -960,20 +965,16 @@ export function registerMapTools(server: McpServer) {
           }
           if (!vc.isConnected()) await vc.connectWithRetry(60_000, 1000);
           if (shouldDismissTransientStalls) {
-            startupDiagnosis = await diagnoseDota();
-            for (const blocker of startupDiagnosis.blockers.filter((window) => window.role === "stall").slice(0, 3)) {
-              transientStallDismissals.push(await closeTransientStallDialog(blocker));
-            }
-            if (transientStallDismissals.length) {
-              await new Promise((resolve) => setTimeout(resolve, 250));
-              startupDiagnosis = await diagnoseDota();
-            }
-            if (startupDiagnosis.blocked) {
-              const blocker = startupDiagnosis.blockers[0];
-              throw new Error(
-                `Dota startup is blocked by ${blocker?.role ?? "a dialog"}: ` +
-                  `${blocker?.title || blocker?.className || "unknown window"}.`,
-              );
+            try {
+              const handled = await dismissTransientEngineStalls();
+              startupDiagnosis = handled.diagnosis;
+              transientStallDismissals.push(...handled.dismissals);
+            } catch (caught) {
+              if (caught instanceof EngineSessionBlockedError) {
+                startupDiagnosis = caught.handling.diagnosis;
+                transientStallDismissals.push(...caught.handling.dismissals);
+              }
+              throw caught;
             }
           }
           windowPreparation = await waitForEngineWindow(shouldFocusDotaWindow, 30_000, 500);
@@ -1219,15 +1220,18 @@ export function registerMapTools(server: McpServer) {
       if (!overview.metadata || !overview.image) {
         return error("The overview metadata or source PNG dimensions are unavailable; a visual minimap test cannot calculate expected coordinates.");
       }
+      const worldBounds = overview.entityBounds;
+      const overviewMetadata = overview.metadata;
+      const overviewImage = overview.image;
 
       if (isDryRun) {
         const sdkPlan = shouldAttach ? await attachDebugSdk(project, true, { cameraBridge: true }) : undefined;
         return json({
           dryRun: true,
           map,
-          worldBounds: overview.entityBounds,
+          worldBounds,
           overviewRotation: {
-            raw: overview.metadata.rotate,
+            raw: overviewMetadata.rotate,
             quarterTurnsClockwise: overview.displayQuarterTurnsClockwise,
           },
           probes: chosenProbes,
@@ -1249,7 +1253,7 @@ export function registerMapTools(server: McpServer) {
           automaticShutdown: true,
         }, [
           `[dry run] ${map}: one guarded launch, ${chosenProbes.length} real minimap click(s), exact camera telemetry, automatic shutdown.`,
-          `Expected world bounds: ${JSON.stringify(overview.entityBounds)}; accepted error: ${allowedError} units.`,
+          `Expected world bounds: ${JSON.stringify(worldBounds)}; accepted error: ${allowedError} units.`,
           `Minimap rectangle: ${minimapRect ? "explicit override" : "discover from the native HUD"}; ` +
             `screenshots: ${shouldCapture ? `${chosenProbes.length} (${chosenScreenshotMethod})` : 0}.`,
           `Dota currently running: ${dotaWasRunning}${dotaWasRunning && !replaceRunningDota ? " (live run would refuse)" : ""}.`,
@@ -1275,55 +1279,34 @@ export function registerMapTools(server: McpServer) {
         return error("No compiled map VPK was found. Compile first or pass compile=true; Dota was not launched.");
       }
 
-      const vc = getVConsole(port);
-      let launched = false;
-      let launchResult: Awaited<ReturnType<typeof restartGame>> | undefined;
       let readiness: Awaited<ReturnType<typeof ensureEngineNavigationMapReady>> | undefined;
-      let windowPreparation: Awaited<ReturnType<typeof waitForEngineWindow>> | undefined;
       let discoveredRect: MinimapClientRect | undefined;
       let baselineTelemetry: Awaited<ReturnType<typeof requestCameraTelemetry>> | undefined;
       const results: Array<Record<string, unknown>> = [];
       const screenshotBuffers: Array<{ name: string; buffer: Buffer }> = [];
-      const transientStallDismissals: Awaited<ReturnType<typeof closeTransientStallDialog>>[] = [];
+      const runtimeStallDismissals: Awaited<ReturnType<typeof closeTransientStallDialog>>[] = [];
       const cameraFocusRecoveries: Array<{
         probe: string;
         reason: "post-input-focus" | "camera-timeout";
         preparation: Awaited<ReturnType<typeof prepareAttachedEngineWindow>>;
       }> = [];
       let failedScreenshotCount = 0;
-      let fatalError: string | undefined;
-      let shutdown: Awaited<ReturnType<typeof shutdownGame>> | undefined;
-      let consoleTail: string[] = [];
 
       const dismissKnownStalls = async () => {
-        const diagnosis = await diagnoseDota();
-        for (const blocker of diagnosis.blockers.filter((window) => window.role === "stall").slice(0, 3)) {
-          transientStallDismissals.push(await closeTransientStallDialog(blocker));
-        }
-        const remaining = await diagnoseDota();
-        if (remaining.blocked) {
-          const blocker = remaining.blockers[0];
-          throw new Error(`Dota is blocked by ${blocker?.role ?? "a dialog"}: ${blocker?.title || blocker?.className || "unknown window"}.`);
-        }
+        const handled = await dismissTransientEngineStalls();
+        runtimeStallDismissals.push(...handled.dismissals);
       };
 
-      try {
-        launchResult = await restartGame(
-          dota,
-          project.addonName,
-          map,
-          port,
-          true,
-          true,
-          launchStrategy ?? "auto",
-          renderer === "default" ? undefined : renderer,
-        );
-        launched = true;
-        if (!vc.isConnected()) await vc.connectWithRetry(60_000, 1000);
-        await dismissKnownStalls();
-        windowPreparation = await waitForEngineWindow(true, 30_000, 500);
-        if (!windowPreparation.ok) throw new Error(`Could not prepare the Dota window: ${windowPreparation.error}`);
-
+      const session = await runOwnedEngineSession({
+        dota,
+        addon: project.addonName,
+        map,
+        port,
+        launchStrategy: launchStrategy ?? "auto",
+        renderer: renderer === "default" ? undefined : renderer,
+        shutdownTimeoutMs: shutdownTimeoutMs ?? 15_000,
+        consoleTailLines: 240,
+      }, async ({ console: vc }) => {
         readiness = await ensureEngineNavigationMapReady(
           vc,
           project.addonName,
@@ -1359,7 +1342,7 @@ export function registerMapTools(server: McpServer) {
         for (const probe of chosenProbes) {
           await dismissKnownStalls();
           const pixel = minimapProbePixel(discoveredRect, probe);
-          const expected = minimapProbeWorld(overview.metadata, overview.image, probe);
+          const expected = minimapProbeWorld(overviewMetadata, overviewImage, probe);
           const input = await runWin32Spec({
             focus: true,
             actions: [
@@ -1459,14 +1442,16 @@ export function registerMapTools(server: McpServer) {
             },
           });
         }
-      } catch (caught) {
-        fatalError = caught instanceof Error ? caught.message : String(caught);
-        consoleTail = vc.recent(240).map((line) => line.text);
-      } finally {
-        if (launched || (await isProcessRunning("dota2.exe"))) {
-          shutdown = await shutdownGame(port, shutdownTimeoutMs ?? 15_000);
-        }
-      }
+      });
+      const launchResult = session.launch;
+      const windowPreparation = session.windowPreparation;
+      const transientStallDismissals = [
+        ...session.transientStallDismissals,
+        ...runtimeStallDismissals,
+      ];
+      const fatalError = session.fatalError;
+      const shutdown = session.shutdown;
+      const consoleTail = fatalError ? session.consoleTail : [];
 
       const failedProbes = results.filter((result) => result.passed !== true);
       const failed = !!fatalError || failedProbes.length > 0 || failedScreenshotCount > 0 || !shutdown?.stopped;
@@ -1480,11 +1465,12 @@ export function registerMapTools(server: McpServer) {
           cameraBridge: attached.cameraBridge,
         } : { skipped: true },
         launch: launchResult,
+        startupDiagnosis: session.startupDiagnosis,
         readiness,
         windowPreparation,
-        worldBounds: overview.entityBounds,
+        worldBounds,
         overviewRotation: {
-          raw: overview.metadata.rotate,
+          raw: overviewMetadata.rotate,
           quarterTurnsClockwise: overview.displayQuarterTurnsClockwise,
         },
         minimapRect: discoveredRect,

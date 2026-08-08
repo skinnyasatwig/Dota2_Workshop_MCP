@@ -13,14 +13,12 @@ import { ensureEngineNavigationMapReady, waitForEngineNavigationReady } from "..
 import { inspectMapAnimationTarget } from "../dota/map-animation-test.js";
 import { captureEngineScreenshot } from "../dota/engine-screenshot.js";
 import { attachDebugSdk, DEBUG_SDK_VERSION } from "../dota/debugsdk.js";
-import { closeTransientStallDialog, diagnoseDota } from "../dota/diagnose.js";
-import { waitForEngineWindow } from "../dota/engine-window.js";
-import { restartGame, shutdownGame } from "../dota/game-session.js";
+import { runOwnedEngineSession } from "../dota/engine-owned-session.js";
 import { compileProjectContent, projectMapPaths } from "../dota/map-project.js";
 import { inspectProjectMapModels } from "../dota/map-model.js";
 import { requireDotaPaths } from "../dota/paths.js";
 import { isProcessRunning } from "../dota/process.js";
-import { defaultVconPort, getVConsole } from "../dota/vconsole.js";
+import { defaultVconPort } from "../dota/vconsole.js";
 import { vmapToText } from "../dota/vmap.js";
 import { pathExists } from "../util/fsx.js";
 import { error, guard, json, ToolResult } from "../util/result.js";
@@ -53,21 +51,6 @@ const DEFAULT_WARM_THRESHOLDS = {
   minimumWarmChangedPixels: 1000,
   minimumWarmChangedFraction: 0.01,
 } as const;
-
-async function dismissKnownStalls(): Promise<void> {
-  let diagnosis = await diagnoseDota();
-  for (const blocker of diagnosis.blockers.filter((window) => window.role === "stall").slice(0, 3)) {
-    await closeTransientStallDialog(blocker);
-  }
-  if (diagnosis.blockers.some((window) => window.role === "stall")) {
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
-    diagnosis = await diagnoseDota();
-  }
-  if (diagnosis.blocked) {
-    const blocker = diagnosis.blockers[0];
-    throw new Error(`Dota is blocked by ${blocker?.role ?? "a dialog"}: ${blocker?.title || blocker?.className || "unknown window"}.`);
-  }
-}
 
 export function registerMapAnimationTools(server: McpServer) {
   server.registerTool(
@@ -208,9 +191,6 @@ export function registerMapAnimationTools(server: McpServer) {
         return error("No compiled map VPK was found. Compile first or pass compile=true; Dota was not launched.");
       }
 
-      const vc = getVConsole(port);
-      let launchAttempted = false;
-      let launch: Awaited<ReturnType<typeof restartGame>> | undefined;
       let readiness: Awaited<ReturnType<typeof ensureEngineNavigationMapReady>> | undefined;
       let inGameReadiness: Awaited<ReturnType<typeof waitForEngineNavigationReady>> | undefined;
       let framing: Awaited<ReturnType<typeof requestEngineFrame>> | undefined;
@@ -221,27 +201,16 @@ export function registerMapAnimationTools(server: McpServer) {
       let firstFrame: Awaited<ReturnType<typeof captureEngineScreenshot>> | undefined;
       let secondFrame: Awaited<ReturnType<typeof captureEngineScreenshot>> | undefined;
       let motion: ReturnType<typeof assessBannerFrameMotion> | undefined;
-      let consoleErrors: string[] = [];
-      let fatalError: string | undefined;
-      let shutdown: Awaited<ReturnType<typeof shutdownGame>> | undefined;
-
-      try {
-        launchAttempted = true;
-        launch = await restartGame(
-          dota,
-          project.addonName,
-          map,
-          port,
-          true,
-          true,
-          launchStrategy ?? "auto",
-          renderer === "default" ? undefined : renderer,
-        );
-        if (!vc.isConnected()) await vc.connectWithRetry(60_000, 1000);
-        await dismissKnownStalls();
-        const window = await waitForEngineWindow(true, 30_000, 500);
-        if (!window.ok) throw new Error(window.error || "Dota's render window was not ready.");
-
+      const session = await runOwnedEngineSession({
+        dota,
+        addon: project.addonName,
+        map,
+        port,
+        launchStrategy: launchStrategy ?? "auto",
+        renderer: renderer === "default" ? undefined : renderer,
+        shutdownTimeoutMs: shutdownTimeoutMs ?? 15_000,
+        consoleTailLines: 1000,
+      }, async ({ console: vc }) => {
         vc.clearRing();
         readiness = await ensureEngineNavigationMapReady(
           vc,
@@ -301,28 +270,12 @@ export function registerMapAnimationTools(server: McpServer) {
             chosenThresholds,
           );
         }
-        consoleErrors = vc.recent(1000)
-          .map((line) => line.text)
-          .filter((line) => /(script error|stack traceback|assertion failed|lua runtime error|\.lua:\d+:)/i.test(line));
-      } catch (caught) {
-        fatalError = caught instanceof Error ? caught.message : String(caught);
-        consoleErrors = vc.recent(1000)
-          .map((line) => line.text)
-          .filter((line) => /(script error|stack traceback|assertion failed|lua runtime error|\.lua:\d+:)/i.test(line));
-      } finally {
-        if (launchAttempted) {
-          if (launch || (await isProcessRunning("dota2.exe"))) {
-            shutdown = await shutdownGame(port, shutdownTimeoutMs ?? 15_000);
-          } else {
-            shutdown = {
-              quitSent: false,
-              forceKilled: false,
-              stopped: true,
-              detail: "Dota never started; no shutdown action was needed.",
-            };
-          }
-        }
-      }
+      });
+      const launch = session.launch;
+      const fatalError = session.fatalError;
+      const shutdown = session.shutdown;
+      const consoleErrors = session.consoleTail
+        .filter((line) => /(script error|stack traceback|assertion failed|lua runtime error|\.lua:\d+:)/i.test(line));
 
       const issues = [
         ...(framingAssessment?.issues ?? []),
@@ -342,6 +295,9 @@ export function registerMapAnimationTools(server: McpServer) {
         compiled: shouldCompile,
         debugSdk: attached ? { copiedTo: attached.copiedTo, cameraBridge: attached.cameraBridge } : { skipped: true },
         launch,
+        windowPreparation: session.windowPreparation,
+        startupDiagnosis: session.startupDiagnosis,
+        transientStallDismissals: session.transientStallDismissals,
         readiness,
         inGameReadiness,
         framing: framing ? { result: framing, assessment: framingAssessment } : undefined,

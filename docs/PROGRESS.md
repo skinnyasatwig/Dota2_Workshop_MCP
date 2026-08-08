@@ -426,10 +426,19 @@ Last updated: 2026-08-07
     `test:engine-animation-map` command stores structured reports and optional frames in the project's `artifacts`
     directory. The build, 350-test default suite, and 208-check MCP smoke surface pass without launching Dota.
 
+67. This milestone - consolidated tool-owned Dota sessions behind one dependency-tested lifecycle. Animation and
+    minimap runs now share launch, VConsole connection, safe exact-watchdog dismissal, render-window preparation,
+    console-tail retention, and `finally`-guarded graceful/forced shutdown. The helper refuses to click assertions,
+    crashes, or generic dialogs; reports a clean no-op when launch never creates a process; and converts shutdown
+    exceptions into structured failures instead of losing the rest of the evidence. Navigation reuses the same stall
+    handler but keeps its distinct attach-to-running-session ownership rules. Five offline tests exercise success,
+    transient-stall recovery, unsafe-dialog refusal, pre-process launch failure, and shutdown failure. The complete
+    suite and smoke surface pass without opening Dota or Hammer.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 350 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 355 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 208 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed palette-bound audit: 20 of 20 model CRCs and MDAT snapshots match the current Dota VPK.
 - Installed palette-gallery proof: the four-model `river-wetland` set passed exact CRC checks, decoded to textured GLBs,
