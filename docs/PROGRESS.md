@@ -205,6 +205,13 @@ Last updated: 2026-08-07
     preview reported zero entity, volume, terrain, material, solid, or navigation changes. Offline validation remained
     at zero errors/holes and the same deliberate 384-cell isolated strip; the diagnostic preview and reachability counts
     were unchanged, and the existing compiled VPK passed required-freshness validation without launching Dota or Hammer.
+45. This acceptance follow-up - extended the real 3v3 `base_shell` into a team-aware reusable side assembly. Five
+    validated Radiant tower recipes (T1, north/south T2, and the two T4-style “T3” defenses), the real center player
+    start, two side-start markers, and the nested front-wall kit now produce both bases. The Dire placement uses one
+    explicit X mirror plus `teamSwap`. An automated targetname-keyed comparison proved all 16 replaced entities exactly
+    preserve class, origin, angles, model, stock unit name, team data, and other keyvalues. Whole-contract counts stayed
+    at 84 entities, 98 terrain operations, 10 volumes, and four paths; real sync again reported zero changes across 148
+    desired entities, and compiled-required validation remained clean except for the known isolated off-map strip.
 
 ## Current verification record
 
