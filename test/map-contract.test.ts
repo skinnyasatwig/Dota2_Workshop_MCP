@@ -29,6 +29,7 @@ test("loadMapContract loads and validates the project default", async () => {
           classname: "info_target",
           origin: "-1024 512 128",
           angles: "0 90 0",
+          scales: "1.25 1.25 1.25",
           properties: { enabled: true },
         },
       ],
@@ -87,6 +88,7 @@ test("loadMapContract loads and validates the project default", async () => {
   assert.equal(resolved?.contract.requiredEntities.length, 2);
   assert.equal(resolved?.contract.requiredEntities[0].properties?.teamnumber, "2");
   assert.equal(resolved?.contract.managedEntities?.[0].origin, "-1024 512 128");
+  assert.equal(resolved?.contract.managedEntities?.[0].scales, "1.25 1.25 1.25");
   assert.equal(resolved?.contract.managedEntities?.[0].properties?.enabled, "true");
   assert.equal(resolved?.contract.managedAbsentEntities?.length, 1);
   assert.equal(resolved?.contract.managedTerrain?.length, 3);
@@ -157,6 +159,26 @@ test("loadMapContract rejects duplicate managed targetnames", async () => {
     }),
   );
   await assert.rejects(() => loadMapContract(root, "twin_gates"), /duplicate targetname "spawn"/);
+  await rm(root, { recursive: true, force: true });
+});
+
+test("loadMapContract requires a valid solid static prop for a PHYS promise", async () => {
+  const root = await freshRoot();
+  const file = join(root, ".dota-workshop", "map-contract.json");
+  await writeFile(file, JSON.stringify({
+    requiredEntities: [],
+    managedEntities: [{
+      targetname: "bad_physics_promise",
+      classname: "info_target",
+      origin: "0 0 0",
+      modelPhysics: "required",
+      properties: { model: "models/props/test.vmdl", solid: 0 },
+    }],
+  }));
+  await assert.rejects(
+    () => loadMapContract(root, "twin_gates"),
+    /modelPhysics.*prop_static.*solid "6"/,
+  );
   await rm(root, { recursive: true, force: true });
 });
 

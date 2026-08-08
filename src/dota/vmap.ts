@@ -61,6 +61,7 @@ export interface EntitySpec {
   classname: string;
   origin?: string; // "x y z"
   angles?: string; // "pitch yaw roll"
+  scales?: string; // "x y z"
   properties?: Record<string, string | number>;
 }
 
@@ -81,6 +82,7 @@ export interface MapEntityPatch {
   newTargetname?: string;
   origin?: string;
   angles?: string;
+  scales?: string;
   properties?: Record<string, string | number>;
   removeProperties?: string[];
 }
@@ -201,6 +203,7 @@ function patchEntityBlock(block: string, patch: MapEntityPatch): string {
   if (patch.classname !== undefined) out = replaceTypedValue(out, "classname", "string", patch.classname);
   if (patch.origin !== undefined) out = replaceTypedValue(out, "origin", "vector3", patch.origin);
   if (patch.angles !== undefined) out = replaceTypedValue(out, "angles", "qangle", patch.angles);
+  if (patch.scales !== undefined) out = replaceTypedValue(out, "scales", "vector3", patch.scales);
   for (const key of patch.removeProperties ?? []) out = removeStringProperty(out, key);
   if (patch.newTargetname !== undefined) out = upsertStringProperty(out, "targetname", patch.newTargetname);
   for (const [key, value] of Object.entries(patch.properties ?? {})) out = upsertStringProperty(out, key, value);
@@ -237,6 +240,7 @@ export interface ManagedEntitySpec {
   classname: string;
   origin: string;
   angles?: string;
+  scales?: string;
   properties?: Record<string, string | number>;
   removeProperties?: string[];
 }
@@ -354,6 +358,7 @@ export function reconcileMapEntities(
       current.classname !== spec.classname ||
       current.origin !== spec.origin ||
       (spec.angles !== undefined && current.angles !== spec.angles) ||
+      (spec.scales !== undefined && current.scales !== spec.scales) ||
       Object.entries(desiredProperties).some(([key, value]) => current.properties[key] !== String(value)) ||
       removeProperties.some((key) => current.properties[key] !== undefined);
     if (!differs) {
@@ -365,6 +370,7 @@ export function reconcileMapEntities(
       classname: spec.classname,
       origin: spec.origin,
       angles: spec.angles,
+      scales: spec.scales,
       properties: desiredProperties,
       removeProperties,
     });
@@ -422,6 +428,7 @@ export function reconcileMapEntities(
           classname: spec.classname,
           origin: spec.origin,
           angles: spec.angles,
+          scales: spec.scales,
           properties,
         },
         ++nodeId,
@@ -470,7 +477,7 @@ export function buildEntityBlock(spec: EntitySpec, nodeId: number): string {
 	"id" "elementid" "${randomUUID()}"
 	"origin" "vector3" "${escapedDmxString(spec.origin ?? "0 0 0")}"
 	"angles" "qangle" "${escapedDmxString(spec.angles ?? "0 0 0")}"
-	"scales" "vector3" "1 1 1"
+	"scales" "vector3" "${escapedDmxString(spec.scales ?? "1 1 1")}"
 	"nodeID" "int" "${nodeId}"
 	"children" "element_array" [ ]
 	"editorOnly" "bool" "0"

@@ -31,6 +31,10 @@ import { reconcileMapSolids } from "../dota/map-solid.js";
 import { reconcileMapNavSurfaces } from "../dota/map-nav-surface.js";
 import { inspectProjectMapMaterials, MapMaterialReport } from "../dota/map-material.js";
 import { inspectProjectMapModels, MapModelReport } from "../dota/map-model.js";
+import {
+  inspectProjectManagedModelPhysics,
+  ManagedModelPhysicsReport,
+} from "../dota/map-model-physics.js";
 import { inspectMapOverview, MapOverviewReport } from "../dota/map-overview.js";
 import {
   buildEngineNavigationCommand,
@@ -96,6 +100,12 @@ function modelFindingText(report: MapModelReport): string {
     .join("\n");
 }
 
+function modelPhysicsFindingText(report: ManagedModelPhysicsReport): string {
+  return report.findings
+    .map((finding) => `[${finding.severity.toUpperCase()}] ${finding.detail}`)
+    .join("\n");
+}
+
 export function registerMapTools(server: McpServer) {
   server.registerTool(
     "map_create",
@@ -151,18 +161,19 @@ export function registerMapTools(server: McpServer) {
         classname: z.string(),
         origin: z.string().optional().describe('"x y z" (default "0 0 0").'),
         angles: z.string().optional().describe('"pitch yaw roll".'),
+        scales: z.string().optional().describe('"x y z" positive entity scale (default "1 1 1").'),
         properties: z.record(numOrStr).optional().describe("Entity keyvalues."),
         recompile: z.boolean().optional(),
       },
     },
-    guard(async ({ projectRoot, map, classname, origin, angles, properties, recompile }): Promise<ToolResult> => {
+    guard(async ({ projectRoot, map, classname, origin, angles, scales, properties, recompile }): Promise<ToolResult> => {
       const dota = await requireDotaPaths();
       const project = await resolveProject(projectRoot);
       const p = projectMapPaths(dota, project, map);
       if (!(await pathExists(p.contentVmap))) return error(`Map not found: ${p.contentVmap}. Create it with map_create.`);
 
       const txt = await vmapToText(dota.dmxconvertExe, p.contentVmap);
-      const block = buildEntityBlock({ classname, origin, angles, properties }, maxNodeId(txt) + 1);
+      const block = buildEntityBlock({ classname, origin, angles, scales, properties }, maxNodeId(txt) + 1);
       await textToVmap(dota.dmxconvertExe, insertEntity(txt, block), p.contentVmap);
 
       const steps = [`Added ${classname} at ${origin ?? "0 0 0"} to "${map}".`];
@@ -1524,6 +1535,7 @@ export function registerMapTools(server: McpServer) {
             newTargetname: z.string().optional(),
             origin: z.string().optional(),
             angles: z.string().optional(),
+            scales: z.string().optional(),
             properties: z.record(numOrStr).optional(),
             removeProperties: z.array(z.string()).optional(),
           }),
@@ -1572,7 +1584,8 @@ export function registerMapTools(server: McpServer) {
         "Paths expand into complete linked waypoint chains. Missing named entities " +
         "are created; existing named entities are repaired; obsolete managed path nodes are removed; and declared " +
         "terrain shapes are restored while terrain outside those shapes is preserved. The operation is idempotent and " +
-        "refuses ambiguous duplicate targetnames or missing/unsafe material or model assets. Preview reports asset blockers " +
+        "refuses ambiguous duplicate targetnames, missing/unsafe material or model assets, or an unproven explicit " +
+        "managed model-PHYS promise. Preview reports blockers " +
         "without writing. Defaults to preview-only; pass apply=true.",
       inputSchema: {
         projectRoot: z.string().optional(),
@@ -1628,7 +1641,14 @@ export function registerMapTools(server: McpServer) {
         project,
         false,
       );
-      const safeToApply = materialValidation.safeToWrite && modelValidation.safeToWrite;
+      const modelPhysicsValidation = await inspectProjectManagedModelPhysics(
+        synchronization.text,
+        dota,
+        project,
+        resolved.contract,
+      );
+      const safeToApply = materialValidation.safeToWrite && modelValidation.safeToWrite &&
+        modelPhysicsValidation.safeToWrite;
       if (apply && !safeToApply) {
         const failure = json(
           {
@@ -1638,11 +1658,17 @@ export function registerMapTools(server: McpServer) {
             safeToApply: false,
             materialValidation,
             modelValidation,
+            modelPhysicsValidation,
           },
-          `No changes written. Asset preflight found ` +
+          `No changes written. Preflight found ` +
             `${materialValidation.missingCount + materialValidation.invalidCount} material blocker(s) and ` +
-            `${modelValidation.missingCount + modelValidation.invalidCount} model blocker(s).\n` +
-            [materialFindingText(materialValidation), modelFindingText(modelValidation)].filter(Boolean).join("\n"),
+            `${modelValidation.missingCount + modelValidation.invalidCount} model blocker(s) and ` +
+            `${modelPhysicsValidation.invalidCount + modelPhysicsValidation.unresolvedCount} model-physics blocker(s).\n` +
+            [
+              materialFindingText(materialValidation),
+              modelFindingText(modelValidation),
+              modelPhysicsFindingText(modelPhysicsValidation),
+            ].filter(Boolean).join("\n"),
         );
         failure.isError = true;
         return failure;
@@ -1720,6 +1746,12 @@ export function registerMapTools(server: McpServer) {
         `${modelValidation.sourceOnlyCount} awaiting compilation, ` +
         `${modelValidation.missingCount + modelValidation.invalidCount} blocker(s).`,
       );
+      if (modelPhysicsValidation.requirementCount) {
+        steps.push(
+          `Model physics: ${modelPhysicsValidation.resolvedCount} proven, ` +
+          `${modelPhysicsValidation.invalidCount + modelPhysicsValidation.unresolvedCount} blocker(s).`,
+        );
+      }
       if (!apply && !safeToApply) {
         steps.push("This preview is unsafe to apply until the asset blockers are fixed.");
       }
@@ -1733,6 +1765,7 @@ export function registerMapTools(server: McpServer) {
           safeToApply,
           materialValidation,
           modelValidation,
+          modelPhysicsValidation,
           changed,
           changedEntities,
           changedSolids,
@@ -1851,7 +1884,8 @@ export function registerMapTools(server: McpServer) {
       title: "Compile a map",
       description:
         "Preflight every VMAP material and model against addon/base loose assets and VPKs, then compile the content " +
-        ".vmap into a playable game .vpk (resourcecompiler). Missing or unsafe assets stop before the expensive compiler run.",
+        ".vmap into a playable game .vpk (resourcecompiler). Checked collision props must also prove real model PHYS. " +
+        "Missing, unsafe, or unproven assets stop before the expensive compiler run.",
       inputSchema: {
         projectRoot: z.string().optional(),
         name: z.string(),
@@ -1875,24 +1909,48 @@ export function registerMapTools(server: McpServer) {
       const mapText = await vmapToText(dota.dmxconvertExe, p.contentVmap);
       const materials = await inspectProjectMapMaterials(mapText, dota, project, false);
       const models = await inspectProjectMapModels(mapText, dota, project, false);
+      const resolvedContract = await loadMapContract(project.root, name, undefined, parseMapSpecification);
+      const modelPhysics = resolvedContract
+        ? await inspectProjectManagedModelPhysics(mapText, dota, project, resolvedContract.contract)
+        : undefined;
       if (dryRun) {
         return json(
-          { dryRun: true, name, command, materialValidation: materials, modelValidation: models },
+          {
+            dryRun: true,
+            name,
+            command,
+            materialValidation: materials,
+            modelValidation: models,
+            modelPhysicsValidation: modelPhysics,
+          },
           `[dry run]\n${command}\nMaterials: ${materials.resolvedCount} resolved, ` +
             `${materials.sourceOnlyCount} awaiting compilation, ${materials.missingCount + materials.invalidCount} blocker(s).` +
             `\nModels: ${models.resolvedCount} resolved, ` +
             `${models.sourceOnlyCount} awaiting compilation, ${models.missingCount + models.invalidCount} blocker(s).` +
-            `${materials.findings.length || models.findings.length
-              ? `\n${[materialFindingText(materials), modelFindingText(models)].filter(Boolean).join("\n")}`
+            `${modelPhysics?.requirementCount
+              ? `\nModel physics: ${modelPhysics.resolvedCount} proven, ` +
+                `${modelPhysics.invalidCount + modelPhysics.unresolvedCount} blocker(s).`
+              : ""}` +
+            `${materials.findings.length || models.findings.length || modelPhysics?.findings.length
+              ? `\n${[
+                  materialFindingText(materials),
+                  modelFindingText(models),
+                  ...(modelPhysics ? [modelPhysicsFindingText(modelPhysics)] : []),
+                ].filter(Boolean).join("\n")}`
               : ""}`,
         );
       }
-      if (!materials.safeToWrite || !models.safeToWrite) {
+      if (!materials.safeToWrite || !models.safeToWrite || !(modelPhysics?.safeToWrite ?? true)) {
         return error(
-          `Map compilation was not started because asset preflight found ` +
+          `Map compilation was not started because preflight found ` +
           `${materials.missingCount + materials.invalidCount} material blocker(s) and ` +
-          `${models.missingCount + models.invalidCount} model blocker(s).\n` +
-          [materialFindingText(materials), modelFindingText(models)].filter(Boolean).join("\n"),
+          `${models.missingCount + models.invalidCount} model blocker(s) and ` +
+          `${(modelPhysics?.invalidCount ?? 0) + (modelPhysics?.unresolvedCount ?? 0)} model-physics blocker(s).\n` +
+          [
+            materialFindingText(materials),
+            modelFindingText(models),
+            ...(modelPhysics ? [modelPhysicsFindingText(modelPhysics)] : []),
+          ].filter(Boolean).join("\n"),
         );
       }
       const res = await compileProjectMap(dota, project, name, force);
@@ -1905,6 +1963,7 @@ export function registerMapTools(server: McpServer) {
           exitCode: res.code,
           materialValidation: materials,
           modelValidation: models,
+          modelPhysicsValidation: modelPhysics,
         },
         `${ok ? "COMPILE OK -> " + p.installedGameVpk : "COMPILE FAILED (exit " + res.code + ")"}\n\n${res.stdout.slice(-2000)}\n${res.stderr.slice(-500)}`.trim(),
       );
@@ -1985,6 +2044,7 @@ export function registerMapTools(server: McpServer) {
               classname: z.string().optional(),
               origin: z.string().optional(),
               angles: z.string().optional(),
+              scales: z.string().optional(),
               properties: z.record(numOrStr).optional(),
               absentProperties: z.array(z.string()).optional(),
             }),
@@ -2024,6 +2084,7 @@ export function registerMapTools(server: McpServer) {
               classname: managed.classname,
               origin: managed.origin,
               angles: managed.angles,
+              scales: managed.scales,
               properties: managed.properties,
               absentProperties: managed.removeProperties,
             })),
@@ -2069,6 +2130,7 @@ export function registerMapTools(server: McpServer) {
       let overviewReport: MapOverviewReport | undefined;
       let materialReport: MapMaterialReport | undefined;
       let modelReport: MapModelReport | undefined;
+      let modelPhysicsReport: ManagedModelPhysicsReport | undefined;
       let terrainDrift:
         | {
             changedHeightVertices: number;
@@ -2151,6 +2213,21 @@ export function registerMapTools(server: McpServer) {
             code: finding.code,
             message: finding.detail,
           });
+        }
+        if (resolvedContract) {
+          modelPhysicsReport = await inspectProjectManagedModelPhysics(
+            mapText,
+            dota,
+            project,
+            resolvedContract.contract,
+          );
+          for (const finding of modelPhysicsReport.findings) {
+            findings.push({
+              severity: finding.severity,
+              code: finding.code,
+              message: `${finding.targetname}: ${finding.detail}`,
+            });
+          }
         }
         overviewReport = await inspectMapOverview({
           mapName: map,
@@ -2411,6 +2488,13 @@ export function registerMapTools(server: McpServer) {
               message: `"${required.targetname}" does not have angles "${required.angles}".`,
             });
           }
+          if (required.scales && !matchingClass.some((entity) => entity.scales === required.scales)) {
+            findings.push({
+              severity: "error",
+              code: "required-entity-scales-mismatch",
+              message: `"${required.targetname}" does not have scales "${required.scales}".`,
+            });
+          }
           if (required.properties) {
             for (const [key, value] of Object.entries(required.properties)) {
               if (!matchingClass.some((entity) => entity.properties[key] === String(value))) {
@@ -2460,6 +2544,7 @@ export function registerMapTools(server: McpServer) {
           entityDefinitions: entityDefinitionValidation ?? null,
           materials: materialReport ?? null,
           models: modelReport ?? null,
+          modelPhysics: modelPhysicsReport ?? null,
           overview: overviewReport ?? null,
           terrainDrift: terrainDrift ?? null,
           solidDrift: solidDrift ?? null,

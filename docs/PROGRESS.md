@@ -325,10 +325,22 @@ Last updated: 2026-08-07
     work. Unit tests cover expansion and asset shadowing; the repository fixture carries two preflighted decorative
     rocks through desired-state expansion and Valve's converter/compiler with Dota and Hammer closed.
 
+58. This milestone - added checked static-prop scale and fail-closed model-physics intent. A `staticPropSet` accepts a
+    bounded uniform or XYZ scale from 0.01 through 16 at set level, with optional per-placement overrides. Scale now
+    survives reusable placement, mirroring, semantic comparison, entity creation, patching, drift repair, and Valve
+    round-trip/compilation. The compiler fixture exposed and drove a repair for a real missing-entity path that had
+    silently emitted the default `1 1 1` scale. Choosing `collision: "vphysics"` now records an internal
+    `modelPhysics: "required"` promise; it is never serialized as an invented Hammer key. Build, contract sync,
+    compile, and validation resolve only those explicit promises through addon-first model lookup and require real,
+    non-empty decoded Valve PHYS geometry before writing or compiling. Missing entities, duplicate names, class/model/
+    solid drift, absent PHYS, and decode failure all stop safely, while unrelated legacy props are deliberately ignored.
+    Unit tests cover success, drift, absent PHYS, and incremental adoption; the installed `cap_point001` hull passed the
+    new preflight, and the scaled decorative fixture passed Valve's converter and ResourceCompiler with Dota and Hammer closed.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 317 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 323 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 203 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
@@ -337,7 +349,7 @@ Last updated: 2026-08-07
 - Valve's installed `dmxconvert.exe` successfully round-trips generated camp, polygonal no-ward, player-clip, and
   sloped trigger volumes from text to binary VMAP and back during the integration suite, preserving exact corner heights.
 - `npm run test:compiler-fixture` successfully round-tripped and compiled the repository-owned acceptance payload,
-  including its two-prop preflighted decorative set, sloped trigger, flat and sloped concave L-shaped world solids, checked rectangular arch, checked bridge
+  including its two-prop preflighted decorative set with uniform and non-uniform entity scales, sloped trigger, flat and sloped concave L-shaped world solids, checked rectangular arch, checked bridge
   deck/navigation twin, complete visible sloped bridge approach/navigation twin, three-material six-piece profile arch, eight-segment ring platform,
   eight-segment unequal-outline holed platform, 14-triangle two-hole platform, and explicit navigation obstruction,
   into a real VPK. The generated map uses Valve's installed blank template only as required hidden
@@ -354,7 +366,8 @@ Last updated: 2026-08-07
   console errors, automatic shutdown, and complete cleanup.
 - Installed ValveResourceFormat 19.2 recovered the physical hull bounds of
   `models/props_gameplay/cap_point001.vmdl_c` directly from `pak01_dir.vpk`; a second lookup reused the fingerprinted
-  cache. The same real-resource test recovers validated exact convex-hull vertices into cache version 4.
+  cache. The same real-resource test recovers validated exact convex-hull vertices into cache version 4, and the new
+  managed-PHYS preflight accepts that model as a collision-safe checked prop.
   A second installed-resource proof recovered 14 of 14 capsule primitives from the current Juggernaut model,
   preserving each posed center pair and three radius basis vectors for tighter world projection.
   Empty-PHYS walls, barrels, trees, gates, and props remain explicitly unresolved rather than borrowing their render
@@ -362,6 +375,8 @@ Last updated: 2026-08-07
 - VRF's public checked Juggernaut physics fixture produced 15 of 15 exact convex hulls after its 15 published bind
   poses were applied; no third-party fixture was copied into this repository.
 - Real Dota 3v3 contract: 84 managed entities, 4 managed paths, 98 terrain operations, and zero desired-state drift.
+- The same 3v3 contract remains a zero-change sync under checked scale/PHYS semantics. It currently declares zero
+  `vphysics` prop promises, so no new collision assumption was silently imposed on the existing map.
 - Real Dota 3v3 minimap: both boundary entities, overview metadata, 1024x1024 PNG, source/compiled material and
   hashed texture, and the scale-16 world transform validate with zero findings.
 - Real Dota 3v3 models: all 16 serialized references (7 unique models) resolve through loose or packed installed

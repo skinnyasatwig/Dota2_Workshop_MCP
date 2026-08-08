@@ -11,6 +11,7 @@ export interface MapEntityRequirement {
   classname?: string;
   origin?: string;
   angles?: string;
+  scales?: string;
   properties?: Record<string, string>;
   absentProperties?: string[];
 }
@@ -20,6 +21,9 @@ export interface ManagedMapEntity {
   classname: string;
   origin: string;
   angles?: string;
+  scales?: string;
+  /** Require this entity's compiled model to expose real, decodable Valve PHYS data. */
+  modelPhysics?: "required";
   properties?: Record<string, string>;
   removeProperties?: string[];
 }
@@ -118,7 +122,7 @@ export function parseMapContract(value: unknown, path: string): MapContract {
     if (requirement.classname !== undefined && typeof requirement.classname !== "string") {
       throw new Error(`requiredEntities[${index}].classname must be a string: ${path}`);
     }
-    for (const key of ["origin", "angles"]) {
+    for (const key of ["origin", "angles", "scales"]) {
       if (requirement[key] !== undefined && typeof requirement[key] !== "string") {
         throw new Error(`requiredEntities[${index}].${key} must be a string: ${path}`);
       }
@@ -147,6 +151,7 @@ export function parseMapContract(value: unknown, path: string): MapContract {
       classname: requirement.classname as string | undefined,
       origin: requirement.origin as string | undefined,
       angles: requirement.angles as string | undefined,
+      scales: requirement.scales as string | undefined,
       properties,
       absentProperties,
     };
@@ -169,6 +174,12 @@ export function parseMapContract(value: unknown, path: string): MapContract {
       if (managed.angles !== undefined && typeof managed.angles !== "string") {
         throw new Error(`managedEntities[${index}].angles must be a string: ${path}`);
       }
+      if (managed.scales !== undefined && typeof managed.scales !== "string") {
+        throw new Error(`managedEntities[${index}].scales must be a string: ${path}`);
+      }
+      if (managed.modelPhysics !== undefined && managed.modelPhysics !== "required") {
+        throw new Error(`managedEntities[${index}].modelPhysics must be "required": ${path}`);
+      }
       let removeProperties: string[] | undefined;
       if (managed.removeProperties !== undefined) {
         if (
@@ -188,14 +199,26 @@ export function parseMapContract(value: unknown, path: string): MapContract {
       if (conflict) {
         throw new Error(`managedEntities[${index}] both sets and removes property "${conflict}": ${path}`);
       }
-      return {
+      const parsed = {
         targetname: managed.targetname as string,
         classname: managed.classname as string,
         origin: managed.origin as string,
         angles: managed.angles as string | undefined,
+        scales: managed.scales as string | undefined,
+        modelPhysics: managed.modelPhysics as "required" | undefined,
         properties,
         removeProperties,
       };
+      if (parsed.modelPhysics === "required") {
+        const model = parsed.properties?.model;
+        if (parsed.classname !== "prop_static" || parsed.properties?.solid !== "6" || !model) {
+          throw new Error(
+            `managedEntities[${index}] requiring modelPhysics must be a prop_static with ` +
+              `properties.model and solid "6": ${path}`,
+          );
+        }
+      }
+      return parsed;
     });
   }
   let managedPaths: ManagedMapPath[] | undefined;

@@ -133,6 +133,7 @@ export const mapEntityRequirementInputSchema = z.object({
   classname: z.string().min(1).optional(),
   origin: z.string().min(1).optional(),
   angles: z.string().min(1).optional(),
+  scales: z.string().min(1).optional(),
   properties: properties.optional(),
   absentProperties: z.array(z.string().min(1)).optional(),
 }).strict();
@@ -142,6 +143,8 @@ export const managedMapEntityInputSchema = z.object({
   classname: z.string().min(1),
   origin: z.string().min(1),
   angles: z.string().min(1).optional(),
+  scales: z.string().min(1).optional(),
+  modelPhysics: z.literal("required").optional(),
   properties: properties.optional(),
   removeProperties: z.array(z.string().min(1)).optional(),
 }).strict();

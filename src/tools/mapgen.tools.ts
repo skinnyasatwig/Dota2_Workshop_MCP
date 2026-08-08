@@ -27,6 +27,7 @@ import { renderMapPreview } from "../dota/map-preview.js";
 import { resolveMapCollisionObstacles } from "../dota/map-collision.js";
 import { inspectProjectMapMaterials } from "../dota/map-material.js";
 import { inspectProjectMapModels } from "../dota/map-model.js";
+import { inspectProjectManagedModelPhysics } from "../dota/map-model-physics.js";
 import { MAP_VOLUME_RECIPES } from "../dota/map-volume.js";
 import { POINT_BLOCKER_RECIPES, WORLD_STRUCTURE_RECIPES } from "../dota/dota-components.js";
 import {
@@ -790,6 +791,7 @@ export function registerMapGenTools(server: McpServer) {
         "managedSolids, managedNavSurfaces, managedVolumes, and " +
         "requiredEntities, plus reusable regions, components, and transformed placements. Legacy terrain/entities/paths " +
         "remain supported. Dry runs report missing/unsafe materials and models, and writes refuse those blockers before conversion. " +
+        "Collision-enabled checked props must also prove real compiled Valve PHYS data before any write. " +
         "Terrain coordinates are tile units; entity/path coordinates are world units.",
       inputSchema: {
         projectRoot: z.string().optional(),
@@ -895,7 +897,11 @@ export function registerMapGenTools(server: McpServer) {
       }
       const materialValidation = await inspectProjectMapMaterials(txt, dota, project, false);
       const modelValidation = await inspectProjectMapModels(txt, dota, project, false);
-      const safeToApply = materialValidation.safeToWrite && modelValidation.safeToWrite;
+      const modelPhysicsValidation = parsedSpecification
+        ? await inspectProjectManagedModelPhysics(txt, dota, project, parsedSpecification)
+        : undefined;
+      const safeToApply = materialValidation.safeToWrite && modelValidation.safeToWrite &&
+        (modelPhysicsValidation?.safeToWrite ?? true);
       log.push(
         `materials: ${materialValidation.resolvedCount} resolved, ` +
         `${materialValidation.sourceOnlyCount} awaiting compilation, ` +
@@ -906,6 +912,12 @@ export function registerMapGenTools(server: McpServer) {
         `${modelValidation.sourceOnlyCount} awaiting compilation, ` +
         `${modelValidation.missingCount + modelValidation.invalidCount} blocker(s)`,
       );
+      if (modelPhysicsValidation?.requirementCount) {
+        log.push(
+          `model physics: ${modelPhysicsValidation.resolvedCount} proven, ` +
+          `${modelPhysicsValidation.invalidCount + modelPhysicsValidation.unresolvedCount} blocker(s)`,
+        );
+      }
       if (dryRun) {
         log.push(
           `Dry run only: would ${mapExists ? "replace" : "create"} ${p.contentVmap}, register it in addoninfo, ` +
@@ -922,6 +934,7 @@ export function registerMapGenTools(server: McpServer) {
             safeToApply,
             materialValidation,
             modelValidation,
+            modelPhysicsValidation,
           },
           log.join("\n"),
         );
@@ -934,11 +947,14 @@ export function registerMapGenTools(server: McpServer) {
             safeToApply: false,
             materialValidation,
             modelValidation,
+            modelPhysicsValidation,
           },
-          `Map build was not started because asset preflight found ` +
+          `Map build was not started because preflight found ` +
             `${materialValidation.missingCount + materialValidation.invalidCount} material blocker(s) and ` +
-            `${modelValidation.missingCount + modelValidation.invalidCount} model blocker(s).\n` +
-            [...materialValidation.findings, ...modelValidation.findings]
+            `${modelValidation.missingCount + modelValidation.invalidCount} model blocker(s) and ` +
+            `${(modelPhysicsValidation?.invalidCount ?? 0) + (modelPhysicsValidation?.unresolvedCount ?? 0)} ` +
+            `model-physics blocker(s).\n` +
+            [...materialValidation.findings, ...modelValidation.findings, ...(modelPhysicsValidation?.findings ?? [])]
               .map((finding) => `[${finding.severity.toUpperCase()}] ${finding.detail}`)
               .join("\n"),
         );
@@ -997,6 +1013,8 @@ export function registerMapGenTools(server: McpServer) {
           compiled: compile === true,
           vmap: p.contentVmap,
           materialValidation,
+          modelValidation,
+          modelPhysicsValidation,
           backupDirectory: transaction.backupDirectory,
           rolledBack: false,
         },

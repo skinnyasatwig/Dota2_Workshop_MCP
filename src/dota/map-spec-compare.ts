@@ -99,6 +99,7 @@ function normalizeEntity<T extends JsonObject>(entity: T): JsonObject {
     ...entity,
     origin: normalizeVector(entity.origin),
     angles: normalizeVector(entity.angles),
+    scales: normalizeVector(entity.scales),
     absentProperties: Array.isArray(entity.absentProperties)
       ? [...entity.absentProperties].sort()
       : entity.absentProperties,

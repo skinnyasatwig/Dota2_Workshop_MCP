@@ -335,10 +335,12 @@ The `wall` component turns an open or closed world-space outline into overlappin
 segments. This supports practical curved and concave base silhouettes without relying on one fragile concave Source 2
 solid; decorative wall meshes and sloped wall runs remain separate visual work.
 `staticPropSet` places one checked `models/*.vmdl` resource at one to 256 named local offsets. The set rotates as one
-reusable assembly, while each prop can add its own yaw. Collision is mandatory and explicit: `none` emits a non-solid
-decoration, while `vphysics` requests the model's Valve physics. Optional tint and shadow controls use official
-`prop_static` properties. Whole-map model preflight verifies every resulting model before a build, sync, or compile;
-offline collision analysis still refuses to invent a hull when a collision-enabled model has no decodable PHYS data.
+reusable assembly, while each prop can add its own yaw. A bounded uniform or XYZ scale (0.01 through 16) may be set for
+the assembly and overridden per placement; desired-state sync repairs scale drift. Collision is mandatory and explicit:
+`none` emits a non-solid decoration, while `vphysics` creates a fail-closed promise that the compiled model contains
+real, decodable Valve PHYS geometry. Build, sync, compile, and validation stop before writing or expensive compiler work
+when that promise cannot be proven; unrelated legacy props are not retroactively gated. Optional tint and shadow controls
+use official `prop_static` properties. Whole-map model preflight verifies every resulting model as a separate existence check.
 The `arch` component is a checked rectangular opening assembled from two solid posts and one elevated lintel. Its
 origin is the center of the arch at ground level; width, depth, total height, opening width, opening height, yaw, and
 one preflighted visible material are explicit. Offline reachability uses a conservative 256-unit standing corridor,
@@ -460,7 +462,7 @@ playable `.vpk` — a pipeline verified end to end.
 - **`map_create`** — clone the official template map (ground + lighting + team spawns) into your
   addon and register it in `addoninfo.txt`. Pass `compile: true` to produce the `.vpk` immediately.
 - **`map_add_entity`** — place any entity (`info_player_start_*`, `npc_dota_spawner`, `env_*`,
-  `prop_dynamic`, `point_*`, …) with origin/angles/properties.
+  `prop_dynamic`, `point_*`, …) with origin/angles/scales/properties.
 - **`map_inspect`** — return compact structured map data without launching Dota: filterable named
   entities, class counts, complete path-chain summaries, tile-grid bounds/height/water/tilesets, and
   broken-link or out-of-bounds findings. Use `includePathNodes:true` only when individual waypoints
@@ -473,8 +475,9 @@ playable `.vpk` — a pipeline verified end to end.
   `map_build`, conventionally stored in `.dota-workshop/map-contract.json`. It creates missing named entities, expands
   complete linked waypoint chains, repairs drifted class/position/rotation/keyvalues, prunes obsolete
   numbered nodes owned by those paths, creates or repairs checked solid volumes, expands reusable regions/components/placements, preserves unrelated map data, and refuses ambiguous duplicate
-  target names. Its preview includes the same whole-map material and model resolution as `map_build`; applying is blocked
-  when an asset cannot be safely resolved. Preview is the default; pass `apply:true` to write and `recompile:true` to compile.
+  target names. Its preview includes the same whole-map material/model resolution and explicit managed-PHYS proof as
+  `map_build`; applying is blocked when an asset or requested collision hull cannot be safely resolved. Preview is the
+  default; pass `apply:true` to write and `recompile:true` to compile.
   Applied map changes use a transaction: the current source map (and compiled map when relevant) is
   backed up under `.dota-workshop/backups`, conversion is staged before replacement, and a failed
   conversion or compile restores the prior files automatically. `map_build` and `map_terrain` use the
@@ -482,8 +485,9 @@ playable `.vpk` — a pipeline verified end to end.
 - **`map_rewrite_path`** — convert/rename a complete numbered waypoint chain while repairing all
   target links (for example generated `path_track` routes → creep `path_corner` routes).
 - **`map_to_text` / `map_from_text`** — read/write the full vmap DMX text for arbitrary edits.
-- **`map_compile`** — resolve all VMAP materials and models first, then compile `.vmap` → `.vpk`; missing or unsafe
-  assets stop before the expensive Valve compiler run. `dryRun:true` returns both the command and asset evidence.
+- **`map_compile`** — resolve all VMAP materials/models and any explicit managed-PHYS promises first, then compile
+  `.vmap` → `.vpk`; missing, unsafe, or unproven assets stop before the expensive Valve compiler run. `dryRun:true`
+  returns both the command and evidence.
 - **`map_list`** — list maps with source/compiled status.
 - **`map_validate`** — no-game preflight: verify map registration, source/compiled state, required
   script-facing entities, duplicate target names, and broken `path_corner`/`path_track` chains. It
@@ -495,7 +499,8 @@ playable `.vpk` — a pipeline verified end to end.
   numeric bounds are enforced; a named destination that cannot be resolved is reported as a warning. Dynamic
   targets such as `!activator`, wildcard targets, and existing class-name destinations are not misreported. The same
   preflight resolves every material and model serialized in the VMAP against addon/base loose source, compiled assets,
-  and addon/Dota/core VPKs. Missing or unsafe resources are errors; source-only custom assets are warnings until
+  and addon/Dota/core VPKs. It also proves every explicit managed `modelPhysics: "required"` promise from real decoded
+  Valve PHYS data. Missing, unsafe, or unproven resources are errors; source-only custom assets are warnings until
   compiled, or errors when `requireCompiled:true`. It also verifies both `dota_minimap_boundary` corners, overview KeyValues, source and compiled material/texture
   assets, PNG dimensions, and the exact world/image/display transform. Valve's legacy `rotate` field is validated as
   an integer flag: `0` is north-up and any nonzero value is one clockwise 90-degree display turn. Rotated source

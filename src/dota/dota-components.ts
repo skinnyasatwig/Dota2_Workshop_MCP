@@ -187,11 +187,21 @@ const wallComponentSchema = z.object({
   }
 });
 
+const entityScaleSchema = z.union([
+  z.number().finite().min(0.01).max(16),
+  z.tuple([
+    z.number().finite().min(0.01).max(16),
+    z.number().finite().min(0.01).max(16),
+    z.number().finite().min(0.01).max(16),
+  ]),
+]);
+
 const staticPropPlacementSchema = z.object({
   name: nameSchema,
   /** Local offset from the set origin. */
   offset: point3,
   yaw: z.number().finite().optional(),
+  scale: entityScaleSchema.optional(),
 }).strict();
 
 const staticPropSetComponentSchema = z.object({
@@ -202,6 +212,8 @@ const staticPropSetComponentSchema = z.object({
   yaw: yawSchema,
   /** One checked model resource shared by every placement in this set. */
   model: modelResourceSchema,
+  /** Default uniform or XYZ scale; a placement may override it. */
+  scale: entityScaleSchema.optional(),
   /** Required so scenery never acquires pathing collision by accident. */
   collision: z.enum(["none", "vphysics"]),
   castShadows: z.boolean().optional(),
@@ -759,8 +771,8 @@ export const POINT_BLOCKER_RECIPES = {
 export const WORLD_STRUCTURE_RECIPES = {
   staticPropSet: {
     parts: ["placement_*"],
-    purpose: "Repeatable static scenery with a checked model path and required explicit collision intent.",
-    source: "Valve prop_static FGD plus MCP model-asset preflight and collision inventory",
+    purpose: "Repeatable scaled static scenery with a checked model path and fail-closed explicit collision intent.",
+    source: "Valve prop_static FGD plus MCP model-asset and decoded-PHYS preflight",
   },
   arch: {
     parts: ["left_post", "right_post", "lintel"],
@@ -1463,11 +1475,17 @@ function expandStaticPropSet(
   component: z.infer<typeof staticPropSetComponentSchema>,
 ): ManagedMapEntity[] {
   const yaw = component.yaw ?? 0;
+  const scales = (value: number | [number, number, number] | undefined): string => {
+    const vector = Array.isArray(value) ? value : [value ?? 1, value ?? 1, value ?? 1];
+    return vector.map(formatted).join(" ");
+  };
   return component.placements.map((placement) => ({
     targetname: `${component.name}_${placement.name}`,
     classname: "prop_static",
     origin: originString(addPoint(component.origin, rotateOffset(placement.offset, yaw))),
     angles: angleString(yaw + (placement.yaw ?? 0)),
+    scales: scales(placement.scale ?? component.scale),
+    ...(component.collision === "vphysics" ? { modelPhysics: "required" as const } : {}),
     properties: {
       model: component.model,
       solid: component.collision === "vphysics" ? "6" : "0",

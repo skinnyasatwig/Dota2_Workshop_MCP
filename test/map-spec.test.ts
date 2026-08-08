@@ -896,6 +896,51 @@ test("mirrored component volumes keep sloped corner heights paired with their fo
   });
 });
 
+test("reusable static props preserve checked scale and PHYS promises through mirroring", () => {
+  const specification = parseMapSpecification({
+    components: {
+      collision_kit: {
+        dotaComponents: [{
+          kind: "staticPropSet",
+          name: "rocks",
+          origin: [128, 64, 32],
+          model: "models/props_mines/mines_rocks_pile_01a.vmdl",
+          scale: [0.5, 1, 2],
+          collision: "vphysics",
+          placements: [{ name: "blocking", offset: [256, 0, 0] }],
+        }],
+      },
+    },
+    placements: [
+      { component: "collision_kit", name: "west", worldOffset: [-1000, 0, 0] },
+      { component: "collision_kit", name: "east", worldOffset: [1000, 0, 0], mirrorAxis: "x" },
+    ],
+  });
+
+  assert.deepEqual(specification.managedEntities?.map((entity) => ({
+    targetname: entity.targetname,
+    origin: entity.origin,
+    scales: entity.scales,
+    modelPhysics: entity.modelPhysics,
+    solid: entity.properties?.solid,
+  })), [
+    {
+      targetname: "west_rocks_blocking",
+      origin: "-616 64 32",
+      scales: "0.5 1 2",
+      modelPhysics: "required",
+      solid: "6",
+    },
+    {
+      targetname: "east_rocks_blocking",
+      origin: "616 64 32",
+      scales: "0.5 1 2",
+      modelPhysics: "required",
+      solid: "6",
+    },
+  ]);
+});
+
 test("component definitions reject unsafe or unresolved reuse", () => {
   assert.throws(
     () =>

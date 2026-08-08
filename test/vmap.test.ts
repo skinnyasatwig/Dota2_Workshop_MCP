@@ -76,6 +76,7 @@ test("patchMapEntities updates class, targetname, transforms, and properties", (
       classname: "npc_dota_tower",
       newTargetname: "radiant_t1",
       origin: "128 256 128",
+      scales: "0.5 1 2",
       properties: { teamnumber: 2 },
       removeProperties: ["comment"],
     },
@@ -85,6 +86,7 @@ test("patchMapEntities updates class, targetname, transforms, and properties", (
   assert.equal(entity.classname, "npc_dota_tower");
   assert.equal(entity.targetname, "radiant_t1");
   assert.equal(entity.origin, "128 256 128");
+  assert.equal(entity.scales, "0.5 1 2");
   assert.equal(entity.properties.teamnumber, "2");
   assert.equal(entity.properties.comment, undefined);
 });
@@ -140,12 +142,14 @@ test("reconcileMapEntities adds missing entities and repairs managed drift idemp
       classname: "npc_dota_tower",
       origin: "128 256 128",
       angles: "0 90 0",
+      scales: "1.25 1.25 1.25",
       properties: { teamnumber: 2 },
     },
     {
       targetname: "radiant_spawn_north",
       classname: "info_target",
       origin: "-1024 512 128",
+      scales: "0.75 1 1.5",
     },
   ];
 
@@ -158,8 +162,11 @@ test("reconcileMapEntities adds missing entities and repairs managed drift idemp
   assert.equal(tower?.classname, "npc_dota_tower");
   assert.equal(tower?.origin, "128 256 128");
   assert.equal(tower?.angles, "0 90 0");
+  assert.equal(tower?.scales, "1.25 1.25 1.25");
   assert.equal(tower?.properties.teamnumber, "2");
-  assert.equal(entities.find((entity) => entity.targetname === "radiant_spawn_north")?.origin, "-1024 512 128");
+  const spawn = entities.find((entity) => entity.targetname === "radiant_spawn_north");
+  assert.equal(spawn?.origin, "-1024 512 128");
+  assert.equal(spawn?.scales, "0.75 1 1.5");
 
   const second = reconcileMapEntities(first.text, specs);
   assert.deepEqual(second.added, []);

@@ -88,12 +88,13 @@ export function buildRepositoryCompileFixtureText(baseText: string): string {
             origin: [-1024, 2048, 128],
             yaw: 30,
             model: "models/props_debris/rock_debris001.vmdl",
+            scale: 1.25,
             collision: "none",
             castShadows: false,
             tint: [192, 224, 255],
             placements: [
               { name: "west", offset: [-128, 0, 0], yaw: -15 },
-              { name: "east", offset: [128, 0, 0], yaw: 15 },
+              { name: "east", offset: [128, 0, 0], yaw: 15, scale: [0.75, 1, 1.5] },
             ],
           },
           {

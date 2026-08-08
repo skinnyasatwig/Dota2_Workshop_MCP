@@ -189,11 +189,12 @@ test("static prop sets rotate repeated scenery and require explicit collision in
     yaw: 90,
     model: "models/props_debris/rock_debris001.vmdl",
     collision: "none",
+    scale: 1.5,
     castShadows: false,
     tint: [192, 224, 255],
     placements: [
       { name: "west", offset: [100, 0, 0], yaw: 15 },
-      { name: "north", offset: [0, 200, 32], yaw: -30 },
+      { name: "north", offset: [0, 200, 32], yaw: -30, scale: [0.5, 1, 2] },
     ],
   }]);
   const entities = expandDotaComponents([set]).managedEntities;
@@ -203,6 +204,7 @@ test("static prop sets rotate repeated scenery and require explicit collision in
     classname: entity.classname,
     origin: entity.origin,
     angles: entity.angles,
+    scales: entity.scales,
     properties: entity.properties,
   })), [
     {
@@ -210,6 +212,7 @@ test("static prop sets rotate repeated scenery and require explicit collision in
       classname: "prop_static",
       origin: "1000 2100 128",
       angles: "0 105 0",
+      scales: "1.5 1.5 1.5",
       properties: {
         model: "models/props_debris/rock_debris001.vmdl",
         solid: "0",
@@ -222,6 +225,7 @@ test("static prop sets rotate repeated scenery and require explicit collision in
       classname: "prop_static",
       origin: "800 2000 160",
       angles: "0 60 0",
+      scales: "0.5 1 2",
       properties: {
         model: "models/props_debris/rock_debris001.vmdl",
         solid: "0",
@@ -231,17 +235,16 @@ test("static prop sets rotate repeated scenery and require explicit collision in
     },
   ]);
 
-  assert.equal(
-    expandDotaComponents(componentList.parse([{
+  const blockingProp = expandDotaComponents(componentList.parse([{
       kind: "staticPropSet",
       name: "blocking_rocks",
       origin: [0, 0, 0],
       model: "models/props_mines/mines_rocks_pile_01a.vmdl",
       collision: "vphysics",
       placements: [{ name: "one", offset: [0, 0, 0] }],
-    }])).managedEntities[0].properties?.solid,
-    "6",
-  );
+    }])).managedEntities[0];
+  assert.equal(blockingProp.properties?.solid, "6");
+  assert.equal(blockingProp.modelPhysics, "required");
   assert.throws(
     () => componentList.parse([{
       kind: "staticPropSet",
@@ -276,6 +279,18 @@ test("static prop sets rotate repeated scenery and require explicit collision in
       ],
     }]),
     /unique within the static prop set/,
+  );
+  assert.throws(
+    () => componentList.parse([{
+      kind: "staticPropSet",
+      name: "unsafe_scale",
+      origin: [0, 0, 0],
+      model: "models/props_debris/rock_debris001.vmdl",
+      collision: "none",
+      scale: 0,
+      placements: [{ name: "rock", offset: [0, 0, 0] }],
+    }]),
+    /greater than or equal to 0.01/,
   );
 });
 

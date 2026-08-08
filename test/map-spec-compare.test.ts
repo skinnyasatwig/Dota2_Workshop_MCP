@@ -79,7 +79,13 @@ test("semantic comparison treats a flat team pair and nested reusable team place
 test("comparison is order-insensitive for named objects and normalizes vector formatting", () => {
   const baseline = parseMapSpecification({
     managedEntities: [
-      { targetname: "a", classname: "info_target", origin: "0 0 0", angles: "0 0 0" },
+      {
+        targetname: "a",
+        classname: "info_target",
+        origin: "0 0 0",
+        angles: "0 0 0",
+        scales: "0.5 1 2",
+      },
       { targetname: "b", classname: "info_target", origin: "1 2 3" },
     ],
     managedAbsentEntities: [
@@ -90,7 +96,13 @@ test("comparison is order-insensitive for named objects and normalizes vector fo
   const candidate = parseMapSpecification({
     managedEntities: [
       { targetname: "b", classname: "info_target", origin: "1.0 2.00 3.000" },
-      { targetname: "a", classname: "info_target", origin: "0.0 0 0", angles: "0 0.00 0" },
+      {
+        targetname: "a",
+        classname: "info_target",
+        origin: "0.0 0 0",
+        angles: "0 0.00 0",
+        scales: "0.50 1.0 2.000",
+      },
     ],
     managedAbsentEntities: [
       { targetname: "old_a", classname: "info_target" },

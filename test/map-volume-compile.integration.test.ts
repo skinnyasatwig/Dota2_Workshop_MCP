@@ -77,6 +77,14 @@ test(
       assert.ok(decorativeRocks.every((entity) => entity.properties.solid === "0"));
       assert.ok(decorativeRocks.every((entity) =>
         entity.properties.model === "models/props_debris/rock_debris001.vmdl"));
+      assert.equal(
+        decorativeRocks.find((entity) => entity.targetname === "fixture_decorative_rocks_west")?.scales,
+        "1.25 1.25 1.25",
+      );
+      assert.equal(
+        decorativeRocks.find((entity) => entity.targetname === "fixture_decorative_rocks_east")?.scales,
+        "0.75 1 1.5",
+      );
       assert.match(roundTripped, /MCP Nav Surface: fixture_bridge_walkable/);
       assert.match(roundTripped, /MCP Nav Surface: fixture_irregular_platform_segment_01_walkable/);
       assert.match(roundTripped, /MCP Nav Surface: fixture_multi_hole_platform_triangle_001_walkable/);

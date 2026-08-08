@@ -123,12 +123,13 @@
       "origin": [-3072, -2048, 128],
       "yaw": 20,
       "model": "models/props_debris/rock_debris001.vmdl",
+      "scale": 1.25,
       "collision": "none",
       "castShadows": true,
       "placements": [
         { "name": "west", "offset": [-192, 0, 0], "yaw": -10 },
         { "name": "center", "offset": [0, 96, 0] },
-        { "name": "east", "offset": [192, 0, 0], "yaw": 15 }
+        { "name": "east", "offset": [192, 0, 0], "yaw": 15, "scale": [0.75, 1, 1.5] }
       ]
     },
     {
