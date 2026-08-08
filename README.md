@@ -223,9 +223,10 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
 
 For one safe project-wide checkpoint, run
 `npm run test:offline-map -- "C:\path\to\project" map_name`. It opens one local MCP session, performs a
-preview-only contract sync, full static validation, and diagnostic preview, then writes one structured JSON report and
-PNG under the project's `artifacts` folder. It fails closed on map drift, actual or desired spatial failures, validation
-errors, a missing preview, or missing structured evidence. It never writes the VMAP, compiles, launches Dota, or opens Hammer.
+preview-only contract sync, dry-run compiler asset preflight, full static validation, and diagnostic preview, then writes
+one structured JSON report and PNG under the project's `artifacts` folder. It fails closed on map drift, actual or desired
+spatial failures, unsafe material/model/PHYS evidence, validation errors, a missing preview, or missing structured evidence.
+It never writes the VMAP, invokes ResourceCompiler, launches Dota, or opens Hammer.
 
 - **`map_build`** — one call: clone the template, apply one validated desired-state map specification,
   register, and optionally compile it. The preferred `specification` object uses the same

@@ -3,6 +3,7 @@ export interface OfflineAcceptanceCriteria {
   contractIsSynchronized: boolean;
   currentSpatialRulesPass: boolean;
   desiredSpatialRulesPass: boolean;
+  compilePreflightPasses: boolean;
   staticValidationPasses: boolean;
   previewSpatialRulesPass: boolean;
   previewProduced: boolean;
@@ -16,10 +17,12 @@ export interface OfflineAcceptanceAssessment {
 export interface OfflineAcceptanceInput {
   stageErrors: {
     sync: boolean;
+    compile: boolean;
     validation: boolean;
     preview: boolean;
   };
   sync: unknown;
+  compilePreflight: unknown;
   validation: unknown;
   preview: unknown;
   previewProduced: boolean;
@@ -38,6 +41,16 @@ function zeroFailureSummary(value: unknown): boolean {
     Number.isInteger(summary.unresolved) && Number(summary.unresolved) === 0;
 }
 
+function compilePreflightPasses(value: unknown): boolean {
+  const preflight = record(value);
+  const materials = record(preflight?.materialValidation);
+  const models = record(preflight?.modelValidation);
+  const physicsValue = preflight?.modelPhysicsValidation;
+  const physics = record(physicsValue);
+  return preflight?.dryRun === true && materials?.safeToWrite === true && models?.safeToWrite === true &&
+    (physicsValue === undefined || physicsValue === null || physics?.safeToWrite === true);
+}
+
 export function assessOfflineAcceptance(input: OfflineAcceptanceInput): OfflineAcceptanceAssessment {
   const sync = record(input.sync);
   const validation = record(input.validation);
@@ -45,10 +58,12 @@ export function assessOfflineAcceptance(input: OfflineAcceptanceInput): OfflineA
   const previewStats = record(preview?.stats);
   const previewOverlays = record(previewStats?.overlays);
   const criteria: OfflineAcceptanceCriteria = {
-    stagesSucceeded: !input.stageErrors.sync && !input.stageErrors.validation && !input.stageErrors.preview,
+    stagesSucceeded: !input.stageErrors.sync && !input.stageErrors.compile &&
+      !input.stageErrors.validation && !input.stageErrors.preview,
     contractIsSynchronized: Number.isInteger(sync?.changed) && Number(sync?.changed) === 0,
     currentSpatialRulesPass: zeroFailureSummary(sync?.currentSpatialAssertionSummary),
     desiredSpatialRulesPass: zeroFailureSummary(sync?.spatialAssertionSummary),
+    compilePreflightPasses: compilePreflightPasses(input.compilePreflight),
     staticValidationPasses: validation?.ok === true,
     previewSpatialRulesPass: Number.isInteger(previewOverlays?.failedSpatialAssertions) &&
       Number(previewOverlays?.failedSpatialAssertions) === 0,

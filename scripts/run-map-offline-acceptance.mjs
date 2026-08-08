@@ -12,7 +12,7 @@ const args = process.argv.slice(2);
 if (args.includes("--help")) {
   console.log(`Usage: npm run test:offline-map -- <project-root> <map> [options]
 
-Runs contract sync preview, static validation, and diagnostic map preview in one MCP session.
+Runs contract sync preview, compiler preflight, static validation, and diagnostic map preview in one MCP session.
 It never writes the VMAP, compiles, launches Dota, or opens Hammer.
 
 Options:
@@ -72,6 +72,7 @@ let report;
 try {
   await client.connect(transport);
   const syncResult = await runStage("map_sync_contract", { projectRoot, map, apply: false, recompile: false });
+  const compileResult = await runStage("map_compile", { projectRoot, name: map, dryRun: true, force: false });
   const validationResult = await runStage("map_validate", { projectRoot, map, requireCompiled });
   const previewResult = await runStage("map_preview", {
     projectRoot,
@@ -84,14 +85,22 @@ try {
   )?.data;
 
   const sync = stageRecord(syncResult);
+  const compile = stageRecord(compileResult);
   const validation = stageRecord(validationResult);
   const preview = stageRecord(previewResult);
   const syncData = sync.structuredContent ?? {};
+  const compileData = compile.structuredContent ?? {};
   const validationData = validation.structuredContent ?? {};
   const previewData = preview.structuredContent ?? {};
   const assessment = assessOfflineAcceptance({
-    stageErrors: { sync: sync.isError, validation: validation.isError, preview: preview.isError },
+    stageErrors: {
+      sync: sync.isError,
+      compile: compile.isError,
+      validation: validation.isError,
+      preview: preview.isError,
+    },
     sync: syncData,
+    compilePreflight: compileData,
     validation: validationData,
     preview: previewData,
     previewProduced: typeof previewImage === "string" && previewImage.length > 0,
@@ -107,7 +116,7 @@ try {
     scale,
     ok: assessment.ok,
     criteria: assessment.criteria,
-    stages: { sync, validation, preview },
+    stages: { sync, compile, validation, preview },
     artifacts: { report: reportPath, preview: previewImage ? previewPath : null },
   };
 } finally {

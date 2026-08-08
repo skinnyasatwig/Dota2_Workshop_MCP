@@ -526,6 +526,13 @@ Last updated: 2026-08-07
     absent evidence. The real 3v3 run completed in about five seconds with every criterion true, six actual spatial passes,
     zero holes, zero repair suggestions, one known off-map-strip warning, and no Dota, Hammer, compile, or VMAP write.
 
+78. This milestone - added compiler readiness to the same no-engine acceptance gate. A fourth `map_compile` dry-run stage
+    resolves every serialized material and model plus any explicit collision-PHYS promise, records the exact compiler
+    command, and refuses unsafe/missing evidence without invoking ResourceCompiler. The pure verdict now also requires
+    that stage and its structured safety flags; missing reports or unsafe models fail closed in tests. The real 3v3 run
+    completed in about seven seconds with 2 materials and 7 models safely resolved, zero PHYS requirements, all prior
+    criteria green, and no compile, Dota launch, Hammer launch, or VMAP write.
+
 ## Current verification record
 
 - TypeScript build passes.
