@@ -104,6 +104,10 @@ export function buildRepositoryCompileFixtureText(baseText: string): string {
             height: 768,
             profile: [[-384, 384], [-192, 600], [0, 704], [192, 600], [384, 384]],
             material: "materials/dev/reflectivity_30.vmat",
+            faceMaterials: {
+              top: "materials/dev/reflectivity_50.vmat",
+              bottom: "materials/dev/reflectivity_20.vmat",
+            },
           },
           {
             kind: "bridge",

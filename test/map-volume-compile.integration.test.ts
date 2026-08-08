@@ -42,6 +42,8 @@ test(
       assert.match(roundTripped, /fixture_sloped_concave_solid/);
       assert.match(roundTripped, /fixture_arch_lintel/);
       assert.match(roundTripped, /fixture_profile_arch_arch_segment_01/);
+      assert.match(roundTripped, /materials\/dev\/reflectivity_50\.vmat/);
+      assert.match(roundTripped, /materials\/dev\/reflectivity_20\.vmat/);
       assert.match(roundTripped, /fixture_bridge_deck/);
       assert.match(roundTripped, /fixture_irregular_platform_segment_01_deck/);
       assert.match(roundTripped, /MCP Nav Surface: fixture_bridge_walkable/);

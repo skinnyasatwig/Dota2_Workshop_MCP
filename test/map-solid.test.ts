@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildExtrudedSolidMesh,
   buildMapSolidBlock,
+  mapSolidFaceMaterialPlan,
   parseManagedMapSolids,
   parseMapSolids,
   reconcileMapSolids,
@@ -76,6 +77,17 @@ test("managed solids reject unsafe outlines, materials, and property overrides",
     /visible world material/,
   );
   assert.throws(
+    () => parseManagedMapSolids([{ ...concaveSolid, faceMaterials: {} }]),
+    /must override top, bottom, or both/,
+  );
+  assert.throws(
+    () => parseManagedMapSolids([{
+      ...concaveSolid,
+      faceMaterials: { top: "materials/tools/toolsplayerclip.vmat" },
+    }]),
+    /visible world material/,
+  );
+  assert.throws(
     () => parseManagedMapSolids([{ ...concaveSolid, properties: { Solidity: 0 } }]),
     /controlled by the checked solid recipe/,
   );
@@ -110,6 +122,43 @@ test("a concave extrusion becomes a closed solid Source 2 mesh", () => {
   assert.equal(entity.properties.Solidity, "2");
   assert.equal(entity.properties.AlwaysSolidIgnoreNav, "0");
   assert.equal(entity.targetname, concaveSolid.targetname);
+});
+
+test("checked solids assign distinct top, bottom, and side materials deterministically", () => {
+  const styled = {
+    ...concaveSolid,
+    targetname: "fixture_styled_concave_wall",
+    faceMaterials: {
+      top: "materials/dev/reflectivity_50.vmat",
+      bottom: "materials/dev/reflectivity_20.vmat",
+    },
+  };
+  const parsed = parseManagedMapSolids([styled])![0];
+  const plan = mapSolidFaceMaterialPlan(parsed);
+  assert.deepEqual(plan.materials, [
+    "materials/dev/reflectivity_30.vmat",
+    "materials/dev/reflectivity_50.vmat",
+    "materials/dev/reflectivity_20.vmat",
+  ]);
+  assert.deepEqual(plan.faceMaterialIndices, [
+    1, 1, 1, 1,
+    2, 2, 2, 2,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]);
+
+  const first = reconcileMapSolids(EMPTY_MAP, [parsed]);
+  assert.match(
+    first.text,
+    /"materials" "string_array" \[ "materials\/dev\/reflectivity_30\.vmat", "materials\/dev\/reflectivity_50\.vmat", "materials\/dev\/reflectivity_20\.vmat" \]/,
+  );
+  assert.deepEqual(parseMapSolids(first.text)[0]?.faceMaterials, styled.faceMaterials);
+  assert.deepEqual(reconcileMapSolids(first.text, [parsed]).unchanged, [styled.targetname]);
+
+  const changed = {
+    ...parsed,
+    faceMaterials: { ...parsed.faceMaterials, top: "materials/dev/reflectivity_70.vmat" },
+  };
+  assert.deepEqual(reconcileMapSolids(first.text, [changed]).updated, [styled.targetname]);
 });
 
 test("paired height rings produce a watertight sloped concave solid", () => {

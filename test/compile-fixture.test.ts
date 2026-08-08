@@ -109,6 +109,10 @@ test("repository compile fixture is self-contained and structurally inspectable"
     bottom: [0, 216, 216, 0],
     top: [384, 384, 384, 384],
   });
+  assert.deepEqual(profileSegment?.faceMaterials, {
+    top: "materials/dev/reflectivity_50.vmat",
+    bottom: "materials/dev/reflectivity_20.vmat",
+  });
   const bridge = fixture.solids.find((solid) => solid.targetname === "fixture_bridge_deck");
   assert.deepEqual(bridge?.center, [-2048, -1024, 384]);
   assert.equal(bridge?.height, 64);

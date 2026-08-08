@@ -20,6 +20,13 @@ const material = z.string()
   .refine((value) => !value.toLowerCase().startsWith("materials/tools/"),
     "must be a visible world material; use managedVolumes for tools materials");
 
+export const managedMapSolidFaceMaterialsInputSchema = z.object({
+  top: material.optional(),
+  bottom: material.optional(),
+}).strict().refine((value) => value.top !== undefined || value.bottom !== undefined, {
+  message: "must override top, bottom, or both",
+});
+
 export function signedPolygonArea(points: readonly [number, number][]): number {
   return points.reduce((area, [x, y], index) => {
     const [nextX, nextY] = points[(index + 1) % points.length];
@@ -114,6 +121,7 @@ export const managedMapSolidInputSchema = z.object({
   center: point3,
   yaw: z.number().finite().optional(),
   material,
+  faceMaterials: managedMapSolidFaceMaterialsInputSchema.optional(),
   extrusion: solidExtrusionInputSchema,
   properties: z.record(scalar).optional(),
 }).strict().superRefine((solid, context) => {
@@ -175,10 +183,36 @@ export interface ManagedMapSolid {
   center: [number, number, number];
   yaw?: number;
   material: string;
+  faceMaterials?: { top?: string; bottom?: string };
   extrusion:
     | { points: [number, number][]; height: number; bottom?: never; top?: never }
     | { points: [number, number][]; height?: never; bottom: number[]; top: number[] };
   properties?: Record<string, string>;
+}
+
+export interface MapSolidFaceMaterialPlan {
+  materials: string[];
+  faceMaterialIndices: number[];
+}
+
+/** Assign one checked material index to every generated top, bottom, and side triangle. */
+export function mapSolidFaceMaterialPlan(solid: ManagedMapSolid): MapSolidFaceMaterialPlan {
+  const sideMaterial = solid.material;
+  const topMaterial = solid.faceMaterials?.top ?? sideMaterial;
+  const bottomMaterial = solid.faceMaterials?.bottom ?? sideMaterial;
+  const materials = [sideMaterial, topMaterial, bottomMaterial]
+    .filter((value, index, all) => all.indexOf(value) === index);
+  const topFaceCount = solid.extrusion.points.length - 2;
+  const bottomFaceCount = topFaceCount;
+  const sideFaceCount = solid.extrusion.points.length * 2;
+  return {
+    materials,
+    faceMaterialIndices: [
+      ...Array(topFaceCount).fill(materials.indexOf(topMaterial)),
+      ...Array(bottomFaceCount).fill(materials.indexOf(bottomMaterial)),
+      ...Array(sideFaceCount).fill(materials.indexOf(sideMaterial)),
+    ],
+  };
 }
 
 export function parseManagedMapSolids(
@@ -208,6 +242,7 @@ export function parseManagedMapSolids(
     return {
       ...solid,
       center: [...solid.center],
+      ...(solid.faceMaterials ? { faceMaterials: { ...solid.faceMaterials } } : {}),
       extrusion,
       properties: solid.properties
         ? Object.fromEntries(Object.entries(solid.properties).map(([key, value]) => [key, String(value)]))
@@ -310,6 +345,7 @@ export function buildMapSolidBlock(
 ): string {
   const parsed = parseManagedMapSolids([solid])![0];
   const mesh = buildExtrudedSolidMesh(parsed);
+  const materialPlan = mapSolidFaceMaterialPlan(parsed);
   const origin = vectorText(parsed.center);
   const yaw = numberText(((parsed.yaw ?? 0) % 360 + 360) % 360);
   const propertyLines = Object.entries({
@@ -321,7 +357,8 @@ export function buildMapSolidBlock(
     nodeId: meshNodeId,
     origin: parsed.center,
     yaw: parsed.yaw,
-    material: parsed.material,
+    materials: materialPlan.materials,
+    faceMaterialIndices: materialPlan.faceMaterialIndices,
   }).split("\n").map((line) => `\t\t${line}`).join("\n");
   return `"CMapEntity"
 {
@@ -382,11 +419,27 @@ function integerArray(block: string, name: string): number[] | undefined {
   return [...match[1].matchAll(/"(-?\d+)"/g)].map((entry) => Number(entry[1]));
 }
 
-function blockMaterial(block: string): string | undefined {
-  return /"materials"\s+"string_array"\s*\[\s*"([^"]+)"/.exec(block)?.[1];
+function blockMaterials(block: string): string[] | undefined {
+  const match = /"materials"\s+"string_array"\s*\[([\s\S]*?)\]/.exec(block);
+  if (!match) return undefined;
+  const materials = [...match[1].matchAll(/"((?:\\.|[^"\\])*)"/g)]
+    .map((entry) => entry[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\"));
+  return materials.length ? materials : undefined;
+}
+
+function blockFaceMaterialIndices(block: string): number[] | undefined {
+  const match = /"standardAttributeName"\s+"string"\s+"materialindex"[\s\S]*?"data"\s+"int_array"\s*\[([\s\S]*?)\]/
+    .exec(block);
+  return match
+    ? [...match[1].matchAll(/"(-?\d+)"/g)].map((entry) => Number(entry[1]))
+    : undefined;
 }
 
 function sameNumbers(actual: readonly number[] | undefined, expected: readonly number[]): boolean {
+  return !!actual && actual.length === expected.length && actual.every((value, index) => value === expected[index]);
+}
+
+function sameStrings(actual: readonly string[] | undefined, expected: readonly string[]): boolean {
   return !!actual && actual.length === expected.length && actual.every((value, index) => value === expected[index]);
 }
 
@@ -411,8 +464,10 @@ function solidBlockMatches(block: string, desired: ManagedMapSolid): boolean {
   if (!angles || Math.abs(angles[0]) > 1e-4 || Math.abs(angles[1] - yaw) > 1e-4 || Math.abs(angles[2]) > 1e-4) {
     return false;
   }
-  if (blockMaterial(block) !== desired.material) return false;
   const mesh = buildExtrudedSolidMesh(desired);
+  const materialPlan = mapSolidFaceMaterialPlan(desired);
+  if (!sameStrings(blockMaterials(block), materialPlan.materials)) return false;
+  if (!sameNumbers(blockFaceMaterialIndices(block), materialPlan.faceMaterialIndices)) return false;
   if (!sameVertices(positionVertices(block), mesh.vertices)) return false;
   for (const [name, expected] of Object.entries({
     vertexEdgeIndices: mesh.vertexEdgeIndices,
@@ -437,6 +492,7 @@ export interface ParsedMapSolid {
   center: [number, number, number];
   yaw: number;
   material: string;
+  faceMaterials?: { top?: string; bottom?: string };
   footprint: [number, number][];
   height?: number;
   sloped?: { bottom: number[]; top: number[] };
@@ -451,7 +507,8 @@ export function parseMapSolids(text: string): ParsedMapSolid[] {
     const vertices = positionVertices(range.block);
     const center = parseVector(entity.origin);
     const angles = parseVector(entity.angles) ?? [0, 0, 0];
-    const materialPath = blockMaterial(range.block);
+    const materialPaths = blockMaterials(range.block);
+    const materialPath = materialPaths?.[0];
     if (
       entity.classname !== "func_brush" || !entity.targetname || entity.properties.Solidity !== "2" ||
       !vertices || !center || !materialPath || materialPath.toLowerCase().startsWith("materials/tools/")
@@ -468,11 +525,32 @@ export function parseMapSolids(text: string): ParsedMapSolid[] {
     const flat = topHeights.every((height) => Math.abs(height - topHeights[0]) <= 1e-4) &&
       bottomHeights.every((height) => Math.abs(height - bottomHeights[0]) <= 1e-4) &&
       Math.abs(topHeights[0] + bottomHeights[0]) <= 1e-4;
+    const topFaceCount = count - 2;
+    const faceIndices = blockFaceMaterialIndices(range.block) ?? Array(4 * count - 4).fill(0);
+    if (
+      faceIndices.length !== 4 * count - 4 ||
+      faceIndices.some((index) => index < 0 || index >= materialPaths!.length)
+    ) continue;
+    const uniformRoleMaterial = (start: number, length: number): string | undefined => {
+      const role = faceIndices.slice(start, start + length);
+      return role.length === length && role.every((index) => index === role[0])
+        ? materialPaths![role[0]]
+        : undefined;
+    };
+    const topMaterial = uniformRoleMaterial(0, topFaceCount);
+    const bottomMaterial = uniformRoleMaterial(topFaceCount, topFaceCount);
+    const sideMaterial = uniformRoleMaterial(topFaceCount * 2, count * 2);
+    if (!topMaterial || !bottomMaterial || sideMaterial !== materialPath) continue;
+    const faceMaterials = {
+      ...(topMaterial !== materialPath ? { top: topMaterial } : {}),
+      ...(bottomMaterial !== materialPath ? { bottom: bottomMaterial } : {}),
+    };
     parsed.push({
       targetname: entity.targetname,
       center,
       yaw: angles[1],
       material: materialPath,
+      ...(Object.keys(faceMaterials).length ? { faceMaterials } : {}),
       footprint: top.map(([x, y]) => [x, y]),
       ...(flat
         ? { height: topHeights[0] - bottomHeights[0] }

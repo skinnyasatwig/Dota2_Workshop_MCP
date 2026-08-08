@@ -245,6 +245,10 @@ test("checked profile arches compose an irregular opening from sloped overhead s
     height: 768,
     profile,
     material: "materials/dev/reflectivity_30.vmat",
+    faceMaterials: {
+      top: "materials/dev/reflectivity_50.vmat",
+      bottom: "materials/dev/reflectivity_20.vmat",
+    },
   }]);
   const solids = expandDotaComponents([arch]).managedSolids;
 
@@ -262,6 +266,10 @@ test("checked profile arches compose an irregular opening from sloped overhead s
     center: [-348, 200, 512],
     yaw: 0,
     material: "materials/dev/reflectivity_30.vmat",
+    faceMaterials: {
+      top: "materials/dev/reflectivity_50.vmat",
+      bottom: "materials/dev/reflectivity_20.vmat",
+    },
     extrusion: {
       points: [[-64, -128], [64, -128], [64, 128], [-64, 128]],
       height: 768,
@@ -272,6 +280,10 @@ test("checked profile arches compose an irregular opening from sloped overhead s
     center: [-188, 200, 512],
     yaw: 0,
     material: "materials/dev/reflectivity_30.vmat",
+    faceMaterials: {
+      top: "materials/dev/reflectivity_50.vmat",
+      bottom: "materials/dev/reflectivity_20.vmat",
+    },
     extrusion: {
       points: [[-96, -128], [96, -128], [96, 128], [-96, 128]],
       bottom: [0, 216, 216, 0],

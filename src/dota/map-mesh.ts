@@ -234,12 +234,24 @@ export interface MapMeshNodeOptions {
   nodeId: number;
   origin: [number, number, number];
   yaw?: number;
-  material: string;
+  material?: string;
+  materials?: readonly string[];
+  faceMaterialIndices?: readonly number[];
   physicsType?: "default" | "none";
 }
 
 /** Serialize checked half-edge data as a Valve-compatible CMapMesh node. */
 export function buildMapMeshNode(mesh: MapMeshData, options: MapMeshNodeOptions): string {
+  if (options.material !== undefined && options.materials !== undefined) {
+    throw new Error("Supply material or materials, not both.");
+  }
+  const materials = options.materials ?? (options.material !== undefined ? [options.material] : []);
+  if (!materials.length || materials.some((material) => !material)) {
+    throw new Error("A map mesh needs at least one non-empty material.");
+  }
+  if (new Set(materials).size !== materials.length) {
+    throw new Error("Map mesh materials must be unique.");
+  }
   const origin = vectorText(options.origin);
   const yaw = numberText(((options.yaw ?? 0) % 360 + 360) % 360);
   const vertexData = dataArray(mesh.vertices.length, [
@@ -252,12 +264,20 @@ export function buildMapMeshNode(mesh: MapMeshData, options: MapMeshNodeOptions)
   ]);
   const edgeCount = new Set(mesh.edgeDataIndices).size;
   const faceCount = mesh.faceEdgeIndices.length;
+  const faceMaterialIndices = options.faceMaterialIndices ?? Array(faceCount).fill(0);
+  if (
+    faceMaterialIndices.length !== faceCount ||
+    faceMaterialIndices.some((index) =>
+      !Number.isInteger(index) || index < 0 || index >= materials.length)
+  ) {
+    throw new Error("faceMaterialIndices must contain one valid material index for every mesh face.");
+  }
   const edgeData = dataArray(edgeCount, [dataStream("flags", "flags", "int", Array(edgeCount).fill(0), 3)]);
   const faceData = dataArray(faceCount, [
     dataStream("textureScale", "textureScale", "vector2", Array(faceCount).fill("1 1"), 0),
     dataStream("textureAxisU", "textureAxisU", "vector4", mesh.textureAxisU, 0),
     dataStream("textureAxisV", "textureAxisV", "vector4", mesh.textureAxisV, 0),
-    dataStream("materialindex", "materialindex", "int", Array(faceCount).fill(0), 8),
+    dataStream("materialindex", "materialindex", "int", faceMaterialIndices, 8),
     dataStream("flags", "flags", "int", Array(faceCount).fill(0), 3),
   ]);
   return `"CMapMesh"
@@ -295,7 +315,7 @@ export function buildMapMeshNode(mesh: MapMeshData, options: MapMeshNodeOptions)
 \t\t"edgeVertexDataIndices" "int_array" [ ${arrayValues(mesh.edgeVertexDataIndices, "")} ]
 \t\t"faceEdgeIndices" "int_array" [ ${arrayValues(mesh.faceEdgeIndices, "")} ]
 \t\t"faceDataIndices" "int_array" [ ${arrayValues(mesh.faceDataIndices, "")} ]
-\t\t"materials" "string_array" [ "${escaped(options.material)}" ]
+\t\t"materials" "string_array" [ ${materials.map((material) => `"${escaped(material)}"`).join(", ")} ]
 \t\t"vertexData" ${vertexData.split("\n").map((line) => `\t\t${line}`).join("\n").trimStart()}
 \t\t"faceVertexData" ${faceVertexData.split("\n").map((line) => `\t\t${line}`).join("\n").trimStart()}
 \t\t"edgeData" ${edgeData.split("\n").map((line) => `\t\t${line}`).join("\n").trimStart()}

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ManagedMapEntity } from "./map-contract.js";
 import {
   ManagedMapSolid,
+  managedMapSolidFaceMaterialsInputSchema,
   pointOnSegment,
   segmentsTouchOrIntersect,
   signedPolygonArea,
@@ -186,6 +187,7 @@ const archComponentSchema = z.object({
   openingWidth: z.number().finite().min(1).max(32768),
   openingHeight: z.number().finite().min(1).max(32768),
   material: visibleMaterialSchema,
+  faceMaterials: managedMapSolidFaceMaterialsInputSchema.optional(),
 }).strict().superRefine((arch, context) => {
   if (arch.openingWidth >= arch.width) {
     context.addIssue({
@@ -229,6 +231,7 @@ const profileArchComponentSchema = z.object({
   /** Local [x,z] points along the opening's underside, ordered left to right. */
   profile: z.array(point2).min(2).max(64),
   material: visibleMaterialSchema,
+  faceMaterials: managedMapSolidFaceMaterialsInputSchema.optional(),
 }).strict().superRefine((arch, context) => {
   const left = -arch.width / 2;
   const right = arch.width / 2;
@@ -267,6 +270,7 @@ const bridgeComponentSchema = z.object({
   width: z.number().finite().min(2).max(32768),
   thickness: z.number().finite().min(1).max(4096),
   material: visibleMaterialSchema,
+  faceMaterials: managedMapSolidFaceMaterialsInputSchema.optional(),
 }).strict();
 
 const bridgeApproachComponentSchema = z.object({
@@ -278,6 +282,7 @@ const bridgeApproachComponentSchema = z.object({
   width: z.number().finite().min(2).max(32768),
   thickness: z.number().finite().min(1).max(4096),
   material: visibleMaterialSchema,
+  faceMaterials: managedMapSolidFaceMaterialsInputSchema.optional(),
 }).strict().superRefine((approach, context) => {
   if (Math.hypot(approach.end[0] - approach.start[0], approach.end[1] - approach.start[1]) < 2) {
     context.addIssue({
@@ -300,6 +305,7 @@ const ringPlatformComponentSchema = z.object({
   height: z.number().finite().min(1).max(4096),
   sides: z.number().int().min(3).max(32).optional(),
   material: visibleMaterialSchema,
+  faceMaterials: managedMapSolidFaceMaterialsInputSchema.optional(),
 }).strict().superRefine((platform, context) => {
   if (platform.outerRadius - platform.innerRadius < 2) {
     context.addIssue({
@@ -513,6 +519,7 @@ const holedPlatformComponentSchema = z.object({
   hole: z.array(point2).min(3).max(64),
   height: z.number().finite().min(1).max(4096),
   material: visibleMaterialSchema,
+  faceMaterials: managedMapSolidFaceMaterialsInputSchema.optional(),
 }).strict().superRefine((platform, context) => {
   for (const issue of validatePairedPlatformOutlines(platform.outer, platform.hole)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: issue.path, message: issue.message });
@@ -930,6 +937,7 @@ function archSolids(component: z.infer<typeof archComponentSchema>): ManagedMapS
       center: at(-postOffset, component.openingHeight / 2),
       yaw,
       material: component.material,
+      ...(component.faceMaterials ? { faceMaterials: component.faceMaterials } : {}),
       extrusion: { points: rectangle(postWidth), height: component.openingHeight },
     },
     {
@@ -937,6 +945,7 @@ function archSolids(component: z.infer<typeof archComponentSchema>): ManagedMapS
       center: at(postOffset, component.openingHeight / 2),
       yaw,
       material: component.material,
+      ...(component.faceMaterials ? { faceMaterials: component.faceMaterials } : {}),
       extrusion: { points: rectangle(postWidth), height: component.openingHeight },
     },
     {
@@ -944,6 +953,7 @@ function archSolids(component: z.infer<typeof archComponentSchema>): ManagedMapS
       center: at(0, component.openingHeight + lintelHeight / 2),
       yaw,
       material: component.material,
+      ...(component.faceMaterials ? { faceMaterials: component.faceMaterials } : {}),
       extrusion: { points: rectangle(component.width), height: lintelHeight },
     },
   ];
@@ -972,6 +982,7 @@ function profileArchSolids(component: z.infer<typeof profileArchComponentSchema>
       center: at((outerLeft + profileLeft) / 2, component.height / 2),
       yaw,
       material: component.material,
+      ...(component.faceMaterials ? { faceMaterials: component.faceMaterials } : {}),
       extrusion: { points: rectangle(leftWidth), height: component.height },
     },
     {
@@ -979,6 +990,7 @@ function profileArchSolids(component: z.infer<typeof profileArchComponentSchema>
       center: at((profileRight + outerRight) / 2, component.height / 2),
       yaw,
       material: component.material,
+      ...(component.faceMaterials ? { faceMaterials: component.faceMaterials } : {}),
       extrusion: { points: rectangle(rightWidth), height: component.height },
     },
   ];
@@ -992,6 +1004,7 @@ function profileArchSolids(component: z.infer<typeof profileArchComponentSchema>
       center: at((startX + endX) / 2, component.height / 2),
       yaw,
       material: component.material,
+      ...(component.faceMaterials ? { faceMaterials: component.faceMaterials } : {}),
       extrusion: {
         points: rectangle(width),
         bottom: [
@@ -1024,6 +1037,7 @@ function bridgeParts(component: z.infer<typeof bridgeComponentSchema>): {
       center: component.center,
       yaw: component.yaw,
       material: component.material,
+      ...(component.faceMaterials ? { faceMaterials: component.faceMaterials } : {}),
       extrusion,
     },
     navSurface: {
@@ -1072,6 +1086,7 @@ function bridgeApproachParts(component: z.infer<typeof bridgeApproachComponentSc
       center,
       yaw,
       material: component.material,
+      ...(component.faceMaterials ? { faceMaterials: component.faceMaterials } : {}),
       extrusion,
     },
     navSurface: {
@@ -1091,6 +1106,7 @@ function pairedOutlinePlatformParts(component: {
   hole: [number, number][];
   height: number;
   material: string;
+  faceMaterials?: { top?: string; bottom?: string };
 }): {
   solids: ManagedMapSolid[];
   navSurfaces: ManagedMapNavSurface[];
@@ -1110,6 +1126,7 @@ function pairedOutlinePlatformParts(component: {
       center: component.center,
       yaw: component.yaw,
       material: component.material,
+      ...(component.faceMaterials ? { faceMaterials: component.faceMaterials } : {}),
       extrusion,
     });
     navSurfaces.push({
@@ -1135,6 +1152,7 @@ function ringPlatformParts(component: z.infer<typeof ringPlatformComponentSchema
     hole: regularPolygonFootprint(component.innerRadius, sides),
     height: component.height,
     material: component.material,
+    faceMaterials: component.faceMaterials,
   });
 }
 

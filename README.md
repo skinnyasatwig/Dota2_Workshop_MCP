@@ -553,7 +553,9 @@ contract explicitly uses `fill`. A terrain shape can also use
 existing managed world-space path, keeping roads synchronized with route edits.
 
 `managedSolids` adds named, always-solid `func_brush` world geometry. Each solid supplies `center`, optional `yaw`,
-an explicit visible (non-`materials/tools`) `materials/...vmat` asset, and an `extrusion`. Use
+an explicit visible (non-`materials/tools`) `materials/...vmat` side/fallback asset, and an `extrusion`. An optional
+`faceMaterials` object may override the `top`, `bottom`, or both while all side faces retain `material`; the same option
+is available on `arch`, `profileArch`, `bridge`, `bridgeApproach`, `ringPlatform`, and `holedPlatform`. Use
 `{ points: [[x,y],...], height }` for a flat centered extrusion, or provide one local height per outline corner with
 `{ points, bottom: [z,...], top: [z,...] }` for a sloped one. Every top height must remain above its matching bottom.
 The footprint may be convex
@@ -566,8 +568,8 @@ components, appear in `map_preview` with an uphill arrow when sloped, and block 
 reachability when their vertical range intersects the standing corridor. The repository fixture round-trips flat and
 sloped L-shaped solids, a checked three-piece rectangular arch, a six-piece profile arch, a visible bridge deck, a complete sloped bridge approach, an
 eight-segment ring platform, and an eight-segment unequal-outline holed platform,
-each paired where appropriate with Valve navigation geometry,
-through Valve's converter and compiles them into a real VPK. The general map material preflight proves the selected visible material exists before a build,
+each paired where appropriate with Valve navigation geometry. Its profile arch also proves distinct top, bottom, and
+side materials survive Valve's converter and compile into a real VPK. The general map material preflight proves every selected visible material exists before a build,
 sync, or compile is allowed to spend work on it.
 
 `managedNavSurfaces` adds named, checked Source 2 meshes using Valve's dedicated navigation-walkable material. Its
