@@ -227,6 +227,9 @@ preview-only contract sync, dry-run compiler asset preflight, full static valida
 one structured JSON report and PNG under the project's `artifacts` folder. It fails closed on map drift, actual or desired
 spatial failures, unsafe material/model/PHYS evidence, validation errors, a missing preview, or missing structured evidence.
 Default mode never writes the VMAP, invokes ResourceCompiler, launches Dota, or opens Hammer.
+Both artifacts are replaced atomically; the report carries a unique artifact-set ID plus the PNG byte count and SHA-256,
+and the runner reads the saved files back before declaring success. Run the same command with `--verify-only` to check the
+latest report/PNG pair without starting the MCP or touching the map.
 Pass `--compile` only when a VPK build is wanted. The runner first requires the entire read-only gate to pass, then calls
 transactional `map_compile` and performs a second `requireCompiled:true` validation; the final verdict requires a committed,
 non-rolled-back compile and a fresh VPK. `--force` is accepted only together with `--compile`.

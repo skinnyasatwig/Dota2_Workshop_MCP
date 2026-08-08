@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { assessOfflineAcceptance } from "../src/dota/map-offline-acceptance.js";
+import {
+  describeOfflineAcceptanceArtifact,
+  verifyOfflineAcceptanceArtifact,
+} from "../src/dota/map-offline-acceptance-artifacts.js";
 
 const passingInput = {
   stageErrors: { sync: false, compile: false, validation: false, preview: false },
@@ -96,4 +100,23 @@ test("requested compilation requires a committed VPK and fresh post-compile vali
   failed = assessOfflineAcceptance(requested);
   assert.equal(failed.ok, false);
   assert.equal(failed.criteria.postCompileValidationPasses, false);
+});
+
+test("offline acceptance artifact fingerprints detect stale or corrupt preview bytes", () => {
+  const preview = Buffer.from("deterministic preview bytes");
+  const integrity = describeOfflineAcceptanceArtifact(preview);
+  assert.equal(integrity.algorithm, "sha256");
+  assert.equal(integrity.byteLength, preview.byteLength);
+  assert.match(integrity.sha256, /^[a-f0-9]{64}$/);
+  assert.deepEqual(verifyOfflineAcceptanceArtifact(preview, integrity), {
+    ok: true,
+    actual: integrity,
+    findings: [],
+  });
+
+  const changed = verifyOfflineAcceptanceArtifact(Buffer.from("changed preview bytes"), integrity);
+  assert.equal(changed.ok, false);
+  assert.equal(changed.findings.some((finding) => finding.includes("byte length differs")), true);
+  assert.equal(changed.findings.some((finding) => finding.includes("SHA-256 differs")), true);
+  assert.equal(verifyOfflineAcceptanceArtifact(preview, null).ok, false);
 });

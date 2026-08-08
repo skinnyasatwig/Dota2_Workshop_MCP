@@ -2,10 +2,16 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { mkdir, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assessOfflineAcceptance } from "../dist/dota/map-offline-acceptance.js";
+import {
+  describeOfflineAcceptanceArtifact,
+  verifyOfflineAcceptanceArtifact,
+} from "../dist/dota/map-offline-acceptance-artifacts.js";
+import { writeFileAtomically } from "../dist/util/file-transaction.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
@@ -22,6 +28,7 @@ Options:
   --require-compiled     Treat a missing or stale compiled VPK as a validation error.
   --no-model-collision   Skip installed PHYS resolution during preview (faster, less complete).
   --scale=<2..16>        Preview pixels per tile (default 8).
+  --verify-only          Verify the latest report/PNG pair without running any map tools.
   --help                 Show this message.`);
   process.exit(0);
 }
@@ -43,6 +50,45 @@ const artifactDirectory = join(projectRoot, "artifacts");
 const safeMapName = map.replace(/[^A-Za-z0-9_.-]/g, "_");
 const reportPath = join(artifactDirectory, `mcp-offline-acceptance-${safeMapName}-latest.json`);
 const previewPath = join(artifactDirectory, `mcp-offline-acceptance-${safeMapName}-latest.png`);
+const verifyOnly = args.includes("--verify-only");
+
+async function verifySavedArtifacts() {
+  const saved = JSON.parse(await readFile(reportPath, "utf8"));
+  const findings = [];
+  if (saved.schemaVersion !== 3) findings.push(`Expected report schema 3, found ${saved.schemaVersion ?? "none"}.`);
+  if (typeof saved.artifactSetId !== "string" || saved.artifactSetId.length < 16) {
+    findings.push("Report has no valid artifactSetId.");
+  }
+  if (resolve(saved.projectRoot ?? "") !== projectRoot) findings.push("Report belongs to a different project root.");
+  if (saved.map !== map) findings.push("Report belongs to a different map.");
+  if (resolve(saved.artifacts?.report ?? "") !== resolve(reportPath)) {
+    findings.push("Report path does not identify this latest report.");
+  }
+  const savedPreviewPath = saved.artifacts?.preview;
+  const savedPreviewIntegrity = saved.artifacts?.previewIntegrity;
+  if (savedPreviewPath === null && savedPreviewIntegrity === null) {
+    // A failed preview stage can still produce a coherent (failing) report with no PNG.
+  } else if (typeof savedPreviewPath !== "string" || savedPreviewIntegrity === null) {
+    findings.push("Preview path and integrity metadata must either both exist or both be null.");
+  } else if (resolve(savedPreviewPath) !== resolve(previewPath)) {
+    findings.push("Preview path does not identify this latest preview.");
+  } else {
+    const previewBytes = await readFile(previewPath);
+    findings.push(...verifyOfflineAcceptanceArtifact(
+      previewBytes,
+      savedPreviewIntegrity,
+    ).findings);
+  }
+  if (findings.length > 0) throw new Error(`Acceptance artifact verification failed:\n- ${findings.join("\n- ")}`);
+  console.log(`Acceptance artifacts verified: ${saved.artifactSetId}`);
+  console.log(`Report: ${reportPath}`);
+  if (savedPreviewPath) console.log(`Preview: ${previewPath}`);
+}
+
+if (verifyOnly) {
+  await verifySavedArtifacts();
+  process.exit(0);
+}
 
 const transport = new StdioClientTransport({
   command: process.execPath,
@@ -75,6 +121,7 @@ async function runStage(name, arguments_) {
 
 let previewImage;
 let report;
+const artifactSetId = randomUUID();
 try {
   await client.connect(transport);
   const syncResult = await runStage("map_sync_contract", { projectRoot, map, apply: false, recompile: false });
@@ -164,7 +211,8 @@ try {
     previewProduced: typeof previewImage === "string" && previewImage.length > 0,
   });
   report = {
-    schemaVersion: 2,
+    schemaVersion: 3,
+    artifactSetId,
     generatedAt: new Date().toISOString(),
     projectRoot,
     map,
@@ -177,15 +225,28 @@ try {
     ok: assessment.ok,
     criteria: assessment.criteria,
     stages: { sync, compilePreflight, validation, preview, compileExecution, postCompileValidation },
-    artifacts: { report: reportPath, preview: previewImage ? previewPath : null },
+    artifacts: {
+      report: reportPath,
+      preview: previewImage ? previewPath : null,
+      previewIntegrity: previewImage
+        ? describeOfflineAcceptanceArtifact(Buffer.from(previewImage, "base64"))
+        : null,
+    },
   };
 } finally {
   await client.close();
 }
 
+if (!report) throw new Error("Offline acceptance ended before a report could be assembled.");
 await mkdir(artifactDirectory, { recursive: true });
-if (previewImage) await writeFile(previewPath, Buffer.from(previewImage, "base64"));
-await writeFile(reportPath, JSON.stringify(report, null, 2) + "\n", "utf8");
+if (previewImage) {
+  await writeFileAtomically(previewPath, Buffer.from(previewImage, "base64"));
+  const savedPreview = await readFile(previewPath);
+  const verification = verifyOfflineAcceptanceArtifact(savedPreview, report.artifacts.previewIntegrity);
+  if (!verification.ok) throw new Error(`Saved preview verification failed:\n- ${verification.findings.join("\n- ")}`);
+}
+await writeFileAtomically(reportPath, JSON.stringify(report, null, 2) + "\n");
+await verifySavedArtifacts();
 
 for (const [name, stage] of Object.entries(report.stages)) {
   if (!stage) continue;

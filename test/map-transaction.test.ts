@@ -7,7 +7,7 @@ import {
   readMapTransactionManifest,
   runMapTransaction,
 } from "../src/dota/map-transaction.js";
-import { replaceFileFromPath } from "../src/util/file-transaction.js";
+import { replaceFileFromPath, writeFileAtomically } from "../src/util/file-transaction.js";
 
 async function exists(path: string): Promise<boolean> {
   try {
@@ -30,6 +30,21 @@ test("replaceFileFromPath swaps a staged file over an existing destination", asy
 
     assert.equal(await readFile(destination, "utf8"), "new map");
     assert.equal(await readFile(source, "utf8"), "new map");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("writeFileAtomically replaces an existing destination without staged leftovers", async () => {
+  const root = await mkdtemp(join(tmpdir(), "d2-map-atomic-write-"));
+  try {
+    const destination = join(root, "artifacts", "latest.json");
+    await writeFileAtomically(destination, "first report");
+    await writeFileAtomically(destination, Buffer.from("second report"));
+
+    assert.equal(await readFile(destination, "utf8"), "second report");
+    const entries = await import("node:fs/promises").then(({ readdir }) => readdir(join(root, "artifacts")));
+    assert.deepEqual(entries, ["latest.json"]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

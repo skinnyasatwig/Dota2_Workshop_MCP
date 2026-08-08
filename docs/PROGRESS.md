@@ -548,10 +548,18 @@ Last updated: 2026-08-07
     successful compile evidence, rollback/failure, and stale post-validation. The real 3v3 workflow passed all ten criteria,
     committed its VPK with a recovery backup, and proved freshness afterward without launching Dota or Hammer.
 
+81. This milestone - made offline acceptance evidence atomic and self-verifying. JSON reports and PNG previews now use
+    rollback-safe same-directory replacements rather than direct writes. Each schema-3 report carries a unique artifact-set
+    ID plus the preview byte count and SHA-256; the runner reads the persisted bytes back and refuses to announce success
+    when they differ. `--verify-only` checks project/map ownership, expected latest paths, schema, and PNG integrity without
+    starting the MCP. Unit tests cover atomic replacement with no staged leftovers, exact fingerprints, corruption, and
+    missing metadata. The real read-only 3v3 run passed, saved a 22,970-byte PNG with SHA-256
+    `6a199a037bf3938e37f595bf966c2579633fd50e07bd7843df02788253a49cfe`, and passed a separate verification-only run.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 376 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 378 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 208 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed palette-bound audit: 20 of 20 model CRCs and MDAT snapshots match the current Dota VPK.
 - Installed palette-gallery proof: the four-model `river-wetland` set passed exact CRC checks, decoded to textured GLBs,

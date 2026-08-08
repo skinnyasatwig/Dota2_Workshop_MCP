@@ -1,4 +1,4 @@
-import { copyFile, mkdir, rename, rm, stat } from "node:fs/promises";
+import { copyFile, mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -44,4 +44,22 @@ export async function replaceFileFromPath(source: string, destination: string): 
   }
 
   if (movedOriginal) await rm(displaced, { force: true }).catch(() => {});
+}
+
+/**
+ * Write one file through a same-directory staged file and the rollback-safe
+ * replacement path above. Callers never observe a partially written destination.
+ */
+export async function writeFileAtomically(
+  destination: string,
+  data: string | NodeJS.ArrayBufferView,
+): Promise<void> {
+  await mkdir(dirname(destination), { recursive: true });
+  const staged = `${destination}.${randomUUID()}.staged`;
+  try {
+    await writeFile(staged, data);
+    await replaceFileFromPath(staged, destination);
+  } finally {
+    await rm(staged, { force: true }).catch(() => {});
+  }
 }
