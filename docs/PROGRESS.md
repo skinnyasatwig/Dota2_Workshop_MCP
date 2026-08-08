@@ -435,10 +435,18 @@ Last updated: 2026-08-07
     transient-stall recovery, unsafe-dialog refusal, pre-process launch failure, and shutdown failure. The complete
     suite and smoke surface pass without opening Dota or Hammer.
 
+68. This milestone - moved pre-existing-session protection into the shared ownership boundary itself. Every current or
+    future caller now receives a second refusal check immediately before launch, so forgetting a tool-level precheck
+    cannot silently close the user's Dota session. Replacement requires an explicit boolean at the central layer; a
+    refusal records that the existing session was preserved and performs no launch or shutdown action. The helper also
+    avoids a post-failure process query when no launch was attempted, closing a small race where an unrelated newly
+    started process could have been mistaken for owned work. Two new dependency tests prove default preservation and
+    explicitly approved replacement. No Dota or Hammer launch was needed.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 355 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 357 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 208 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed palette-bound audit: 20 of 20 model CRCs and MDAT snapshots match the current Dota VPK.
 - Installed palette-gallery proof: the four-model `river-wetland` set passed exact CRC checks, decoded to textured GLBs,

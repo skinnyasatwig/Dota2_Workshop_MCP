@@ -88,6 +88,7 @@ export interface OwnedEngineSessionOptions {
   port: number;
   launchStrategy?: GameLaunchStrategy;
   renderer?: "dx11" | "vulkan";
+  replaceRunningDota?: boolean;
   dismissTransientStalls?: boolean;
   focusWindow?: boolean;
   windowTimeoutMs?: number;
@@ -101,6 +102,7 @@ export interface OwnedEngineSessionContext {
 }
 
 export interface OwnedEngineSessionResult<T> {
+  dotaWasRunning: boolean;
   launchAttempted: boolean;
   launch?: GameLaunchResult;
   startupDiagnosis?: DotaDiagnosis;
@@ -128,6 +130,7 @@ export async function runOwnedEngineSession<T>(
 ): Promise<OwnedEngineSessionResult<T>> {
   const dependencies = dependenciesWith(dependencyOverrides);
   const console = dependencies.consoleForPort(options.port);
+  let dotaWasRunning = false;
   let launchAttempted = false;
   let launch: GameLaunchResult | undefined;
   let startupDiagnosis: DotaDiagnosis | undefined;
@@ -139,6 +142,13 @@ export async function runOwnedEngineSession<T>(
   let shutdown = noShutdownNeeded("Dota was not launched.");
 
   try {
+    dotaWasRunning = await dependencies.processRunning("dota2.exe");
+    if (dotaWasRunning && options.replaceRunningDota !== true) {
+      shutdown = noShutdownNeeded("The pre-existing Dota session was preserved.");
+      throw new Error(
+        "Dota is already running. The owned engine session refused to replace it without explicit permission.",
+      );
+    }
     launchAttempted = true;
     launch = await dependencies.restart(
       options.dota,
@@ -178,12 +188,14 @@ export async function runOwnedEngineSession<T>(
       // Console evidence is best effort; shutdown is still mandatory.
     }
     try {
-      const running = launch !== undefined || await dependencies.processRunning("dota2.exe");
-      if (launchAttempted && running) {
-        shutdown = await dependencies.shutdown(options.port, options.shutdownTimeoutMs ?? 15_000);
-      } else if (launchAttempted) {
-        console.disconnect();
-        shutdown = noShutdownNeeded("Dota never started; no shutdown action was needed.");
+      if (launchAttempted) {
+        const running = launch !== undefined || await dependencies.processRunning("dota2.exe");
+        if (running) {
+          shutdown = await dependencies.shutdown(options.port, options.shutdownTimeoutMs ?? 15_000);
+        } else {
+          console.disconnect();
+          shutdown = noShutdownNeeded("Dota never started; no shutdown action was needed.");
+        }
       }
     } catch (caught) {
       console.disconnect();
@@ -197,6 +209,7 @@ export async function runOwnedEngineSession<T>(
   }
 
   return {
+    dotaWasRunning,
     launchAttempted,
     launch,
     startupDiagnosis,

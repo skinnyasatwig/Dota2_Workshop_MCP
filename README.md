@@ -297,7 +297,8 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
   adds two renderer-native PNGs and the deliberately strict warm-colour motion gate; structured cycle proof is the safe
   default because broad scene motion is not object-specific evidence. The animation and minimap tools share one tested
   owned-session lifecycle for launch, VConsole connection, exact-watchdog handling, window readiness, retained console
-  evidence, and bounded shutdown; the navigation tool shares the watchdog policy while preserving its separate attach mode.
+  evidence, and bounded shutdown. That central layer independently refuses to replace a pre-existing Dota process unless
+  explicit permission reaches it; the navigation tool shares the watchdog policy while preserving its separate attach mode.
 - **`map_recipe_catalog`** — inspect the named terrain cores, Radiant/Dire cliff recipes, ramp-safe
   fallbacks, checked solid-volume recipes, deterministic visual-dressing palettes, and official Valve prefab references
   used by the generator. `category:"dressing"` returns the curated palette library. `verifyInstalled:true` checks the

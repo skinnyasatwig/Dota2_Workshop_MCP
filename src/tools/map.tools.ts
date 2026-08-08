@@ -1304,6 +1304,7 @@ export function registerMapTools(server: McpServer) {
         port,
         launchStrategy: launchStrategy ?? "auto",
         renderer: renderer === "default" ? undefined : renderer,
+        replaceRunningDota: replaceRunningDota === true,
         shutdownTimeoutMs: shutdownTimeoutMs ?? 15_000,
         consoleTailLines: 240,
       }, async ({ console: vc }) => {

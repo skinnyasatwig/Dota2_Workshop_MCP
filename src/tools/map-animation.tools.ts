@@ -208,6 +208,7 @@ export function registerMapAnimationTools(server: McpServer) {
         port,
         launchStrategy: launchStrategy ?? "auto",
         renderer: renderer === "default" ? undefined : renderer,
+        replaceRunningDota: replaceRunningDota === true,
         shutdownTimeoutMs: shutdownTimeoutMs ?? 15_000,
         consoleTailLines: 1000,
       }, async ({ console: vc }) => {

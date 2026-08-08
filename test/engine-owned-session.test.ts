@@ -154,3 +154,35 @@ test("owned engine session returns a structured failure when shutdown itself thr
   assert.match(result.shutdown.detail, /quit transport failed/);
   assert.deepEqual(calls, ["restart", "connect", "diagnose", "window", "shutdown", "disconnect"]);
 });
+
+test("owned engine session preserves an existing Dota session by default", async () => {
+  const { calls, dependencies } = harness({ processRunning: async () => true });
+  const result = await runOwnedEngineSession({
+    dota: DOTA,
+    addon: "fixture",
+    map: "fixture_map",
+    port: 29000,
+  }, async () => "unsafe", dependencies);
+
+  assert.equal(result.dotaWasRunning, true);
+  assert.equal(result.launchAttempted, false);
+  assert.match(result.fatalError ?? "", /refused to replace/);
+  assert.match(result.shutdown.detail, /pre-existing Dota session was preserved/);
+  assert.deepEqual(calls, []);
+});
+
+test("owned engine session replaces an existing Dota session only with explicit permission", async () => {
+  const { calls, dependencies } = harness({ processRunning: async () => true });
+  const result = await runOwnedEngineSession({
+    dota: DOTA,
+    addon: "fixture",
+    map: "fixture_map",
+    port: 29000,
+    replaceRunningDota: true,
+  }, async () => "approved", dependencies);
+
+  assert.equal(result.dotaWasRunning, true);
+  assert.equal(result.value, "approved");
+  assert.equal(result.shutdown.stopped, true);
+  assert.deepEqual(calls, ["restart", "connect", "diagnose", "window", "shutdown"]);
+});
