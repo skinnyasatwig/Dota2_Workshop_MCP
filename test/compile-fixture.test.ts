@@ -43,6 +43,12 @@ test("repository compile fixture is self-contained and structurally inspectable"
       "fixture_irregular_platform_segment_08_deck",
       "fixture_nav_obstruction",
       "fixture_polygon_no_wards",
+      "fixture_profile_arch_arch_segment_01",
+      "fixture_profile_arch_arch_segment_02",
+      "fixture_profile_arch_arch_segment_03",
+      "fixture_profile_arch_arch_segment_04",
+      "fixture_profile_arch_left_post",
+      "fixture_profile_arch_right_post",
       "fixture_radiant_start",
       "fixture_radiant_team_core_start",
       "fixture_radiant_team_core_tower",
@@ -81,7 +87,7 @@ test("repository compile fixture is self-contained and structurally inspectable"
     fixture.entities.find((entity) => entity.targetname === "fixture_dire_team_core_start")?.classname,
     "info_player_start_badguys",
   );
-  assert.equal(fixture.solids.length, 23);
+  assert.equal(fixture.solids.length, 29);
   const concave = fixture.solids.find((solid) => solid.targetname === "fixture_concave_solid");
   assert.equal(concave?.footprint.length, 6);
   assert.equal(concave?.height, 256);
@@ -95,6 +101,14 @@ test("repository compile fixture is self-contained and structurally inspectable"
   const lintel = fixture.solids.find((solid) => solid.targetname === "fixture_arch_lintel");
   assert.deepEqual(lintel?.center.map((value) => Number(value.toFixed(6))), [-2048, 1024, 768]);
   assert.equal(lintel?.height, 256);
+  const profileSegment = fixture.solids.find(
+    (solid) => solid.targetname === "fixture_profile_arch_arch_segment_01",
+  );
+  assert.deepEqual(profileSegment?.center, [-3360, 2048, 512]);
+  assert.deepEqual(profileSegment?.sloped, {
+    bottom: [0, 216, 216, 0],
+    top: [384, 384, 384, 384],
+  });
   const bridge = fixture.solids.find((solid) => solid.targetname === "fixture_bridge_deck");
   assert.deepEqual(bridge?.center, [-2048, -1024, 384]);
   assert.equal(bridge?.height, 64);
@@ -136,6 +150,8 @@ test("repository compile fixture is self-contained and structurally inspectable"
     solid.targetname.startsWith("fixture_irregular_platform_segment_"));
   assert.equal(irregularSegments.length, 8);
   assert.ok(irregularSegments.every((solid) => solid.footprint.length === 4 && solid.height === 64));
+  assert.equal(fixture.solids.filter((solid) =>
+    solid.targetname.startsWith("fixture_profile_arch_arch_segment_")).length, 4);
   assert.equal(fixture.volumes.length, 2);
   const round = fixture.volumes.find((volume) => volume.targetname === "fixture_polygon_no_wards");
   assert.equal(round?.footprint.length, 12);

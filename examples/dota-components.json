@@ -130,6 +130,17 @@
       "material": "materials/dev/reflectivity_30.vmat"
     },
     {
+      "kind": "profileArch",
+      "name": "dragon_profile_arch",
+      "origin": [0, 3072, 128],
+      "yaw": 0,
+      "width": 1024,
+      "depth": 256,
+      "height": 768,
+      "profile": [[-384, 384], [-192, 600], [0, 704], [192, 600], [384, 384]],
+      "material": "materials/dev/reflectivity_30.vmat"
+    },
+    {
       "kind": "bridgeApproach",
       "name": "center_river_bridge_west_approach",
       "start": [-1280, 0, 128],

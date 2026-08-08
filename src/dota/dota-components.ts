@@ -217,6 +217,46 @@ const archComponentSchema = z.object({
   }
 });
 
+const profileArchComponentSchema = z.object({
+  kind: z.literal("profileArch"),
+  name: nameSchema,
+  /** World-space center of the outer arch rectangle at its base elevation. */
+  origin: point3,
+  yaw: yawSchema,
+  width: z.number().finite().min(3).max(32768),
+  depth: z.number().finite().min(1).max(32768),
+  height: z.number().finite().min(2).max(32768),
+  /** Local [x,z] points along the opening's underside, ordered left to right. */
+  profile: z.array(point2).min(2).max(64),
+  material: visibleMaterialSchema,
+}).strict().superRefine((arch, context) => {
+  const left = -arch.width / 2;
+  const right = arch.width / 2;
+  arch.profile.forEach(([x, zValue], index) => {
+    if (x < left + 1 || x > right - 1) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["profile", index, 0],
+        message: "must leave at least one world unit for both outer posts",
+      });
+    }
+    if (zValue < 1 || zValue > arch.height - 1) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["profile", index, 1],
+        message: "must stay at least one world unit above the base and below the outer height",
+      });
+    }
+    if (index > 0 && x - arch.profile[index - 1][0] < 1) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["profile", index, 0],
+        message: "must be at least one world unit to the right of the preceding profile point",
+      });
+    }
+  });
+});
+
 const bridgeComponentSchema = z.object({
   kind: z.literal("bridge"),
   name: nameSchema,
@@ -571,6 +611,7 @@ export const dotaComponentInputSchema = z.union([
   fowBlockerComponentSchema,
   wallComponentSchema,
   archComponentSchema,
+  profileArchComponentSchema,
   bridgeComponentSchema,
   bridgeApproachComponentSchema,
   ringPlatformComponentSchema,
@@ -609,6 +650,11 @@ export const WORLD_STRUCTURE_RECIPES = {
     parts: ["left_post", "right_post", "lintel"],
     purpose: "Rectangular wall opening assembled from three checked always-solid func_brush extrusions.",
     source: "MCP composition of the Valve-compiler-proven managedSolids recipe",
+  },
+  profileArch: {
+    parts: ["left_post", "right_post", "arch_segment_*"],
+    purpose: "Irregular or curved-approximation opening assembled from checked posts and sloped overhead segments.",
+    source: "MCP composition of the Valve-compiler-proven flat and per-corner-sloped managedSolids recipe",
   },
   bridge: {
     parts: ["deck", "walkable"],
@@ -901,6 +947,64 @@ function archSolids(component: z.infer<typeof archComponentSchema>): ManagedMapS
       extrusion: { points: rectangle(component.width), height: lintelHeight },
     },
   ];
+}
+
+function profileArchSolids(component: z.infer<typeof profileArchComponentSchema>): ManagedMapSolid[] {
+  const yaw = component.yaw ?? 0;
+  const at = (localX: number, localZ: number): Point3 =>
+    addPoint(component.origin, rotateOffset([localX, 0, localZ], yaw))
+      .map((value) => Number(formatted(value))) as Point3;
+  const rectangle = (width: number): [number, number][] => [
+    [-width / 2, -component.depth / 2],
+    [width / 2, -component.depth / 2],
+    [width / 2, component.depth / 2],
+    [-width / 2, component.depth / 2],
+  ];
+  const outerLeft = -component.width / 2;
+  const outerRight = component.width / 2;
+  const profileLeft = component.profile[0][0];
+  const profileRight = component.profile[component.profile.length - 1][0];
+  const leftWidth = profileLeft - outerLeft;
+  const rightWidth = outerRight - profileRight;
+  const solids: ManagedMapSolid[] = [
+    {
+      targetname: `${component.name}_left_post`,
+      center: at((outerLeft + profileLeft) / 2, component.height / 2),
+      yaw,
+      material: component.material,
+      extrusion: { points: rectangle(leftWidth), height: component.height },
+    },
+    {
+      targetname: `${component.name}_right_post`,
+      center: at((profileRight + outerRight) / 2, component.height / 2),
+      yaw,
+      material: component.material,
+      extrusion: { points: rectangle(rightWidth), height: component.height },
+    },
+  ];
+  for (let index = 0; index < component.profile.length - 1; index++) {
+    const [startX, startZ] = component.profile[index];
+    const [endX, endZ] = component.profile[index + 1];
+    const width = endX - startX;
+    const segment = String(index + 1).padStart(2, "0");
+    solids.push({
+      targetname: `${component.name}_arch_segment_${segment}`,
+      center: at((startX + endX) / 2, component.height / 2),
+      yaw,
+      material: component.material,
+      extrusion: {
+        points: rectangle(width),
+        bottom: [
+          startZ - component.height / 2,
+          endZ - component.height / 2,
+          endZ - component.height / 2,
+          startZ - component.height / 2,
+        ],
+        top: Array(4).fill(component.height / 2),
+      },
+    });
+  }
+  return solids;
 }
 
 function bridgeParts(component: z.infer<typeof bridgeComponentSchema>): {
@@ -1258,6 +1362,9 @@ export function expandDotaComponents(components: DotaComponentInput[]): Expanded
         break;
       case "arch":
         managedSolids.push(...archSolids(component));
+        break;
+      case "profileArch":
+        managedSolids.push(...profileArchSolids(component));
         break;
       case "bridge": {
         const bridge = bridgeParts(component);

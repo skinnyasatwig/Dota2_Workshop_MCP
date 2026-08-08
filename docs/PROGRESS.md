@@ -246,10 +246,19 @@ Last updated: 2026-08-07
     documented example and repository compiler fixture now exercise that unequal case as eight generated segment pairs;
     Valve conversion and ResourceCompiler accepted it without launching Dota or Hammer.
 
+50. This milestone - added `profileArch`, a checked irregular-opening recipe driven by a bounded local `[x,z]`
+    underside profile. Strictly increasing X values, outer-post clearance, base clearance, and overhead thickness are
+    validated before expansion. Two full-height posts plus one flat- or per-corner-sloped overhead solid per profile
+    interval exactly fill the outer rectangle while preserving the requested asymmetric, pointed, or piecewise-curved
+    opening. The pieces use the existing watertight managed-solid writer, so namespacing, mirroring, drift repair,
+    preview, material checks, and vertical-clearance-aware offline reachability work without raw faces. Tests prove the
+    center opening stays reachable while the posts block. The documented five-point profile and six-piece repository
+    fixture round-tripped and compiled through Valve's tools without launching Dota or Hammer.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 301 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 303 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 203 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
@@ -259,7 +268,7 @@ Last updated: 2026-08-07
   sloped trigger volumes from text to binary VMAP and back during the integration suite, preserving exact corner heights.
 - `npm run test:compiler-fixture` successfully round-tripped and compiled the repository-owned acceptance payload,
   including its sloped trigger, flat and sloped concave L-shaped world solids, checked rectangular arch, checked bridge
-  deck/navigation twin, complete visible sloped bridge approach/navigation twin, eight-segment ring platform,
+  deck/navigation twin, complete visible sloped bridge approach/navigation twin, six-piece profile arch, eight-segment ring platform,
   eight-segment unequal-outline holed platform, and explicit navigation obstruction,
   into a real VPK. The generated map uses Valve's installed blank template only as required hidden
   infrastructure, depends on no private 3v3 file, stores no copied Valve VMAP, and leaves no temporary addon trees.

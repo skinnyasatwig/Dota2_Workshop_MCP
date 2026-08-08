@@ -95,6 +95,17 @@ export function buildRepositoryCompileFixtureText(baseText: string): string {
             material: "materials/dev/reflectivity_30.vmat",
           },
           {
+            kind: "profileArch",
+            name: "profile_arch",
+            origin: [-3072, 2048, 128],
+            yaw: 0,
+            width: 1024,
+            depth: 256,
+            height: 768,
+            profile: [[-384, 384], [-192, 600], [0, 704], [192, 600], [384, 384]],
+            material: "materials/dev/reflectivity_30.vmat",
+          },
+          {
             kind: "bridge",
             name: "bridge",
             center: [-2048, -1024, 384],

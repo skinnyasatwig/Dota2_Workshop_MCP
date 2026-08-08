@@ -231,6 +231,67 @@ test("checked arches expand into two posts and one elevated lintel", () => {
   );
 });
 
+test("checked profile arches compose an irregular opening from sloped overhead segments", () => {
+  const profile: [number, number][] = [
+    [-384, 384], [-192, 600], [0, 704], [192, 600], [384, 384],
+  ];
+  const [arch] = componentList.parse([{
+    kind: "profileArch",
+    name: "dragon_profile_arch",
+    origin: [100, 200, 128],
+    yaw: 0,
+    width: 1024,
+    depth: 256,
+    height: 768,
+    profile,
+    material: "materials/dev/reflectivity_30.vmat",
+  }]);
+  const solids = expandDotaComponents([arch]).managedSolids;
+
+  assert.equal(solids.length, 6);
+  assert.deepEqual(solids.map((solid) => solid.targetname), [
+    "dragon_profile_arch_left_post",
+    "dragon_profile_arch_right_post",
+    "dragon_profile_arch_arch_segment_01",
+    "dragon_profile_arch_arch_segment_02",
+    "dragon_profile_arch_arch_segment_03",
+    "dragon_profile_arch_arch_segment_04",
+  ]);
+  assert.deepEqual(solids[0], {
+    targetname: "dragon_profile_arch_left_post",
+    center: [-348, 200, 512],
+    yaw: 0,
+    material: "materials/dev/reflectivity_30.vmat",
+    extrusion: {
+      points: [[-64, -128], [64, -128], [64, 128], [-64, 128]],
+      height: 768,
+    },
+  });
+  assert.deepEqual(solids[2], {
+    targetname: "dragon_profile_arch_arch_segment_01",
+    center: [-188, 200, 512],
+    yaw: 0,
+    material: "materials/dev/reflectivity_30.vmat",
+    extrusion: {
+      points: [[-96, -128], [96, -128], [96, 128], [-96, 128]],
+      bottom: [0, 216, 216, 0],
+      top: [384, 384, 384, 384],
+    },
+  });
+  assert.throws(
+    () => componentList.parse([{ ...arch, profile: [[-512, 384], [384, 384]] }]),
+    /leave at least one world unit for both outer posts/,
+  );
+  assert.throws(
+    () => componentList.parse([{ ...arch, profile: [[-384, 384], [-384, 600]] }]),
+    /to the right of the preceding profile point/,
+  );
+  assert.throws(
+    () => componentList.parse([{ ...arch, profile: [[-384, 768], [384, 384]] }]),
+    /below the outer height/,
+  );
+});
+
 test("checked bridges pair a visible solid deck with Valve navigation-walkable geometry", () => {
   const [bridge] = componentList.parse([{
     kind: "bridge",
@@ -500,6 +561,6 @@ test("the documented Dota component assembly remains valid", async () => {
   assert.equal(specification.managedEntities?.filter((entity) => entity.classname === "npc_dota_fort").length, 2);
   assert.equal(specification.managedEntities?.filter((entity) => entity.classname === "npc_dota_tower").length, 5);
   assert.equal(specification.managedTerrain?.filter((operation) => operation.op === "ramp").length, 3);
-  assert.equal(specification.managedSolids?.length, 22);
+  assert.equal(specification.managedSolids?.length, 28);
   assert.equal(specification.managedNavSurfaces?.length, 19);
 });

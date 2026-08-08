@@ -321,7 +321,7 @@ Transforms and team swaps compose at every level, while deferred `@local:` refer
 chain. Missing children, duplicate local placement names, cycles, and nesting deeper than 32 levels are rejected.
 
 For common gameplay structure, `dotaComponents` provides strongly checked `base`, `ancient`, `tower`, `fountain`,
-`shop`, `camp`, `bossPit`, `playerStart`, `gate`, `baseBlocker`, `fowBlocker`, `wall`, `arch`, `bridge`,
+`shop`, `camp`, `bossPit`, `playerStart`, `gate`, `baseBlocker`, `fowBlocker`, `wall`, `arch`, `profileArch`, `bridge`,
 `bridgeApproach`, `ringPlatform`, and `holedPlatform` entries. It derives team numbers, official entity classes,
 stock unit/model names, tower tier names, shop/camp numeric values, base member transforms, and boss-pit terrain.
 See [`examples/dota-components.json`](examples/dota-components.json). A `camp` can include an optional checked
@@ -339,6 +339,12 @@ origin is the center of the arch at ground level; width, depth, total height, op
 one preflighted visible material are explicit. Offline reachability uses a conservative 256-unit standing corridor,
 so the posts block their true footprints while a sufficiently high lintel leaves the doorway open. This is a safe
 reusable composition, not a general-purpose hole or arbitrary mesh API.
+`profileArch` keeps the same safe composition model but accepts a bounded left-to-right local `[x,z]` profile for
+the opening's underside. It creates two full-height side posts and one checked per-corner-sloped overhead extrusion
+between each pair of profile points. This supports asymmetric, pointed, and piecewise-curved graybox openings while
+guaranteeing positive post width, increasing profile X, opening clearance, and overhead thickness. Adjacent pieces
+share exact seams; no user-authored faces or triangle soup are accepted. Offline reachability respects the real sloped
+underside, and Valve's converter/compiler accept the five-point, four-segment fixture.
 The `bridge` component pairs one visible, checked solid deck with a same-shape `managedNavSurface` made from Valve's
 dedicated `materials/editor/dota_nav_walkable.vmat` recipe. The MCP checks and mirrors both pieces together, detects
 drift, previews the deck, and conservatively reports terrain clearance underneath it. `bridgeApproach` takes two
@@ -558,7 +564,7 @@ closes every side, and then proves every
 half-edge has exactly one opposite before writing the VMAP. Solids reconcile by targetname, mirror inside reusable
 components, appear in `map_preview` with an uphill arrow when sloped, and block their true concave footprint in offline
 reachability when their vertical range intersects the standing corridor. The repository fixture round-trips flat and
-sloped L-shaped solids, a checked three-piece arch, a visible bridge deck, a complete sloped bridge approach, an
+sloped L-shaped solids, a checked three-piece rectangular arch, a six-piece profile arch, a visible bridge deck, a complete sloped bridge approach, an
 eight-segment ring platform, and an eight-segment unequal-outline holed platform,
 each paired where appropriate with Valve navigation geometry,
 through Valve's converter and compiles them into a real VPK. The general map material preflight proves the selected visible material exists before a build,
@@ -594,10 +600,10 @@ the real link operation refuses to overwrite conflicting folders.
 Then launch it: `addon_launch_custom_game map="<name>"`.
 
 > Limitation: the MCP can safely generate checked flat or per-corner-sloped extrusions with convex or concave outlines,
-> flat/sloped convex gameplay volumes, a rectangular arch assembled from three checked solids, and checked bridge
+> flat/sloped convex gameplay volumes, rectangular and profile-driven arches assembled from checked solids, and checked bridge
 > decks/approaches, regular ring platforms, and irregular holed platforms paired with Valve navigation-walkable
-> geometry. Freeform 3D meshes, multiple hole boundaries, curved or irregular
-> arches, curves, terrain props, and decorative cliff brushwork still require Hammer or
+> geometry. Freeform 3D meshes, multiple hole boundaries, truly curved surfaces, terrain props, and decorative cliff
+> brushwork still require Hammer or
 > a future checked recipe. Because Valve GridNav aliases height at a shared X/Y location, independent stacked bridge
 > and underpass navigation is not represented by this API.
 

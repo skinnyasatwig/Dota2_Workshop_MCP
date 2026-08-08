@@ -249,6 +249,43 @@ test("the checked arch recipe blocks its posts but leaves its opening reachable"
   assert.equal(report.findings.some((finding) => finding.code === "inaccessible-objective"), false);
 });
 
+test("the checked profile arch blocks its posts but preserves the irregular opening", () => {
+  const expanded = expandDotaComponents([{
+    kind: "profileArch",
+    name: "test_profile_arch",
+    origin: [896, 640, 128],
+    width: 1280,
+    depth: 256,
+    height: 768,
+    profile: [[-384, 384], [-192, 600], [0, 704], [192, 600], [384, 384]],
+    material: "materials/dev/reflectivity_30.vmat",
+  }]);
+  const blockers: ParsedMapSolid[] = expanded.managedSolids.map((solid) => ({
+    targetname: solid.targetname,
+    center: solid.center,
+    yaw: solid.yaw ?? 0,
+    material: solid.material,
+    footprint: solid.extrusion.points,
+    ...(solid.extrusion.height !== undefined
+      ? { height: solid.extrusion.height }
+      : { sloped: { bottom: solid.extrusion.bottom, top: solid.extrusion.top } }),
+    blocking: true,
+  }));
+  const report = analyzeTileGridReachability(
+    flatGrid(7, 5),
+    [
+      entity("radiant_spawn", "info_target", 896, 128),
+      entity("dragon_boss_spawn", "info_target", 896, 1152),
+    ],
+    { blockingVolumes: blockers },
+  );
+
+  assert.equal(report.cells.find((cell) => cell.x === 3 && cell.y === 2)?.blockingVolume, undefined);
+  assert.equal(report.cells.find((cell) => cell.x === 1 && cell.y === 2)?.blockingVolume, "test_profile_arch_left_post");
+  assert.equal(report.cells.find((cell) => cell.x === 5 && cell.y === 2)?.blockingVolume, "test_profile_arch_right_post");
+  assert.equal(report.findings.some((finding) => finding.code === "inaccessible-objective"), false);
+});
+
 test("the checked ring platform preserves its central opening offline", () => {
   const expanded = expandDotaComponents([{
     kind: "ringPlatform",
