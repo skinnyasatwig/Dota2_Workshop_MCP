@@ -158,24 +158,44 @@ const wallComponentSchema = z.object({
   height: z.number().finite().positive().max(32768),
   overlap: z.number().finite().nonnegative().max(4096).optional(),
   closed: z.boolean().optional(),
+  /** Optional visible graybox skin; player-clip segments are always generated. */
+  material: visibleMaterialSchema.optional(),
+  faceMaterials: managedMapSolidFaceMaterialsInputSchema.optional(),
+  faceTextureScales: managedMapSolidFaceTextureScalesInputSchema.optional(),
+  faceTextureShifts: managedMapSolidFaceTextureShiftsInputSchema.optional(),
+  faceTextureRotations: managedMapSolidFaceTextureRotationsInputSchema.optional(),
+  faceTextureAlignments: managedMapSolidFaceTextureAlignmentsInputSchema.optional(),
 }).strict().superRefine((wall, context) => {
-  for (let index = 0; index < wall.points.length - 1; index++) {
-    const current = wall.points[index];
-    const next = wall.points[index + 1];
+  const overlap = wall.overlap ?? Math.min(wall.thickness * 0.25, 64);
+  const checkSegment = (current: Point3, next: Point3, pathIndex: number) => {
     if (current[0] === next[0] && current[1] === next[1]) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["points", index + 1],
+        path: ["points", pathIndex],
         message: "must not repeat the preceding XY point",
       });
+      return;
     }
-    if (Math.abs(current[2] - next[2]) > 1e-6) {
+    const length = Math.hypot(next[0] - current[0], next[1] - current[1]);
+    const effectiveLength = length + overlap;
+    if (effectiveLength > 32768) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["points", index + 1, 2],
-        message: "must use the same base Z as the preceding point; sloped wall segments are not yet supported",
+        path: ["points", pathIndex],
+        message: "creates a wall segment longer than 32768 world units after overlap",
       });
     }
+    const effectiveRise = Math.abs(next[2] - current[2]) * (effectiveLength / length);
+    if (wall.height + effectiveRise > 32768) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["points", pathIndex, 2],
+        message: "creates a sloped wall envelope taller than 32768 world units after overlap",
+      });
+    }
+  };
+  for (let index = 0; index < wall.points.length - 1; index++) {
+    checkSegment(wall.points[index], wall.points[index + 1], index + 1);
   }
   if (wall.closed && wall.points.length > 2) {
     const first = wall.points[0];
@@ -186,13 +206,25 @@ const wallComponentSchema = z.object({
         path: ["points", wall.points.length - 1],
         message: "must not repeat the first point when closed=true",
       });
+    } else {
+      checkSegment(last, first, wall.points.length - 1);
     }
-    if (Math.abs(first[2] - last[2]) > 1e-6) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["points", wall.points.length - 1, 2],
-        message: "must use the same base Z as the first point when closed=true",
-      });
+  }
+  if (!wall.material) {
+    for (const field of [
+      "faceMaterials",
+      "faceTextureScales",
+      "faceTextureShifts",
+      "faceTextureRotations",
+      "faceTextureAlignments",
+    ] as const) {
+      if (wall[field] !== undefined) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [field],
+          message: "requires material so a visible wall skin exists",
+        });
+      }
     }
   }
 });
@@ -868,6 +900,11 @@ export const POINT_BLOCKER_RECIPES = {
 } as const;
 
 export const WORLD_STRUCTURE_RECIPES = {
+  wall: {
+    parts: ["segment_*", "visual_*"],
+    purpose: "Open or closed segmented wall run with checked sloped player clips and an optional matching visible skin.",
+    source: "MCP composition of compiler-proven sloped managedSolids and managedVolumes recipes",
+  },
   staticPropSet: {
     parts: ["placement_*"],
     purpose: "Repeatable scaled static scenery with a checked model path and fail-closed explicit collision intent.",
@@ -1125,7 +1162,9 @@ function fowBlockerEntities(component: z.infer<typeof fowBlockerComponentSchema>
   });
 }
 
-function wallVolumes(component: z.infer<typeof wallComponentSchema>): ManagedMapVolume[] {
+type WallComponent = z.infer<typeof wallComponentSchema>;
+
+function wallPairs(component: WallComponent): Array<[Point3, Point3]> {
   const pairs: Array<[Point3, Point3]> = [];
   for (let index = 0; index < component.points.length - 1; index++) {
     pairs.push([component.points[index], component.points[index + 1]]);
@@ -1133,11 +1172,74 @@ function wallVolumes(component: z.infer<typeof wallComponentSchema>): ManagedMap
   if (component.closed && component.points.length > 2) {
     pairs.push([component.points[component.points.length - 1], component.points[0]]);
   }
+  return pairs;
+}
+
+function wallSegmentGeometry(
+  component: WallComponent,
+  from: Point3,
+  to: Point3,
+): {
+  center: Point3;
+  yaw: number;
+  points: [number, number][];
+  bottom: number[];
+  top: number[];
+} {
   const overlap = component.overlap ?? Math.min(component.thickness * 0.25, 64);
-  return pairs.map(([from, to], index) => {
+  const dx = to[0] - from[0];
+  const dy = to[1] - from[1];
+  const length = Math.hypot(dx, dy);
+  const extendedLength = length + overlap;
+  const extension = overlap / 2;
+  const risePerUnit = (to[2] - from[2]) / length;
+  const extendedFromZ = from[2] - risePerUnit * extension;
+  const extendedToZ = to[2] + risePerUnit * extension;
+  const centerZ = (from[2] + to[2]) / 2 + component.height / 2;
+  const bottom = [
+    extendedFromZ - centerZ,
+    extendedToZ - centerZ,
+    extendedToZ - centerZ,
+    extendedFromZ - centerZ,
+  ].map(normalizedNumber);
+  return {
+    center: [
+      normalizedNumber((from[0] + to[0]) / 2),
+      normalizedNumber((from[1] + to[1]) / 2),
+      normalizedNumber(centerZ),
+    ],
+    yaw: normalizedNumber((Math.atan2(dy, dx) * 180) / Math.PI),
+    points: [
+      [-extendedLength / 2, -component.thickness / 2],
+      [extendedLength / 2, -component.thickness / 2],
+      [extendedLength / 2, component.thickness / 2],
+      [-extendedLength / 2, component.thickness / 2],
+    ].map(([x, y]) => [normalizedNumber(x), normalizedNumber(y)] as [number, number]),
+    bottom,
+    top: bottom.map((height) => normalizedNumber(height + component.height)),
+  };
+}
+
+function wallVolumes(component: WallComponent): ManagedMapVolume[] {
+  const overlap = component.overlap ?? Math.min(component.thickness * 0.25, 64);
+  return wallPairs(component).map(([from, to], index) => {
     const dx = to[0] - from[0];
     const dy = to[1] - from[1];
     const length = Math.hypot(dx, dy);
+    if (Math.abs(from[2] - to[2]) > 1e-6) {
+      const geometry = wallSegmentGeometry(component, from, to);
+      return {
+        targetname: `${component.name}_${index + 1}`,
+        recipe: "playerClip",
+        center: geometry.center,
+        polygon: {
+          points: geometry.points,
+          bottom: geometry.bottom,
+          top: geometry.top,
+        },
+        yaw: geometry.yaw,
+      };
+    }
     return {
       targetname: `${component.name}_${index + 1}`,
       recipe: "playerClip",
@@ -1148,6 +1250,29 @@ function wallVolumes(component: z.infer<typeof wallComponentSchema>): ManagedMap
       ],
       size: [length + overlap, component.thickness, component.height],
       yaw: (Math.atan2(dy, dx) * 180) / Math.PI,
+    };
+  });
+}
+
+function wallSolids(component: WallComponent): ManagedMapSolid[] {
+  if (!component.material) return [];
+  return wallPairs(component).map(([from, to], index) => {
+    const geometry = wallSegmentGeometry(component, from, to);
+    return {
+      targetname: `${component.name}_visual_${index + 1}`,
+      center: geometry.center,
+      yaw: geometry.yaw,
+      material: component.material!,
+      ...(component.faceMaterials ? { faceMaterials: component.faceMaterials } : {}),
+      ...(component.faceTextureScales ? { faceTextureScales: component.faceTextureScales } : {}),
+      ...(component.faceTextureShifts ? { faceTextureShifts: component.faceTextureShifts } : {}),
+      ...(component.faceTextureRotations ? { faceTextureRotations: component.faceTextureRotations } : {}),
+      ...(component.faceTextureAlignments ? { faceTextureAlignments: component.faceTextureAlignments } : {}),
+      extrusion: {
+        points: geometry.points,
+        bottom: geometry.bottom,
+        top: geometry.top,
+      },
     };
   });
 }
@@ -1778,6 +1903,7 @@ export function expandDotaComponents(components: DotaComponentInput[]): Expanded
         break;
       case "wall":
         managedVolumes.push(...wallVolumes(component));
+        managedSolids.push(...wallSolids(component));
         break;
       case "staticPropSet":
         managedEntities.push(...expandStaticPropSet(component));

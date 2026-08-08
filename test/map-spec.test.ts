@@ -410,6 +410,78 @@ test("reusable component definitions expand, namespace, and mirror checked Dota 
   });
 });
 
+test("reusable sloped wall runs mirror their visible skin and exact player clip together", () => {
+  const specification = parseMapSpecification({
+    components: {
+      wall_kit: {
+        dotaComponents: [{
+          kind: "wall",
+          name: "base_wall",
+          points: [[0, 0, 0], [1000, 0, 200]],
+          thickness: 100,
+          height: 400,
+          overlap: 40,
+          material: "materials/dev/reflectivity_30.vmat",
+        }],
+      },
+    },
+    placements: [
+      { component: "wall_kit", name: "west", worldOffset: [-2000, 0, 0] },
+      { component: "wall_kit", name: "east", worldOffset: [2000, 0, 0], mirrorAxis: "x" },
+    ],
+  });
+
+  assert.deepEqual(specification.managedSolids?.map((solid) => ({
+    targetname: solid.targetname,
+    center: solid.center,
+    yaw: solid.yaw,
+    bottom: "bottom" in solid.extrusion ? solid.extrusion.bottom : undefined,
+    top: "top" in solid.extrusion ? solid.extrusion.top : undefined,
+  })), [
+    {
+      targetname: "west_base_wall_visual_1",
+      center: [-1500, 0, 300],
+      yaw: 0,
+      bottom: [-304, -96, -96, -304],
+      top: [96, 304, 304, 96],
+    },
+    {
+      targetname: "east_base_wall_visual_1",
+      center: [1500, 0, 300],
+      yaw: 180,
+      bottom: [-304, -96, -96, -304],
+      top: [96, 304, 304, 96],
+    },
+  ]);
+  assert.deepEqual(specification.managedVolumes?.map((volume) => ({
+    targetname: volume.targetname,
+    center: volume.center,
+    yaw: volume.yaw,
+    polygon: volume.polygon,
+  })), [
+    {
+      targetname: "west_base_wall_1",
+      center: [-1500, 0, 300],
+      yaw: 0,
+      polygon: {
+        points: [[-520, -50], [520, -50], [520, 50], [-520, 50]],
+        bottom: [-304, -96, -96, -304],
+        top: [96, 304, 304, 96],
+      },
+    },
+    {
+      targetname: "east_base_wall_1",
+      center: [1500, 0, 300],
+      yaw: 180,
+      polygon: {
+        points: [[-520, -50], [520, -50], [520, 50], [-520, 50]],
+        bottom: [-304, -96, -96, -304],
+        top: [96, 304, 304, 96],
+      },
+    },
+  ]);
+});
+
 test("nested reusable components compose transforms, references, terrain, and team identity", () => {
   const specification = parseMapSpecification({
     components: {

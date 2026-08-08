@@ -443,10 +443,20 @@ Last updated: 2026-08-07
     started process could have been mistaken for owned work. Two new dependency tests prove default preservation and
     explicitly approved replacement. No Dota or Hammer launch was needed.
 
+69. This milestone - upgraded the existing segmented `wall` recipe from flat invisible clips to elevation-following
+    wall runs with an optional matching visible skin. Different endpoint Z values now produce a checked coplanar
+    four-sided sloped prism; overlap extends along the same grade instead of flattening the ends. Player clipping and
+    visible `func_brush` geometry use the exact same footprint and height rings. A preflighted material enables the
+    skin, with the existing bounded face-material and texture projection controls; omitting it preserves the original
+    flat blocker-only output. Segment length and combined height/rise envelopes fail before generation if Source 2's
+    checked local bounds would be exceeded. Reusable placement and mirroring keep skins and clips paired. Direct,
+    specification, documented-example, and fixture tests pass, and Valve's real converter/compiler accepted a
+    disposable two-segment sloped wall without launching Dota or Hammer.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 357 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 359 passed, 0 failed, and 4 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 208 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed palette-bound audit: 20 of 20 model CRCs and MDAT snapshots match the current Dota VPK.
 - Installed palette-gallery proof: the four-model `river-wetland` set passed exact CRC checks, decoded to textured GLBs,
@@ -463,7 +473,8 @@ Last updated: 2026-08-07
 - `npm run test:compiler-fixture` successfully round-tripped and compiled the repository-owned acceptance payload,
   including its two-prop preflighted decorative set with uniform and non-uniform entity scales, all 20 explicit variants
   plus four checked non-solid/nav-neutral `prop_dynamic` team-banner loops,
-  from the five curated visual-dressing palettes, sloped trigger, flat and sloped concave L-shaped world solids, checked rectangular arch, checked bridge
+  from the five curated visual-dressing palettes, sloped trigger, a two-segment sloped visible wall/player-clip pair,
+  flat and sloped concave L-shaped world solids, checked rectangular arch, checked bridge
   deck/navigation twin, complete visible sloped bridge approach/navigation twin, three-material six-piece profile arch, eight-segment ring platform,
   eight-segment unequal-outline holed platform, 14-triangle two-hole platform, and explicit navigation obstruction,
   into a real VPK. The generated map uses Valve's installed blank template only as required hidden

@@ -146,7 +146,7 @@ test("segmented walls expand a practical curved outline into overlapping convex 
   assert.deepEqual(volumes[1].center, [-4224, -1664, 384]);
 });
 
-test("closed segmented walls add a final blocker and reject degenerate or sloped segments", () => {
+test("closed segmented walls add a final blocker and reject degenerate segments", () => {
   const [wall] = componentList.parse([
     {
       kind: "wall",
@@ -172,13 +172,73 @@ test("closed segmented walls add a final blocker and reject degenerate or sloped
   assert.throws(
     () => componentList.parse([{
       kind: "wall",
-      name: "sloped_wall",
-      points: [[0, 0, 0], [512, 0, 128]],
+      name: "unbounded_wall",
+      points: [[0, 0, 0], [32768, 0, 0]],
       thickness: 128,
       height: 512,
+      overlap: 1,
     }]),
-    /sloped wall segments are not yet supported/,
+    /longer than 32768/,
   );
+});
+
+test("segmented walls follow elevation and optionally generate a matching visible skin", () => {
+  const [wall] = componentList.parse([{
+    kind: "wall",
+    name: "sloped_base_wall",
+    points: [[0, 0, 0], [1000, 0, 200]],
+    thickness: 100,
+    height: 400,
+    overlap: 40,
+    material: "materials/dev/reflectivity_30.vmat",
+    faceMaterials: { top: "materials/dev/reflectivity_50.vmat" },
+    faceTextureAlignments: { sides: "shared" },
+  }]);
+  const expanded = expandDotaComponents([wall]);
+
+  assert.equal(expanded.managedVolumes.length, 1);
+  assert.deepEqual(expanded.managedVolumes[0], {
+    targetname: "sloped_base_wall_1",
+    recipe: "playerClip",
+    center: [500, 0, 300],
+    polygon: {
+      points: [[-520, -50], [520, -50], [520, 50], [-520, 50]],
+      bottom: [-304, -96, -96, -304],
+      top: [96, 304, 304, 96],
+    },
+    yaw: 0,
+  });
+  assert.equal(expanded.managedSolids.length, 1);
+  assert.deepEqual(expanded.managedSolids[0], {
+    targetname: "sloped_base_wall_visual_1",
+    center: [500, 0, 300],
+    yaw: 0,
+    material: "materials/dev/reflectivity_30.vmat",
+    faceMaterials: { top: "materials/dev/reflectivity_50.vmat" },
+    faceTextureAlignments: { sides: "shared" },
+    extrusion: {
+      points: [[-520, -50], [520, -50], [520, 50], [-520, 50]],
+      bottom: [-304, -96, -96, -304],
+      top: [96, 304, 304, 96],
+    },
+  });
+
+  assert.throws(() => componentList.parse([{
+    kind: "wall",
+    name: "invisible_projection",
+    points: [[0, 0, 0], [512, 0, 0]],
+    thickness: 64,
+    height: 256,
+    faceTextureAlignments: { sides: "shared" },
+  }]), /requires material/);
+  assert.throws(() => componentList.parse([{
+    kind: "wall",
+    name: "too_tall_when_sloped",
+    points: [[0, 0, 0], [512, 0, 32700]],
+    thickness: 64,
+    height: 128,
+    overlap: 0,
+  }]), /envelope taller than 32768/);
 });
 
 test("static prop sets rotate repeated scenery and require explicit collision intent", () => {
@@ -926,6 +986,10 @@ test("the documented Dota component assembly remains valid", async () => {
   assert.equal(specification.managedEntities?.filter((entity) => entity.classname === "npc_dota_fort").length, 2);
   assert.equal(specification.managedEntities?.filter((entity) => entity.classname === "npc_dota_tower").length, 5);
   assert.equal(specification.managedTerrain?.filter((operation) => operation.op === "ramp").length, 3);
-  assert.equal(specification.managedSolids?.length, 42);
+  assert.equal(specification.managedSolids?.length, 47);
   assert.equal(specification.managedNavSurfaces?.length, 33);
+  assert.equal(specification.managedSolids?.filter((solid) =>
+    solid.targetname.startsWith("radiant_curved_base_wall_visual_")).length, 5);
+  assert.equal(specification.managedVolumes?.filter((volume) =>
+    volume.targetname.startsWith("radiant_curved_base_wall_")).length, 5);
 });

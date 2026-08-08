@@ -107,15 +107,17 @@
       "name": "radiant_curved_base_wall",
       "points": [
         [-5120, -3072, 0],
-        [-4352, -2304, 0],
-        [-4096, -1024, 0],
-        [-4096, 1024, 0],
-        [-4352, 2304, 0],
+        [-4352, -2304, 64],
+        [-4096, -1024, 128],
+        [-4096, 1024, 128],
+        [-4352, 2304, 64],
         [-5120, 3072, 0]
       ],
       "thickness": 192,
       "height": 768,
-      "overlap": 48
+      "overlap": 48,
+      "material": "materials/dev/reflectivity_30.vmat",
+      "faceTextureAlignments": { "sides": "shared" }
     },
     {
       "kind": "staticPropSet",

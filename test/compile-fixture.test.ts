@@ -74,6 +74,10 @@ test("repository compile fixture is self-contained and structurally inspectable"
       "fixture_route_2",
       "fixture_sloped_concave_solid",
       "fixture_sloped_trigger",
+      "fixture_sloped_wall_1",
+      "fixture_sloped_wall_2",
+      "fixture_sloped_wall_visual_1",
+      "fixture_sloped_wall_visual_2",
     ],
   );
   const radiantTower = fixture.entities.find(
@@ -145,7 +149,7 @@ test("repository compile fixture is self-contained and structurally inspectable"
       ?.properties.IdleAnim,
     "banner_dire_idle",
   );
-  assert.equal(fixture.solids.length, 43);
+  assert.equal(fixture.solids.length, 45);
   const concave = fixture.solids.find((solid) => solid.targetname === "fixture_concave_solid");
   assert.equal(concave?.footprint.length, 6);
   assert.equal(concave?.height, 256);
@@ -240,7 +244,15 @@ test("repository compile fixture is self-contained and structurally inspectable"
   assert.ok(multiHoleTriangles.every((solid) => solid.footprint.length === 3 && solid.height === 64));
   assert.equal(fixture.solids.filter((solid) =>
     solid.targetname.startsWith("fixture_profile_arch_arch_segment_")).length, 4);
-  assert.equal(fixture.volumes.length, 2);
+  const wallSolid = fixture.solids.find((solid) => solid.targetname === "fixture_sloped_wall_visual_1");
+  assert.equal(wallSolid?.material, "materials/dev/reflectivity_30.vmat");
+  assert.deepEqual(wallSolid?.sloped, {
+    bottom: [-392, -120, -120, -392],
+    top: [120, 392, 392, 120],
+  });
+  assert.deepEqual(wallSolid?.faceMaterials, { top: "materials/dev/reflectivity_50.vmat" });
+  assert.deepEqual(wallSolid?.faceTextureAlignments, { sides: "shared" });
+  assert.equal(fixture.volumes.length, 4);
   const round = fixture.volumes.find((volume) => volume.targetname === "fixture_polygon_no_wards");
   assert.equal(round?.footprint.length, 12);
   assert.equal(round?.recipe, "noWards");
@@ -249,5 +261,11 @@ test("repository compile fixture is self-contained and structurally inspectable"
   assert.deepEqual(sloped?.sloped, {
     bottom: [-128, -128, 0, 0],
     top: [128, 128, 256, 256],
+  });
+  const wallClip = fixture.volumes.find((volume) => volume.targetname === "fixture_sloped_wall_1");
+  assert.equal(wallClip?.recipe, "playerClip");
+  assert.deepEqual(wallClip?.sloped, {
+    bottom: [-392, -120, -120, -392],
+    top: [120, 392, 392, 120],
   });
 });

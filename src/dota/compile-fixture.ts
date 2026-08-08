@@ -233,6 +233,17 @@ export function buildRepositoryCompileFixtureText(baseText: string): string {
             },
           },
           {
+            kind: "wall",
+            name: "sloped_wall",
+            points: [[-1024, 4096, 128], [0, 4096, 384], [1024, 4352, 256]],
+            thickness: 128,
+            height: 512,
+            overlap: 64,
+            material: "materials/dev/reflectivity_30.vmat",
+            faceMaterials: { top: "materials/dev/reflectivity_50.vmat" },
+            faceTextureAlignments: { sides: "shared" },
+          },
+          {
             kind: "bridge",
             name: "bridge",
             center: [-2048, -1024, 384],
@@ -322,6 +333,7 @@ export function buildRepositoryCompileFixtureText(baseText: string): string {
     ],
   });
   text = reconcileMapEntities(text, structures.managedEntities ?? []).text;
+  text = reconcileMapVolumes(text, structures.managedVolumes ?? []).text;
   text = reconcileMapSolids(text, [
     {
       targetname: "fixture_concave_solid",

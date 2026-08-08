@@ -354,8 +354,12 @@ at 32 sides the maximum radial overshoot is under 0.5%.
 `baseBlocker` uses Valve's team-aware base-gate entity. `fowBlocker` turns two or more points into uniquely named,
 explicitly linked `ent_fow_blocker_node` lines; broken links are reported by map inspection/validation and drawn in previews.
 The `wall` component turns an open or closed world-space outline into overlapping, checked convex `playerClip`
-segments. This supports practical curved and concave base silhouettes without relying on one fragile concave Source 2
-solid; decorative wall meshes and sloped wall runs remain separate visual work.
+segments. Consecutive points may use different base elevations; each sloped segment becomes a coplanar four-sided
+prism whose overlap follows the same grade. This supports practical curved, concave, and elevation-following base
+silhouettes without relying on one fragile concave Source 2 solid. Add one preflighted visible `material` to generate a
+matching always-solid graybox skin for every segment; the same optional top/bottom materials and bounded texture scale,
+shift, rotation, and shared-alignment controls used by other checked world structures are available. Omitting `material`
+retains the original blocker-only output exactly.
 `staticPropSet` places one checked `models/*.vmdl` resource at one to 256 named local offsets. The set rotates as one
 reusable assembly, while each prop can add its own yaw. A bounded uniform or XYZ scale (0.01 through 16) may be set for
 the assembly and overridden per placement; desired-state sync repairs scale drift. Collision is mandatory and explicit:
