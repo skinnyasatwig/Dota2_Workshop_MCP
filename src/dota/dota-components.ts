@@ -1,6 +1,12 @@
 import { z } from "zod";
 import { ManagedMapEntity } from "./map-contract.js";
-import { ManagedMapSolid } from "./map-solid.js";
+import {
+  ManagedMapSolid,
+  pointOnSegment,
+  segmentsTouchOrIntersect,
+  signedPolygonArea,
+  simplePolygonError,
+} from "./map-solid.js";
 import { ManagedMapNavSurface } from "./map-nav-surface.js";
 import { ManagedTerrainOperation } from "./map-terrain.js";
 import { ManagedMapVolume, regularPolygonFootprint } from "./map-volume.js";
@@ -264,6 +270,154 @@ const ringPlatformComponentSchema = z.object({
   }
 });
 
+interface OutlineValidationIssue {
+  path: (string | number)[];
+  message: string;
+}
+
+function pointStrictlyInsidePolygon(
+  point: [number, number],
+  polygon: readonly [number, number][],
+): boolean {
+  if (polygon.some((start, index) => pointOnSegment(point, start, polygon[(index + 1) % polygon.length]))) {
+    return false;
+  }
+  let inside = false;
+  for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index++) {
+    const [x, y] = polygon[index];
+    const [previousX, previousY] = polygon[previous];
+    if (
+      (y > point[1]) !== (previousY > point[1]) &&
+      point[0] < ((previousX - x) * (point[1] - y)) / (previousY - y) + x
+    ) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function validatePairedPlatformOutlines(
+  outer: [number, number][],
+  hole: [number, number][],
+): OutlineValidationIssue[] {
+  const issues: OutlineValidationIssue[] = [];
+  const outerError = simplePolygonError(outer);
+  const holeError = simplePolygonError(hole);
+  if (outerError) issues.push({ path: ["outer"], message: `outer outline ${outerError}` });
+  if (holeError) issues.push({ path: ["hole"], message: `hole outline ${holeError}` });
+  if (outer.length !== hole.length) {
+    issues.push({
+      path: ["hole"],
+      message: "must contain the same number of corresponding points as outer",
+    });
+  }
+  if (outerError || holeError || outer.length !== hole.length) return issues;
+  const outerArea = signedPolygonArea(outer);
+  const holeArea = signedPolygonArea(hole);
+  if (Math.sign(outerArea) !== Math.sign(holeArea)) {
+    issues.push({
+      path: ["hole"],
+      message: "must use the same clockwise or counter-clockwise point order as outer",
+    });
+    return issues;
+  }
+  for (let index = 0; index < hole.length; index++) {
+    if (!pointStrictlyInsidePolygon(hole[index], outer)) {
+      issues.push({
+        path: ["hole", index],
+        message: "must stay strictly inside the outer outline",
+      });
+    }
+  }
+  for (let outerIndex = 0; outerIndex < outer.length; outerIndex++) {
+    const outerNext = (outerIndex + 1) % outer.length;
+    for (let holeIndex = 0; holeIndex < hole.length; holeIndex++) {
+      const holeNext = (holeIndex + 1) % hole.length;
+      if (segmentsTouchOrIntersect(
+        outer[outerIndex], outer[outerNext], hole[holeIndex], hole[holeNext],
+      )) {
+        issues.push({ path: ["hole"], message: "must not touch or cross the outer outline" });
+        return issues;
+      }
+    }
+  }
+  const spokes = outer.map((point, index) => [point, hole[index]] as const);
+  for (let index = 0; index < spokes.length; index++) {
+    const [from, to] = spokes[index];
+    const midpoint: [number, number] = [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2];
+    if (!pointStrictlyInsidePolygon(midpoint, outer) || pointStrictlyInsidePolygon(midpoint, hole)) {
+      issues.push({
+        path: ["hole", index],
+        message: "must form a platform segment that stays between the outer and hole outlines",
+      });
+      return issues;
+    }
+    for (let edge = 0; edge < outer.length; edge++) {
+      const next = (edge + 1) % outer.length;
+      if (edge !== index && next !== index && segmentsTouchOrIntersect(from, to, outer[edge], outer[next])) {
+        issues.push({ path: ["hole", index], message: "corresponding spoke crosses the outer outline" });
+        return issues;
+      }
+      if (edge !== index && next !== index && segmentsTouchOrIntersect(from, to, hole[edge], hole[next])) {
+        issues.push({ path: ["hole", index], message: "corresponding spoke crosses the hole outline" });
+        return issues;
+      }
+    }
+    for (let other = index + 1; other < spokes.length; other++) {
+      if (segmentsTouchOrIntersect(from, to, spokes[other][0], spokes[other][1])) {
+        issues.push({ path: ["hole", other], message: "corresponding platform spokes must not cross" });
+        return issues;
+      }
+    }
+  }
+  const reverse = outerArea < 0;
+  const normalizedOuter = reverse ? [...outer].reverse() : outer;
+  const normalizedHole = reverse ? [...hole].reverse() : hole;
+  let segmentArea = 0;
+  for (let index = 0; index < normalizedOuter.length; index++) {
+    const next = (index + 1) % normalizedOuter.length;
+    const segment: [number, number][] = [
+      normalizedOuter[index], normalizedOuter[next], normalizedHole[next], normalizedHole[index],
+    ];
+    const segmentError = simplePolygonError(segment);
+    const area = signedPolygonArea(segment);
+    if (segmentError || area <= 1) {
+      issues.push({
+        path: ["hole", index],
+        message: `corresponding points do not form a safe platform segment${segmentError ? `: ${segmentError}` : ""}`,
+      });
+      return issues;
+    }
+    segmentArea += area;
+  }
+  const expectedArea = Math.abs(outerArea) - Math.abs(holeArea);
+  const areaTolerance = Math.max(1e-5, expectedArea * 1e-8);
+  if (expectedArea <= 1 || Math.abs(segmentArea - expectedArea) > areaTolerance) {
+    issues.push({
+      path: ["hole"],
+      message: "corresponding outlines must partition the platform without gaps or overlaps",
+    });
+  }
+  return issues;
+}
+
+const holedPlatformComponentSchema = z.object({
+  kind: z.literal("holedPlatform"),
+  name: nameSchema,
+  /** World-space center of the complete platform prism. Outlines are local XY coordinates. */
+  center: point3,
+  yaw: yawSchema,
+  /** Paired simple outlines. Matching indexes define the checked segment seams. */
+  outer: z.array(point2).min(3).max(64),
+  hole: z.array(point2).min(3).max(64),
+  height: z.number().finite().min(1).max(4096),
+  material: visibleMaterialSchema,
+}).strict().superRefine((platform, context) => {
+  for (const issue of validatePairedPlatformOutlines(platform.outer, platform.hole)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: issue.path, message: issue.message });
+  }
+});
+
 const bossPitComponentSchema = z.object({
   kind: z.literal("bossPit"),
   name: nameSchema,
@@ -359,6 +513,7 @@ export const dotaComponentInputSchema = z.union([
   bridgeComponentSchema,
   bridgeApproachComponentSchema,
   ringPlatformComponentSchema,
+  holedPlatformComponentSchema,
   bossPitComponentSchema,
   baseComponentSchema,
 ]);
@@ -408,6 +563,11 @@ export const WORLD_STRUCTURE_RECIPES = {
     parts: ["segment_*_deck", "segment_*_walkable"],
     purpose: "Regular ring platform with a real central opening, composed from checked convex deck/navigation pairs.",
     source: "MCP composition of compiler-proven managedSolids and real-GridNav-proven Valve navigation surfaces",
+  },
+  holedPlatform: {
+    parts: ["segment_*_deck", "segment_*_walkable"],
+    purpose: "Irregular platform with a real paired-outline opening, composed from checked deck/navigation segments.",
+    source: "MCP topology-validated composition of compiler-proven managedSolids and Valve navigation surfaces",
   },
 } as const;
 
@@ -758,22 +918,30 @@ function bridgeApproachParts(component: z.infer<typeof bridgeApproachComponentSc
   };
 }
 
-function ringPlatformParts(component: z.infer<typeof ringPlatformComponentSchema>): {
+function pairedOutlinePlatformParts(component: {
+  name: string;
+  center: Point3;
+  yaw?: number;
+  outer: [number, number][];
+  hole: [number, number][];
+  height: number;
+  material: string;
+}): {
   solids: ManagedMapSolid[];
   navSurfaces: ManagedMapNavSurface[];
 } {
-  const sides = component.sides ?? 16;
   const normalizeFootprint = (points: [number, number][]) =>
     points.map(([x, y]) => [normalizedNumber(x), normalizedNumber(y)] as [number, number]);
-  const outer = normalizeFootprint(regularPolygonFootprint(component.outerRadius, sides));
-  const inner = normalizeFootprint(regularPolygonFootprint(component.innerRadius, sides));
+  const reverse = signedPolygonArea(component.outer) < 0;
+  const outer = normalizeFootprint(reverse ? [...component.outer].reverse() : component.outer);
+  const hole = normalizeFootprint(reverse ? [...component.hole].reverse() : component.hole);
   const solids: ManagedMapSolid[] = [];
   const navSurfaces: ManagedMapNavSurface[] = [];
-  for (let index = 0; index < sides; index++) {
-    const next = (index + 1) % sides;
+  for (let index = 0; index < outer.length; index++) {
+    const next = (index + 1) % outer.length;
     const segment = String(index + 1).padStart(2, "0");
     const extrusion = {
-      points: [outer[index], outer[next], inner[next], inner[index]] as [number, number][],
+      points: [outer[index], outer[next], hole[next], hole[index]] as [number, number][],
       height: component.height,
     };
     solids.push({
@@ -791,6 +959,29 @@ function ringPlatformParts(component: z.infer<typeof ringPlatformComponentSchema
     });
   }
   return { solids, navSurfaces };
+}
+
+function ringPlatformParts(component: z.infer<typeof ringPlatformComponentSchema>): {
+  solids: ManagedMapSolid[];
+  navSurfaces: ManagedMapNavSurface[];
+} {
+  const sides = component.sides ?? 16;
+  return pairedOutlinePlatformParts({
+    name: component.name,
+    center: component.center,
+    yaw: component.yaw,
+    outer: regularPolygonFootprint(component.outerRadius, sides),
+    hole: regularPolygonFootprint(component.innerRadius, sides),
+    height: component.height,
+    material: component.material,
+  });
+}
+
+function holedPlatformParts(component: z.infer<typeof holedPlatformComponentSchema>): {
+  solids: ManagedMapSolid[];
+  navSurfaces: ManagedMapNavSurface[];
+} {
+  return pairedOutlinePlatformParts(component);
 }
 
 function pitOperations(component: z.infer<typeof bossPitComponentSchema>): ExpandedDotaComponents {
@@ -1025,6 +1216,12 @@ export function expandDotaComponents(components: DotaComponentInput[]): Expanded
       }
       case "ringPlatform": {
         const platform = ringPlatformParts(component);
+        managedSolids.push(...platform.solids);
+        managedNavSurfaces.push(...platform.navSurfaces);
+        break;
+      }
+      case "holedPlatform": {
+        const platform = holedPlatformParts(component);
         managedSolids.push(...platform.solids);
         managedNavSurfaces.push(...platform.navSurfaces);
         break;

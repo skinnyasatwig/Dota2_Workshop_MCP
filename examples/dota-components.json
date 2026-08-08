@@ -167,6 +167,16 @@
       "height": 64,
       "sides": 8,
       "material": "materials/dev/reflectivity_30.vmat"
+    },
+    {
+      "kind": "holedPlatform",
+      "name": "irregular_side_overlook",
+      "center": [3072, 0, 352],
+      "yaw": 12,
+      "outer": [[-600, -400], [400, -500], [700, 0], [350, 550], [-550, 450]],
+      "hole": [[-250, -150], [180, -220], [300, 20], [140, 240], [-220, 180]],
+      "height": 64,
+      "material": "materials/dev/reflectivity_30.vmat"
     }
   ]
 }

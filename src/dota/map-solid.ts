@@ -20,7 +20,7 @@ const material = z.string()
   .refine((value) => !value.toLowerCase().startsWith("materials/tools/"),
     "must be a visible world material; use managedVolumes for tools materials");
 
-function signedPolygonArea(points: readonly [number, number][]): number {
+export function signedPolygonArea(points: readonly [number, number][]): number {
   return points.reduce((area, [x, y], index) => {
     const [nextX, nextY] = points[(index + 1) % points.length];
     return area + x * nextY - nextX * y;
@@ -35,7 +35,7 @@ function close(a: number, b: number): boolean {
   return Math.abs(a - b) <= 1e-8;
 }
 
-function pointOnSegment(
+export function pointOnSegment(
   point: [number, number],
   start: [number, number],
   end: [number, number],
@@ -47,7 +47,7 @@ function pointOnSegment(
     point[1] <= Math.max(start[1], end[1]) + 1e-8;
 }
 
-function segmentsTouchOrIntersect(
+export function segmentsTouchOrIntersect(
   a: [number, number],
   b: [number, number],
   c: [number, number],
@@ -64,7 +64,7 @@ function segmentsTouchOrIntersect(
     (Math.abs(cdB) <= 1e-8 && pointOnSegment(b, c, d));
 }
 
-function simplePolygonError(points: readonly [number, number][]): string | undefined {
+export function simplePolygonError(points: readonly [number, number][]): string | undefined {
   if (points.length < 3) return "must contain at least three points";
   if (points.some(([x, y]) => Math.abs(x) > 16384 || Math.abs(y) > 16384)) {
     return "coordinates must stay within +/-16384 local world units";

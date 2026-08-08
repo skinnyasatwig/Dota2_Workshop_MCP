@@ -322,7 +322,7 @@ chain. Missing children, duplicate local placement names, cycles, and nesting de
 
 For common gameplay structure, `dotaComponents` provides strongly checked `base`, `ancient`, `tower`, `fountain`,
 `shop`, `camp`, `bossPit`, `playerStart`, `gate`, `baseBlocker`, `fowBlocker`, `wall`, `arch`, `bridge`,
-`bridgeApproach`, and `ringPlatform` entries. It derives team numbers, official entity classes,
+`bridgeApproach`, `ringPlatform`, and `holedPlatform` entries. It derives team numbers, official entity classes,
 stock unit/model names, tower tier names, shop/camp numeric values, base member transforms, and boss-pit terrain.
 See [`examples/dota-components.json`](examples/dota-components.json). A `camp` can include an optional checked
 rectangular `volume`, which creates the real `trigger_multiple` bounds referenced by its spawner. A boss pit's
@@ -350,9 +350,14 @@ GridNav is still X/Y-only: two probes at the same X/Y but different heights alia
 does not claim independent stacked bridge and underpass routes at the same coordinates.
 `ringPlatform` creates a regular three- to 32-sided walkable ring from checked convex deck/navigation pairs. Its
 outer and inner values are explicit vertex radii; the center, yaw, height, segment count, and visible material are
-validated. The composition leaves a real central opening without allowing arbitrary mesh-with-holes input. Valve's
+validated. The composition leaves a real central opening without allowing raw mesh input. Valve's
 compiler accepted the complete visible eight-segment ring. In a separate terrain-free engine fixture, Dota connected
 an arc across four wedge seams while both the center hole and the surrounding void remained non-traversable.
+`holedPlatform` generalizes that composition to matching irregular outer and hole outlines. Corresponding point pairs
+define the checked seams; both outlines must have the same point count and winding. The validator proves each outline
+is simple, keeps the hole strictly inside, rejects crossing boundaries or spokes, and verifies that the generated
+segments partition the platform without gaps or overlaps. It then emits only ordinary checked solid/navigation pairs,
+not a user-authored triangle mesh. Valve's converter and ResourceCompiler accept the irregular five-segment fixture.
 These recipes can also live inside a named specification `component`. One local objective kit can therefore combine,
 for example, a camp, boss pit, fog blockers, bridge approach, and ring platform, then be placed or mirrored repeatedly
 with separate world/tile offsets. The MCP expands the recipes first and applies one namespacing/transform pass to all
@@ -550,8 +555,8 @@ closes every side, and then proves every
 half-edge has exactly one opposite before writing the VMAP. Solids reconcile by targetname, mirror inside reusable
 components, appear in `map_preview` with an uphill arrow when sloped, and block their true concave footprint in offline
 reachability when their vertical range intersects the standing corridor. The repository fixture round-trips flat and
-sloped L-shaped solids, a checked three-piece arch, a visible bridge deck, a complete sloped bridge approach, and an
-eight-segment ring platform,
+sloped L-shaped solids, a checked three-piece arch, a visible bridge deck, a complete sloped bridge approach, an
+eight-segment ring platform, and a five-segment irregular holed platform,
 each paired where appropriate with Valve navigation geometry,
 through Valve's converter and compiles them into a real VPK. The general map material preflight proves the selected visible material exists before a build,
 sync, or compile is allowed to spend work on it.
@@ -587,8 +592,9 @@ Then launch it: `addon_launch_custom_game map="<name>"`.
 
 > Limitation: the MCP can safely generate checked flat or per-corner-sloped extrusions with convex or concave outlines,
 > flat/sloped convex gameplay volumes, a rectangular arch assembled from three checked solids, and checked bridge
-> decks/approaches and regular ring platforms paired with Valve navigation-walkable geometry. Freeform 3D meshes,
-> arbitrary single-mesh holes, curved or irregular arches, curves, terrain props, and decorative cliff brushwork still require Hammer or
+> decks/approaches, regular ring platforms, and matching-outline irregular holed platforms paired with Valve
+> navigation-walkable geometry. Freeform 3D meshes, unmatched or multiple hole boundaries, curved or irregular
+> arches, curves, terrain props, and decorative cliff brushwork still require Hammer or
 > a future checked recipe. Because Valve GridNav aliases height at a shared X/Y location, independent stacked bridge
 > and underpass navigation is not represented by this API.
 

@@ -283,6 +283,39 @@ test("the checked ring platform preserves its central opening offline", () => {
   assert.equal(report.cells.find((cell) => cell.x === 8 && cell.y === 3)?.blockingVolume, undefined);
 });
 
+test("the checked irregular holed platform preserves its opening offline", () => {
+  const expanded = expandDotaComponents([{
+    kind: "holedPlatform",
+    name: "test_irregular_platform",
+    center: [1152, 896, 128],
+    outer: [[-700, -450], [450, -550], [760, 0], [400, 600], [-650, 500]],
+    hole: [[-300, -180], [220, -260], [340, 20], [170, 280], [-260, 220]],
+    height: 256,
+    material: "materials/dev/reflectivity_30.vmat",
+  }]);
+  const blockers: ParsedMapSolid[] = expanded.managedSolids.map((solid) => ({
+    targetname: solid.targetname,
+    center: solid.center,
+    yaw: solid.yaw ?? 0,
+    material: solid.material,
+    footprint: solid.extrusion.points,
+    height: solid.extrusion.height,
+    blocking: true,
+  }));
+  const report = analyzeTileGridReachability(
+    flatGrid(9, 7),
+    [entity("center_probe", "info_target", 1152, 896)],
+    { blockingVolumes: blockers },
+  );
+
+  assert.equal(report.cells.find((cell) => cell.x === 4 && cell.y === 3)?.blockingVolume, undefined);
+  assert.match(
+    report.cells.find((cell) => cell.x === 6 && cell.y === 3)?.blockingVolume ?? "",
+    /^test_irregular_platform_segment_\d+_deck$/,
+  );
+  assert.equal(report.cells.find((cell) => cell.x === 8 && cell.y === 3)?.blockingVolume, undefined);
+});
+
 test("creep routes warn when they cross explicit Valve obstruction classes", () => {
   const report = analyzeTileGridReachability(flatGrid(), [
     entity("path_test_1", "path_corner", 128, 384, "path_test_2"),

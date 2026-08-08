@@ -228,10 +228,19 @@ Last updated: 2026-08-07
     or field differences, with four recorded yaw roundoff values below 0.0000005 degrees. No VMAP, Hammer, or Dota was
     opened for that proof.
 
+48. This milestone - added `holedPlatform`, a checked irregular platform recipe with a real central opening. The user
+    supplies simple local outer and hole outlines with matching point counts and winding; corresponding indexes define
+    seams rather than exposing triangles. Validation keeps every hole point strictly inside, rejects boundary/spoke
+    intersections, proves each segment is a safe simple polygon, and verifies a gap-free, overlap-free area partition.
+    The recipe emits paired visible `func_brush` and Valve navigation-walkable segments through the established checked
+    writers, so mirroring, namespacing, drift repair, preview, material preflight, and offline collision work without a
+    new raw VMAP path. Unit tests cover invalid topology and the preserved opening. The repository fixture round-tripped
+    and compiled an irregular five-segment platform successfully without launching Dota or Hammer.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 299 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 301 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 203 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
@@ -241,8 +250,8 @@ Last updated: 2026-08-07
   sloped trigger volumes from text to binary VMAP and back during the integration suite, preserving exact corner heights.
 - `npm run test:compiler-fixture` successfully round-tripped and compiled the repository-owned acceptance payload,
   including its sloped trigger, flat and sloped concave L-shaped world solids, checked rectangular arch, checked bridge
-  deck/navigation twin, complete visible sloped bridge approach/navigation twin, eight-segment ring platform, and
-  explicit navigation obstruction,
+  deck/navigation twin, complete visible sloped bridge approach/navigation twin, eight-segment ring platform,
+  five-segment irregular holed platform, and explicit navigation obstruction,
   into a real VPK. The generated map uses Valve's installed blank template only as required hidden
   infrastructure, depends on no private 3v3 file, stores no copied Valve VMAP, and leaves no temporary addon trees.
   Its checked structures now originate inside one reusable component placement, proving the recipe path through

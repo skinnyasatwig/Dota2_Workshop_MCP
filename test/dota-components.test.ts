@@ -344,6 +344,65 @@ test("checked ring platforms compose a real central opening from deck/navigation
   );
 });
 
+test("checked holed platforms compose paired irregular outlines without raw mesh input", () => {
+  const outer: [number, number][] = [
+    [-600, -400], [400, -500], [700, 0], [350, 550], [-550, 450],
+  ];
+  const hole: [number, number][] = [
+    [-250, -150], [180, -220], [300, 20], [140, 240], [-220, 180],
+  ];
+  const [platform] = componentList.parse([{
+    kind: "holedPlatform",
+    name: "irregular_overlook",
+    center: [2048, 1024, 384],
+    yaw: 12,
+    outer,
+    hole,
+    height: 64,
+    material: "materials/dev/reflectivity_30.vmat",
+  }]);
+  const expanded = expandDotaComponents([platform]);
+
+  assert.equal(expanded.managedSolids.length, 5);
+  assert.equal(expanded.managedNavSurfaces.length, 5);
+  assert.deepEqual(expanded.managedSolids[0], {
+    targetname: "irregular_overlook_segment_01_deck",
+    center: [2048, 1024, 384],
+    yaw: 12,
+    material: "materials/dev/reflectivity_30.vmat",
+    extrusion: {
+      points: [outer[0], outer[1], hole[1], hole[0]],
+      height: 64,
+    },
+  });
+  assert.deepEqual(
+    expanded.managedNavSurfaces.map((surface) => surface.extrusion),
+    expanded.managedSolids.map((solid) => solid.extrusion),
+  );
+  assert.throws(
+    () => componentList.parse([{ ...platform, hole: hole.slice(0, 4) }]),
+    /same number of corresponding points/,
+  );
+  assert.throws(
+    () => componentList.parse([{
+      ...platform,
+      hole: hole.map(([x, y]) => [x + 1000, y] as [number, number]),
+    }]),
+    /strictly inside the outer outline/,
+  );
+  assert.throws(
+    () => componentList.parse([{ ...platform, hole: [...hole].reverse() }]),
+    /same clockwise or counter-clockwise point order/,
+  );
+  assert.throws(
+    () => componentList.parse([{
+      ...platform,
+      hole: hole.map((_point, index) => hole[(index + 2) % hole.length]),
+    }]),
+    /spoke crosses|must form a platform segment/,
+  );
+});
+
 test("boss pit components create structured terrain, entrances, and an official spawn", () => {
   const [pit] = componentList.parse([
     {
@@ -425,6 +484,6 @@ test("the documented Dota component assembly remains valid", async () => {
   assert.equal(specification.managedEntities?.filter((entity) => entity.classname === "npc_dota_fort").length, 2);
   assert.equal(specification.managedEntities?.filter((entity) => entity.classname === "npc_dota_tower").length, 5);
   assert.equal(specification.managedTerrain?.filter((operation) => operation.op === "ramp").length, 3);
-  assert.equal(specification.managedSolids?.length, 14);
-  assert.equal(specification.managedNavSurfaces?.length, 11);
+  assert.equal(specification.managedSolids?.length, 19);
+  assert.equal(specification.managedNavSurfaces?.length, 16);
 });

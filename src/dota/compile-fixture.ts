@@ -124,6 +124,16 @@ export function buildRepositoryCompileFixtureText(baseText: string): string {
             sides: 8,
             material: "materials/dev/reflectivity_30.vmat",
           },
+          {
+            kind: "holedPlatform",
+            name: "irregular_platform",
+            center: [3072, -1536, 384],
+            yaw: 12,
+            outer: [[-600, -400], [400, -500], [700, 0], [350, 550], [-550, 450]],
+            hole: [[-250, -150], [180, -220], [300, 20], [140, 240], [-220, 180]],
+            height: 64,
+            material: "materials/dev/reflectivity_30.vmat",
+          },
         ],
       },
       team_pair: {

@@ -33,6 +33,11 @@ test("repository compile fixture is self-contained and structurally inspectable"
       "fixture_dire_start",
       "fixture_dire_team_core_start",
       "fixture_dire_team_core_tower",
+      "fixture_irregular_platform_segment_01_deck",
+      "fixture_irregular_platform_segment_02_deck",
+      "fixture_irregular_platform_segment_03_deck",
+      "fixture_irregular_platform_segment_04_deck",
+      "fixture_irregular_platform_segment_05_deck",
       "fixture_nav_obstruction",
       "fixture_polygon_no_wards",
       "fixture_radiant_start",
@@ -73,7 +78,7 @@ test("repository compile fixture is self-contained and structurally inspectable"
     fixture.entities.find((entity) => entity.targetname === "fixture_dire_team_core_start")?.classname,
     "info_player_start_badguys",
   );
-  assert.equal(fixture.solids.length, 15);
+  assert.equal(fixture.solids.length, 20);
   const concave = fixture.solids.find((solid) => solid.targetname === "fixture_concave_solid");
   assert.equal(concave?.footprint.length, 6);
   assert.equal(concave?.height, 256);
@@ -100,6 +105,11 @@ test("repository compile fixture is self-contained and structurally inspectable"
   assert.deepEqual(fixture.navSurfaces.map((surface) => surface.targetname).sort(), [
     "fixture_bridge_approach_walkable",
     "fixture_bridge_walkable",
+    "fixture_irregular_platform_segment_01_walkable",
+    "fixture_irregular_platform_segment_02_walkable",
+    "fixture_irregular_platform_segment_03_walkable",
+    "fixture_irregular_platform_segment_04_walkable",
+    "fixture_irregular_platform_segment_05_walkable",
     "fixture_ring_platform_segment_01_walkable",
     "fixture_ring_platform_segment_02_walkable",
     "fixture_ring_platform_segment_03_walkable",
@@ -116,6 +126,10 @@ test("repository compile fixture is self-contained and structurally inspectable"
     solid.targetname.startsWith("fixture_ring_platform_segment_"));
   assert.equal(ringSegments.length, 8);
   assert.ok(ringSegments.every((solid) => solid.footprint.length === 4 && solid.height === 64));
+  const irregularSegments = fixture.solids.filter((solid) =>
+    solid.targetname.startsWith("fixture_irregular_platform_segment_"));
+  assert.equal(irregularSegments.length, 5);
+  assert.ok(irregularSegments.every((solid) => solid.footprint.length === 4 && solid.height === 64));
   assert.equal(fixture.volumes.length, 2);
   const round = fixture.volumes.find((volume) => volume.targetname === "fixture_polygon_no_wards");
   assert.equal(round?.footprint.length, 12);
