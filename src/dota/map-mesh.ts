@@ -241,6 +241,8 @@ export interface MapMeshNodeOptions {
   faceTextureScales?: readonly (readonly [number, number])[];
   /** One U/V projection shift for every face. Defaults to the generated axis offsets. */
   faceTextureShifts?: readonly (readonly [number, number])[];
+  /** One right-hand rotation in degrees around each outward face normal. */
+  faceTextureRotations?: readonly number[];
   physicsType?: "default" | "none";
 }
 
@@ -256,6 +258,57 @@ function axisWithShift(axis: string, shift: number): string {
   }
   values[3] = shift;
   return vectorText(values);
+}
+
+function numericTextureAxis(axis: string): [number, number, number, number] {
+  const values = axis.trim().split(/\s+/).map(Number);
+  if (values.length !== 4 || values.some((value) => !Number.isFinite(value))) {
+    throw new Error("Generated texture axes must contain four finite values.");
+  }
+  return values as [number, number, number, number];
+}
+
+/** Rotate generated face-local projection axes while retaining their U/V shifts. */
+export function mapTextureAxesWithRotations(
+  mesh: Pick<MapMeshData, "textureAxisU" | "textureAxisV">,
+  faceTextureRotations?: readonly number[],
+): MapTextureAxes {
+  if (mesh.textureAxisU.length !== mesh.textureAxisV.length) {
+    throw new Error("Generated texture axis streams must have the same face count.");
+  }
+  if (faceTextureRotations === undefined) {
+    return { textureAxisU: [...mesh.textureAxisU], textureAxisV: [...mesh.textureAxisV] };
+  }
+  if (
+    faceTextureRotations.length !== mesh.textureAxisU.length ||
+    faceTextureRotations.some((degrees) => !Number.isFinite(degrees) || degrees < -180 || degrees > 180)
+  ) {
+    throw new Error(
+      "faceTextureRotations must contain one finite degree value from -180 through 180 for every mesh face.",
+    );
+  }
+  const textureAxisU: string[] = [];
+  const textureAxisV: string[] = [];
+  for (let face = 0; face < mesh.textureAxisU.length; face++) {
+    const u = numericTextureAxis(mesh.textureAxisU[face]);
+    const v = numericTextureAxis(mesh.textureAxisV[face]);
+    const radians = faceTextureRotations[face] * Math.PI / 180;
+    const cosine = Math.cos(radians);
+    const sine = Math.sin(radians);
+    textureAxisU.push(vectorText([
+      u[0] * cosine - v[0] * sine,
+      u[1] * cosine - v[1] * sine,
+      u[2] * cosine - v[2] * sine,
+      u[3],
+    ]));
+    textureAxisV.push(vectorText([
+      v[0] * cosine + u[0] * sine,
+      v[1] * cosine + u[1] * sine,
+      v[2] * cosine + u[2] * sine,
+      v[3],
+    ]));
+  }
+  return { textureAxisU, textureAxisV };
 }
 
 /** Apply checked per-face U/V shifts without exposing or replacing the generated projection directions. */
@@ -330,7 +383,8 @@ export function buildMapMeshNode(mesh: MapMeshData, options: MapMeshNodeOptions)
       "faceTextureScales must contain one finite, non-zero U/V pair within +/-4096 for every mesh face.",
     );
   }
-  const textureAxes = mapTextureAxesWithShifts(mesh, options.faceTextureShifts);
+  const rotatedTextureAxes = mapTextureAxesWithRotations(mesh, options.faceTextureRotations);
+  const textureAxes = mapTextureAxesWithShifts(rotatedTextureAxes, options.faceTextureShifts);
   const edgeData = dataArray(edgeCount, [dataStream("flags", "flags", "int", Array(edgeCount).fill(0), 3)]);
   const faceData = dataArray(faceCount, [
     dataStream("textureScale", "textureScale", "vector2", faceTextureScales.map(vectorText), 0),

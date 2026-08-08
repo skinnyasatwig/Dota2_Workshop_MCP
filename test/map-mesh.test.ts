@@ -54,6 +54,7 @@ test("mesh serialization requires checked texture projection settings per face",
     material: "materials/dev/reflectivity_30.vmat",
     faceTextureScales: [[0.25, 0.5], [1, 1], [-1, 2], [4, 4]],
     faceTextureShifts: [[0, 64], [-128, 256], [16, -16], [32, 32]],
+    faceTextureRotations: [0, 45, -90, 180],
   });
   assert.match(block, /"0\.25 0\.5"/);
   assert.match(block, /"-1 2"/);
@@ -76,5 +77,14 @@ test("mesh serialization requires checked texture projection settings per face",
       faceTextureShifts: [[0, 0]],
     }),
     /one finite U\/V pair/,
+  );
+  assert.throws(
+    () => buildMapMeshNode(mesh, {
+      nodeId: 2,
+      origin: [0, 0, 0],
+      material: "materials/dev/reflectivity_30.vmat",
+      faceTextureRotations: [181, 0, 0, 0],
+    }),
+    /from -180 through 180/,
   );
 });

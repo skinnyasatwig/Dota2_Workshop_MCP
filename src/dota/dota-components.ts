@@ -7,6 +7,8 @@ import {
   ManagedMapSolidFaceTextureScales,
   managedMapSolidFaceTextureShiftsInputSchema,
   ManagedMapSolidFaceTextureShifts,
+  managedMapSolidFaceTextureRotationsInputSchema,
+  ManagedMapSolidFaceTextureRotations,
   pointOnSegment,
   segmentsTouchOrIntersect,
   signedPolygonArea,
@@ -195,6 +197,7 @@ const archComponentSchema = z.object({
   faceMaterials: managedMapSolidFaceMaterialsInputSchema.optional(),
   faceTextureScales: managedMapSolidFaceTextureScalesInputSchema.optional(),
   faceTextureShifts: managedMapSolidFaceTextureShiftsInputSchema.optional(),
+  faceTextureRotations: managedMapSolidFaceTextureRotationsInputSchema.optional(),
 }).strict().superRefine((arch, context) => {
   if (arch.openingWidth >= arch.width) {
     context.addIssue({
@@ -241,6 +244,7 @@ const profileArchComponentSchema = z.object({
   faceMaterials: managedMapSolidFaceMaterialsInputSchema.optional(),
   faceTextureScales: managedMapSolidFaceTextureScalesInputSchema.optional(),
   faceTextureShifts: managedMapSolidFaceTextureShiftsInputSchema.optional(),
+  faceTextureRotations: managedMapSolidFaceTextureRotationsInputSchema.optional(),
 }).strict().superRefine((arch, context) => {
   const left = -arch.width / 2;
   const right = arch.width / 2;
@@ -282,6 +286,7 @@ const bridgeComponentSchema = z.object({
   faceMaterials: managedMapSolidFaceMaterialsInputSchema.optional(),
   faceTextureScales: managedMapSolidFaceTextureScalesInputSchema.optional(),
   faceTextureShifts: managedMapSolidFaceTextureShiftsInputSchema.optional(),
+  faceTextureRotations: managedMapSolidFaceTextureRotationsInputSchema.optional(),
 }).strict();
 
 const bridgeApproachComponentSchema = z.object({
@@ -296,6 +301,7 @@ const bridgeApproachComponentSchema = z.object({
   faceMaterials: managedMapSolidFaceMaterialsInputSchema.optional(),
   faceTextureScales: managedMapSolidFaceTextureScalesInputSchema.optional(),
   faceTextureShifts: managedMapSolidFaceTextureShiftsInputSchema.optional(),
+  faceTextureRotations: managedMapSolidFaceTextureRotationsInputSchema.optional(),
 }).strict().superRefine((approach, context) => {
   if (Math.hypot(approach.end[0] - approach.start[0], approach.end[1] - approach.start[1]) < 2) {
     context.addIssue({
@@ -321,6 +327,7 @@ const ringPlatformComponentSchema = z.object({
   faceMaterials: managedMapSolidFaceMaterialsInputSchema.optional(),
   faceTextureScales: managedMapSolidFaceTextureScalesInputSchema.optional(),
   faceTextureShifts: managedMapSolidFaceTextureShiftsInputSchema.optional(),
+  faceTextureRotations: managedMapSolidFaceTextureRotationsInputSchema.optional(),
 }).strict().superRefine((platform, context) => {
   if (platform.outerRadius - platform.innerRadius < 2) {
     context.addIssue({
@@ -537,6 +544,7 @@ const holedPlatformComponentSchema = z.object({
   faceMaterials: managedMapSolidFaceMaterialsInputSchema.optional(),
   faceTextureScales: managedMapSolidFaceTextureScalesInputSchema.optional(),
   faceTextureShifts: managedMapSolidFaceTextureShiftsInputSchema.optional(),
+  faceTextureRotations: managedMapSolidFaceTextureRotationsInputSchema.optional(),
 }).strict().superRefine((platform, context) => {
   for (const issue of validatePairedPlatformOutlines(platform.outer, platform.hole)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: issue.path, message: issue.message });
@@ -556,6 +564,7 @@ const multiHoledPlatformComponentSchema = z.object({
   faceMaterials: managedMapSolidFaceMaterialsInputSchema.optional(),
   faceTextureScales: managedMapSolidFaceTextureScalesInputSchema.optional(),
   faceTextureShifts: managedMapSolidFaceTextureShiftsInputSchema.optional(),
+  faceTextureRotations: managedMapSolidFaceTextureRotationsInputSchema.optional(),
 }).strict().superRefine((platform, context) => {
   try {
     partitionPolygonWithHoles(platform.outer, platform.holes);
@@ -988,6 +997,7 @@ function archSolids(component: z.infer<typeof archComponentSchema>): ManagedMapS
       ...(component.faceMaterials ? { faceMaterials: component.faceMaterials } : {}),
       ...(component.faceTextureScales ? { faceTextureScales: component.faceTextureScales } : {}),
       ...(component.faceTextureShifts ? { faceTextureShifts: component.faceTextureShifts } : {}),
+      ...(component.faceTextureRotations ? { faceTextureRotations: component.faceTextureRotations } : {}),
       extrusion: { points: rectangle(postWidth), height: component.openingHeight },
     },
     {
@@ -998,6 +1008,7 @@ function archSolids(component: z.infer<typeof archComponentSchema>): ManagedMapS
       ...(component.faceMaterials ? { faceMaterials: component.faceMaterials } : {}),
       ...(component.faceTextureScales ? { faceTextureScales: component.faceTextureScales } : {}),
       ...(component.faceTextureShifts ? { faceTextureShifts: component.faceTextureShifts } : {}),
+      ...(component.faceTextureRotations ? { faceTextureRotations: component.faceTextureRotations } : {}),
       extrusion: { points: rectangle(postWidth), height: component.openingHeight },
     },
     {
@@ -1008,6 +1019,7 @@ function archSolids(component: z.infer<typeof archComponentSchema>): ManagedMapS
       ...(component.faceMaterials ? { faceMaterials: component.faceMaterials } : {}),
       ...(component.faceTextureScales ? { faceTextureScales: component.faceTextureScales } : {}),
       ...(component.faceTextureShifts ? { faceTextureShifts: component.faceTextureShifts } : {}),
+      ...(component.faceTextureRotations ? { faceTextureRotations: component.faceTextureRotations } : {}),
       extrusion: { points: rectangle(component.width), height: lintelHeight },
     },
   ];
@@ -1039,6 +1051,7 @@ function profileArchSolids(component: z.infer<typeof profileArchComponentSchema>
       ...(component.faceMaterials ? { faceMaterials: component.faceMaterials } : {}),
       ...(component.faceTextureScales ? { faceTextureScales: component.faceTextureScales } : {}),
       ...(component.faceTextureShifts ? { faceTextureShifts: component.faceTextureShifts } : {}),
+      ...(component.faceTextureRotations ? { faceTextureRotations: component.faceTextureRotations } : {}),
       extrusion: { points: rectangle(leftWidth), height: component.height },
     },
     {
@@ -1049,6 +1062,7 @@ function profileArchSolids(component: z.infer<typeof profileArchComponentSchema>
       ...(component.faceMaterials ? { faceMaterials: component.faceMaterials } : {}),
       ...(component.faceTextureScales ? { faceTextureScales: component.faceTextureScales } : {}),
       ...(component.faceTextureShifts ? { faceTextureShifts: component.faceTextureShifts } : {}),
+      ...(component.faceTextureRotations ? { faceTextureRotations: component.faceTextureRotations } : {}),
       extrusion: { points: rectangle(rightWidth), height: component.height },
     },
   ];
@@ -1065,6 +1079,7 @@ function profileArchSolids(component: z.infer<typeof profileArchComponentSchema>
       ...(component.faceMaterials ? { faceMaterials: component.faceMaterials } : {}),
       ...(component.faceTextureScales ? { faceTextureScales: component.faceTextureScales } : {}),
       ...(component.faceTextureShifts ? { faceTextureShifts: component.faceTextureShifts } : {}),
+      ...(component.faceTextureRotations ? { faceTextureRotations: component.faceTextureRotations } : {}),
       extrusion: {
         points: rectangle(width),
         bottom: [
@@ -1100,6 +1115,7 @@ function bridgeParts(component: z.infer<typeof bridgeComponentSchema>): {
       ...(component.faceMaterials ? { faceMaterials: component.faceMaterials } : {}),
       ...(component.faceTextureScales ? { faceTextureScales: component.faceTextureScales } : {}),
       ...(component.faceTextureShifts ? { faceTextureShifts: component.faceTextureShifts } : {}),
+      ...(component.faceTextureRotations ? { faceTextureRotations: component.faceTextureRotations } : {}),
       extrusion,
     },
     navSurface: {
@@ -1151,6 +1167,7 @@ function bridgeApproachParts(component: z.infer<typeof bridgeApproachComponentSc
       ...(component.faceMaterials ? { faceMaterials: component.faceMaterials } : {}),
       ...(component.faceTextureScales ? { faceTextureScales: component.faceTextureScales } : {}),
       ...(component.faceTextureShifts ? { faceTextureShifts: component.faceTextureShifts } : {}),
+      ...(component.faceTextureRotations ? { faceTextureRotations: component.faceTextureRotations } : {}),
       extrusion,
     },
     navSurface: {
@@ -1173,6 +1190,7 @@ function pairedOutlinePlatformParts(component: {
   faceMaterials?: { top?: string; bottom?: string };
   faceTextureScales?: ManagedMapSolidFaceTextureScales;
   faceTextureShifts?: ManagedMapSolidFaceTextureShifts;
+  faceTextureRotations?: ManagedMapSolidFaceTextureRotations;
 }): {
   solids: ManagedMapSolid[];
   navSurfaces: ManagedMapNavSurface[];
@@ -1195,6 +1213,7 @@ function pairedOutlinePlatformParts(component: {
       ...(component.faceMaterials ? { faceMaterials: component.faceMaterials } : {}),
       ...(component.faceTextureScales ? { faceTextureScales: component.faceTextureScales } : {}),
       ...(component.faceTextureShifts ? { faceTextureShifts: component.faceTextureShifts } : {}),
+      ...(component.faceTextureRotations ? { faceTextureRotations: component.faceTextureRotations } : {}),
       extrusion,
     });
     navSurfaces.push({
@@ -1223,6 +1242,7 @@ function ringPlatformParts(component: z.infer<typeof ringPlatformComponentSchema
     faceMaterials: component.faceMaterials,
     faceTextureScales: component.faceTextureScales,
     faceTextureShifts: component.faceTextureShifts,
+    faceTextureRotations: component.faceTextureRotations,
   });
 }
 
@@ -1254,6 +1274,7 @@ function multiHoledPlatformParts(component: z.infer<typeof multiHoledPlatformCom
       ...(component.faceMaterials ? { faceMaterials: component.faceMaterials } : {}),
       ...(component.faceTextureScales ? { faceTextureScales: component.faceTextureScales } : {}),
       ...(component.faceTextureShifts ? { faceTextureShifts: component.faceTextureShifts } : {}),
+      ...(component.faceTextureRotations ? { faceTextureRotations: component.faceTextureRotations } : {}),
       extrusion,
     });
     navSurfaces.push({

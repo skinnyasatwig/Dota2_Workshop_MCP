@@ -565,8 +565,10 @@ is available on `arch`, `profileArch`, `bridge`, `bridgeApproach`, `ringPlatform
 `multiHoledPlatform`. `faceTextureScales` similarly accepts checked `[u, v]` pairs for `top`, `bottom`, and/or `sides`.
 Values must be finite and non-zero within +/-4096; negative values intentionally mirror that texture axis. The MCP
 also accepts `faceTextureShifts` in the same three roles, with finite U/V offsets within +/-32768. It preserves the
-generated projection directions while replacing only their shift values. The MCP assigns all of these settings by
-generated face role, so callers never provide raw face indexes, axis vectors, or arbitrary triangles. Use
+generated projection directions while replacing only their shift values. `faceTextureRotations` rotates those owned
+axes from -180 through 180 degrees around each outward face normal; it does not accept caller-authored vectors. The MCP
+assigns all of these settings by generated face role, so callers never provide raw face indexes, axis vectors, or
+arbitrary triangles. Use
 `{ points: [[x,y],...], height }` for a flat centered extrusion, or provide one local height per outline corner with
 `{ points, bottom: [z,...], top: [z,...] }` for a sloped one. Every top height must remain above its matching bottom.
 The footprint may be convex

@@ -166,6 +166,7 @@ test("component placements namespace and mirror asymmetric concave solids", () =
           material: "materials/dev/reflectivity_30.vmat",
           faceTextureScales: { top: [0.25, 0.25], sides: [-0.5, 1] },
           faceTextureShifts: { top: [0, 64], sides: [16, -16] },
+          faceTextureRotations: { top: 45, sides: -90 },
           extrusion: {
             points: [[-200, -100], [200, -100], [200, 0], [0, 0], [0, 200], [-200, 200]],
             height: 128,
@@ -187,6 +188,7 @@ test("component placements namespace and mirror asymmetric concave solids", () =
       material: "materials/dev/reflectivity_30.vmat",
       faceTextureScales: { top: [0.25, 0.25], sides: [-0.5, 1] },
       faceTextureShifts: { top: [0, 64], sides: [16, -16] },
+      faceTextureRotations: { top: 45, sides: -90 },
       extrusion: {
         points: [[-200, -100], [200, -100], [200, 0], [0, 0], [0, 200], [-200, 200]],
         height: 128,
@@ -200,6 +202,7 @@ test("component placements namespace and mirror asymmetric concave solids", () =
       material: "materials/dev/reflectivity_30.vmat",
       faceTextureScales: { top: [0.25, 0.25], sides: [-0.5, 1] },
       faceTextureShifts: { top: [0, 64], sides: [16, -16] },
+      faceTextureRotations: { top: 45, sides: -90 },
       extrusion: {
         points: [[-200, -200], [0, -200], [0, 0], [200, 0], [200, 100], [-200, 100]],
         height: 128,

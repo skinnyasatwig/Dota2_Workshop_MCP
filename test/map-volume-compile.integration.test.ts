@@ -55,6 +55,11 @@ test(
           solid.targetname === "fixture_profile_arch_arch_segment_01")?.faceTextureShifts,
         { top: [0, 64], bottom: [-128, 256], sides: [16, -16] },
       );
+      assert.deepEqual(
+        parseMapSolids(roundTripped).find((solid) =>
+          solid.targetname === "fixture_profile_arch_arch_segment_01")?.faceTextureRotations,
+        { top: 45, bottom: -90, sides: 180 },
+      );
       assert.match(roundTripped, /fixture_bridge_deck/);
       assert.match(roundTripped, /fixture_irregular_platform_segment_01_deck/);
       assert.match(roundTripped, /fixture_multi_hole_platform_triangle_001_deck/);

@@ -295,6 +295,16 @@ Last updated: 2026-08-07
     addon with Dota and Hammer closed. Rotation and world-versus-face alignment remain intentionally unsupported until
     their complete axis semantics have equally strong evidence.
 
+55. This milestone - added bounded role-based texture rotation without exposing arbitrary axis vectors.
+    `faceTextureRotations` accepts -180 through 180 degrees for top, bottom, and/or side faces. Each generated U/V pair
+    is rotated as an orthonormal basis around its outward face normal, then receives the already checked role shift.
+    Inspection independently reconstructs each angle from both observed axes, rejects non-rotational drift, normalizes
+    six-decimal serialization noise for readable reports, and still compares the complete axis values during desired-
+    state reconciliation. Reusable components and mirrored placements carry the setting automatically. The profile-
+    arch fixture proved 45, -90, and 180 degree rotations survive Valve's converter and compiler in a disposable addon
+    with Dota and Hammer closed. Shared/world alignment remains separate because face-relative rotation alone cannot
+    promise seamless texturing across triangles whose original edge bases differ.
+
 ## Current verification record
 
 - TypeScript build passes.

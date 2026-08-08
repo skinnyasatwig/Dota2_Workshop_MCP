@@ -6,6 +6,7 @@ import {
   MapMeshData,
   MeshPoint3,
   mapTextureAxesWithShifts,
+  mapTextureAxesWithRotations,
   numberText,
   vectorText,
 } from "./map-mesh.js";
@@ -64,6 +65,23 @@ export interface ManagedMapSolidFaceTextureShifts {
   top?: [number, number];
   bottom?: [number, number];
   sides?: [number, number];
+}
+
+const textureRotationDegrees = z.number().finite().min(-180).max(180);
+
+export const managedMapSolidFaceTextureRotationsInputSchema = z.object({
+  top: textureRotationDegrees.optional(),
+  bottom: textureRotationDegrees.optional(),
+  sides: textureRotationDegrees.optional(),
+}).strict().refine(
+  (value) => value.top !== undefined || value.bottom !== undefined || value.sides !== undefined,
+  { message: "must override top, bottom, sides, or a combination of those roles" },
+);
+
+export interface ManagedMapSolidFaceTextureRotations {
+  top?: number;
+  bottom?: number;
+  sides?: number;
 }
 
 export function signedPolygonArea(points: readonly [number, number][]): number {
@@ -163,6 +181,7 @@ export const managedMapSolidInputSchema = z.object({
   faceMaterials: managedMapSolidFaceMaterialsInputSchema.optional(),
   faceTextureScales: managedMapSolidFaceTextureScalesInputSchema.optional(),
   faceTextureShifts: managedMapSolidFaceTextureShiftsInputSchema.optional(),
+  faceTextureRotations: managedMapSolidFaceTextureRotationsInputSchema.optional(),
   extrusion: solidExtrusionInputSchema,
   properties: z.record(scalar).optional(),
 }).strict().superRefine((solid, context) => {
@@ -227,6 +246,7 @@ export interface ManagedMapSolid {
   faceMaterials?: { top?: string; bottom?: string };
   faceTextureScales?: ManagedMapSolidFaceTextureScales;
   faceTextureShifts?: ManagedMapSolidFaceTextureShifts;
+  faceTextureRotations?: ManagedMapSolidFaceTextureRotations;
   extrusion:
     | { points: [number, number][]; height: number; bottom?: never; top?: never }
     | { points: [number, number][]; height?: never; bottom: number[]; top: number[] };
@@ -244,6 +264,10 @@ export interface MapSolidFaceTextureScalePlan {
 
 export interface MapSolidFaceTextureShiftPlan {
   faceTextureShifts: [number, number][];
+}
+
+export interface MapSolidFaceTextureRotationPlan {
+  faceTextureRotations: number[];
 }
 
 /** Assign one checked material index to every generated top, bottom, and side triangle. */
@@ -300,6 +324,23 @@ export function mapSolidFaceTextureShiftPlan(solid: ManagedMapSolid): MapSolidFa
   };
 }
 
+/** Assign one checked projection rotation to every generated top, bottom, and side triangle. */
+export function mapSolidFaceTextureRotationPlan(solid: ManagedMapSolid): MapSolidFaceTextureRotationPlan {
+  const top = solid.faceTextureRotations?.top ?? 0;
+  const bottom = solid.faceTextureRotations?.bottom ?? 0;
+  const sides = solid.faceTextureRotations?.sides ?? 0;
+  const topFaceCount = solid.extrusion.points.length - 2;
+  const bottomFaceCount = topFaceCount;
+  const sideFaceCount = solid.extrusion.points.length * 2;
+  return {
+    faceTextureRotations: [
+      ...Array(topFaceCount).fill(top),
+      ...Array(bottomFaceCount).fill(bottom),
+      ...Array(sideFaceCount).fill(sides),
+    ],
+  };
+}
+
 export function parseManagedMapSolids(
   value: unknown,
   field = "managedSolids",
@@ -341,6 +382,9 @@ export function parseManagedMapSolids(
               Object.entries(solid.faceTextureShifts).map(([role, shift]) => [role, [...shift]]),
             ) as ManagedMapSolidFaceTextureShifts,
           }
+        : {}),
+      ...(solid.faceTextureRotations
+        ? { faceTextureRotations: { ...solid.faceTextureRotations } }
         : {}),
       extrusion,
       properties: solid.properties
@@ -447,6 +491,7 @@ export function buildMapSolidBlock(
   const materialPlan = mapSolidFaceMaterialPlan(parsed);
   const textureScalePlan = mapSolidFaceTextureScalePlan(parsed);
   const textureShiftPlan = mapSolidFaceTextureShiftPlan(parsed);
+  const textureRotationPlan = mapSolidFaceTextureRotationPlan(parsed);
   const origin = vectorText(parsed.center);
   const yaw = numberText(((parsed.yaw ?? 0) % 360 + 360) % 360);
   const propertyLines = Object.entries({
@@ -462,6 +507,7 @@ export function buildMapSolidBlock(
     faceMaterialIndices: materialPlan.faceMaterialIndices,
     faceTextureScales: textureScalePlan.faceTextureScales,
     faceTextureShifts: textureShiftPlan.faceTextureShifts,
+    faceTextureRotations: textureRotationPlan.faceTextureRotations,
   }).split("\n").map((line) => `\t\t${line}`).join("\n");
   return `"CMapEntity"
 {
@@ -600,6 +646,53 @@ function sameTextureAxes(
   });
 }
 
+function normalizedAxis3(axis: readonly number[]): [number, number, number] | undefined {
+  const length = Math.hypot(axis[0], axis[1], axis[2]);
+  return Number.isFinite(length) && length > 1e-8
+    ? [axis[0] / length, axis[1] / length, axis[2] / length]
+    : undefined;
+}
+
+function dot3(a: readonly number[], b: readonly number[]): number {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+function inferTextureRotation(
+  baseUText: string,
+  baseVText: string,
+  actualU: readonly number[],
+  actualV: readonly number[],
+): number | undefined {
+  const baseU = normalizedAxis3(baseUText.trim().split(/\s+/).map(Number));
+  const baseV = normalizedAxis3(baseVText.trim().split(/\s+/).map(Number));
+  const observedU = normalizedAxis3(actualU);
+  const observedV = normalizedAxis3(actualV);
+  if (!baseU || !baseV || !observedU || !observedV) return undefined;
+  const cosine = Math.max(-1, Math.min(1, dot3(observedU, baseU)));
+  const sine = Math.max(-1, Math.min(1, -dot3(observedU, baseV)));
+  let degrees = Math.atan2(sine, cosine) * 180 / Math.PI;
+  if (Math.abs(degrees + 180) <= 1e-4) degrees = 180;
+  // Generated axes are serialized to six decimals, so angle recovery is intentionally
+  // canonicalized to four decimals instead of exposing floating-point reconstruction noise.
+  degrees = Number(degrees.toFixed(4));
+  const expected = mapTextureAxesWithRotations(
+    { textureAxisU: [baseUText], textureAxisV: [baseVText] },
+    [degrees],
+  );
+  const expectedU = expected.textureAxisU[0].split(/\s+/).map(Number);
+  const expectedV = expected.textureAxisV[0].split(/\s+/).map(Number);
+  return [actualU, actualV].every((axis, index) => {
+    const expectedAxis = index === 0 ? expectedU : expectedV;
+    return axis.slice(0, 3).every((value, component) =>
+      Math.abs(value - expectedAxis[component]) <= 1e-4);
+  }) ? degrees : undefined;
+}
+
+function rotationDistance(a: number, b: number): number {
+  const difference = Math.abs(a - b) % 360;
+  return Math.min(difference, 360 - difference);
+}
+
 function sameVertices(
   actual: readonly [number, number, number][] | undefined,
   expected: readonly string[],
@@ -625,7 +718,12 @@ function solidBlockMatches(block: string, desired: ManagedMapSolid): boolean {
   const materialPlan = mapSolidFaceMaterialPlan(desired);
   const textureScalePlan = mapSolidFaceTextureScalePlan(desired);
   const textureShiftPlan = mapSolidFaceTextureShiftPlan(desired);
-  const textureAxes = mapTextureAxesWithShifts(mesh, textureShiftPlan.faceTextureShifts);
+  const textureRotationPlan = mapSolidFaceTextureRotationPlan(desired);
+  const rotatedTextureAxes = mapTextureAxesWithRotations(
+    mesh,
+    textureRotationPlan.faceTextureRotations,
+  );
+  const textureAxes = mapTextureAxesWithShifts(rotatedTextureAxes, textureShiftPlan.faceTextureShifts);
   if (!sameStrings(blockMaterials(block), materialPlan.materials)) return false;
   if (!sameNumbers(blockFaceMaterialIndices(block), materialPlan.faceMaterialIndices)) return false;
   if (!sameTextureScales(blockFaceTextureScales(block), textureScalePlan.faceTextureScales)) return false;
@@ -658,6 +756,7 @@ export interface ParsedMapSolid {
   faceMaterials?: { top?: string; bottom?: string };
   faceTextureScales?: ManagedMapSolidFaceTextureScales;
   faceTextureShifts?: ManagedMapSolidFaceTextureShifts;
+  faceTextureRotations?: ManagedMapSolidFaceTextureRotations;
   footprint: [number, number][];
   height?: number;
   sloped?: { bottom: number[]; top: number[] };
@@ -752,6 +851,49 @@ export function parseMapSolids(text: string): ParsedMapSolid[] {
       ...(!defaultShift(bottomShift) ? { bottom: bottomShift } : {}),
       ...(!defaultShift(sideShift) ? { sides: sideShift } : {}),
     };
+    const footprint = top.map(([x, y]) => [x, y] as [number, number]);
+    const extrusion: ManagedMapSolid["extrusion"] = flat
+      ? { points: footprint, height: topHeights[0] - bottomHeights[0] }
+      : { points: footprint, bottom: bottomHeights, top: topHeights };
+    const baseMesh = buildExtrudedSolidMesh({
+      targetname: entity.targetname,
+      center,
+      yaw: angles[1],
+      material: materialPath,
+      extrusion,
+    });
+    const observedAxisU = blockFaceTextureAxes(range.block, "textureAxisU");
+    const observedAxisV = blockFaceTextureAxes(range.block, "textureAxisV");
+    if (
+      !observedAxisU || !observedAxisV ||
+      observedAxisU.length !== baseMesh.textureAxisU.length ||
+      observedAxisV.length !== baseMesh.textureAxisV.length
+    ) continue;
+    const rotationValues = observedAxisU.map((axis, face) => inferTextureRotation(
+      baseMesh.textureAxisU[face],
+      baseMesh.textureAxisV[face],
+      axis,
+      observedAxisV[face],
+    ));
+    if (rotationValues.some((rotation) => rotation === undefined)) continue;
+    const rotations = rotationValues as number[];
+    const uniformRoleRotation = (start: number, length: number): number | undefined => {
+      const role = rotations.slice(start, start + length);
+      const first = role[0];
+      return role.length === length && first !== undefined && role.every((rotation) =>
+        rotationDistance(rotation, first) <= 1e-4)
+        ? first
+        : undefined;
+    };
+    const topRotation = uniformRoleRotation(0, topFaceCount);
+    const bottomRotation = uniformRoleRotation(topFaceCount, topFaceCount);
+    const sideRotation = uniformRoleRotation(topFaceCount * 2, count * 2);
+    if (topRotation === undefined || bottomRotation === undefined || sideRotation === undefined) continue;
+    const faceTextureRotations = {
+      ...(rotationDistance(topRotation, 0) > 1e-4 ? { top: topRotation } : {}),
+      ...(rotationDistance(bottomRotation, 0) > 1e-4 ? { bottom: bottomRotation } : {}),
+      ...(rotationDistance(sideRotation, 0) > 1e-4 ? { sides: sideRotation } : {}),
+    };
     parsed.push({
       targetname: entity.targetname,
       center,
@@ -760,9 +902,10 @@ export function parseMapSolids(text: string): ParsedMapSolid[] {
       ...(Object.keys(faceMaterials).length ? { faceMaterials } : {}),
       ...(Object.keys(faceTextureScales).length ? { faceTextureScales } : {}),
       ...(Object.keys(faceTextureShifts).length ? { faceTextureShifts } : {}),
-      footprint: top.map(([x, y]) => [x, y]),
+      ...(Object.keys(faceTextureRotations).length ? { faceTextureRotations } : {}),
+      footprint,
       ...(flat
-        ? { height: topHeights[0] - bottomHeights[0] }
+        ? { height: extrusion.height }
         : { sloped: { bottom: bottomHeights, top: topHeights } }),
       blocking: true,
     });

@@ -152,6 +152,11 @@
         "top": [0, 64],
         "bottom": [-128, 256],
         "sides": [16, -16]
+      },
+      "faceTextureRotations": {
+        "top": 45,
+        "bottom": -90,
+        "sides": 180
       }
     },
     {
