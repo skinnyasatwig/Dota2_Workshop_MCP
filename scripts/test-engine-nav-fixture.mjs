@@ -13,6 +13,14 @@ import {
   buildBridgeNavigationFixtureText,
   inspectBridgeNavigationFixture,
 } from "../src/dota/bridge-nav-fixture.js";
+import {
+  RING_NAV_FIXTURE_DEBUG_SDK_VERSION,
+  RING_NAV_FIXTURE_MAP,
+  assessRingNavigationFixture,
+  buildRingNavigationFixtureText,
+  inspectRingNavigationFixture,
+  ringNavigationFixtureRoutesFromText,
+} from "../src/dota/ring-nav-fixture.js";
 import { attachDebugSdk } from "../src/dota/debugsdk.js";
 import { closeTransientStallDialog, diagnoseDota } from "../src/dota/diagnose.js";
 import {
@@ -35,6 +43,7 @@ import { compileVmap, textToVmap, vmapToText } from "../src/dota/vmap.js";
 const args = new Set(process.argv.slice(2));
 const probe = args.has("--probe");
 const bridge = args.has("--bridge");
+const ring = args.has("--ring");
 const compileOnly = args.has("--compile-only");
 const launchStrategy = args.has("--direct") ? "direct" : "steam";
 const port = Number(process.env.DOTA2_VCONPORT || 29000);
@@ -66,6 +75,7 @@ function fixtureProject(root, addonName, gameDir, contentDir) {
 }
 
 async function main() {
+  if (bridge && ring) throw new Error("Choose only one isolated fixture: --bridge or --ring.");
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`Invalid VConsole port: ${port}`);
   if (await isProcessRunning("dota2.exe")) {
     throw new Error("Dota is already running. The disposable fixture refuses to replace a user session.");
@@ -75,9 +85,14 @@ async function main() {
   const template = join(dota.contentDotaAddons, "addon_template", "maps", "template_map.vmap");
   if (!existsSync(template)) throw new Error(`Valve's blank-map template is missing: ${template}`);
 
-  const fixtureMap = bridge ? BRIDGE_NAV_FIXTURE_MAP : ENGINE_NAV_FIXTURE_MAP;
-  const debugSdkVersion = bridge ? BRIDGE_NAV_FIXTURE_DEBUG_SDK_VERSION : ENGINE_NAV_FIXTURE_DEBUG_SDK_VERSION;
-  const addonName = `codex_mcp_${bridge ? "bridge_nav" : "nav"}_${process.pid}_${Date.now()}`;
+  const fixtureMap = ring
+    ? RING_NAV_FIXTURE_MAP
+    : bridge ? BRIDGE_NAV_FIXTURE_MAP : ENGINE_NAV_FIXTURE_MAP;
+  const debugSdkVersion = ring
+    ? RING_NAV_FIXTURE_DEBUG_SDK_VERSION
+    : bridge ? BRIDGE_NAV_FIXTURE_DEBUG_SDK_VERSION : ENGINE_NAV_FIXTURE_DEBUG_SDK_VERSION;
+  const fixtureKind = ring ? "ring_nav" : bridge ? "bridge_nav" : "nav";
+  const addonName = `codex_mcp_${fixtureKind}_${process.pid}_${Date.now()}`;
   const contentAddon = join(dota.contentDotaAddons, addonName);
   const gameAddon = join(dota.gameDotaAddons, addonName);
   const contentMap = join(contentAddon, "maps", `${fixtureMap}.vmap`);
@@ -93,7 +108,9 @@ async function main() {
     const structuralSeed = await vmapToText(dota.dmxconvertExe, template);
     await textToVmap(
       dota.dmxconvertExe,
-      bridge ? buildBridgeNavigationFixtureText(structuralSeed) : buildRepositoryCompileFixtureText(structuralSeed),
+      ring
+        ? buildRingNavigationFixtureText(structuralSeed)
+        : bridge ? buildBridgeNavigationFixtureText(structuralSeed) : buildRepositoryCompileFixtureText(structuralSeed),
       contentMap,
     );
     const roundTripped = await vmapToText(dota.dmxconvertExe, contentMap);
@@ -103,6 +120,13 @@ async function main() {
           inspection.navigationSurfaceNames.length !== 3 ||
           inspection.solidNames.length !== 0) {
         throw new Error(`The bridge fixture did not survive Valve's VMAP conversion: ${JSON.stringify(inspection)}`);
+      }
+    } else if (ring) {
+      const inspection = inspectRingNavigationFixture(roundTripped);
+      if ((inspection.terrainCenterDistance ?? 0) < 40000 ||
+          inspection.navigationSurfaceNames.length !== 8 ||
+          inspection.solidNames.length !== 0) {
+        throw new Error(`The ring fixture did not survive Valve's VMAP conversion: ${JSON.stringify(inspection)}`);
       }
     } else if (!roundTripped.includes("fixture_nav_obstruction")) {
       throw new Error("The fixture blocker did not survive Valve's VMAP conversion.");
@@ -138,8 +162,11 @@ async function main() {
         addonName,
         map: fixtureMap,
         bridge,
+        ring,
         compileOnly: true,
-        inspection: bridge ? inspectBridgeNavigationFixture(roundTripped) : undefined,
+        inspection: ring
+          ? inspectRingNavigationFixture(roundTripped)
+          : bridge ? inspectBridgeNavigationFixture(roundTripped) : undefined,
         passed: true,
       }, null, 2));
       return;
@@ -191,13 +218,13 @@ async function main() {
     }
 
     vc.clearRing();
-    const routes = bridge
-      ? bridgeNavigationFixtureRoutesFromText(roundTripped)
-      : ENGINE_NAV_FIXTURE_ROUTES;
+    const routes = ring
+      ? ringNavigationFixtureRoutesFromText(roundTripped)
+      : bridge ? bridgeNavigationFixtureRoutesFromText(roundTripped) : ENGINE_NAV_FIXTURE_ROUTES;
     const execution = await executeEngineNavigationChecks(vc, routes, "both", 10_000);
-    const assessment = bridge
-      ? assessBridgeNavigationFixture(execution)
-      : assessEngineNavigationFixture(execution, {
+    const assessment = ring
+      ? assessRingNavigationFixture(execution)
+      : bridge ? assessBridgeNavigationFixture(execution) : assessEngineNavigationFixture(execution, {
           blockedOriginalPoint: [0, 384, 128],
           // The first --probe run discovers the installed engine's exact repair.
           blockedSuggestedPoint: probe ? undefined : [-32, 480, 128],
@@ -213,6 +240,7 @@ async function main() {
       addonName,
       map: fixtureMap,
       bridge,
+      ring,
       probe,
       launch: { method: launch.method, fallbackUsed: launch.fallbackUsed },
       readiness: readiness.line,

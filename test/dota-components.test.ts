@@ -303,6 +303,47 @@ test("checked bridge approaches derive a sloped solid and exact walkable twin fr
   );
 });
 
+test("checked ring platforms compose a real central opening from deck/navigation wedges", () => {
+  const [platform] = componentList.parse([{
+    kind: "ringPlatform",
+    name: "dragon_ring",
+    center: [0, 4096, 384],
+    yaw: 45,
+    outerRadius: 512,
+    innerRadius: 256,
+    height: 64,
+    sides: 4,
+    material: "materials/dev/reflectivity_30.vmat",
+  }]);
+  const expanded = expandDotaComponents([platform]);
+  assert.equal(expanded.managedSolids.length, 4);
+  assert.equal(expanded.managedNavSurfaces.length, 4);
+  assert.deepEqual(expanded.managedSolids.map((solid) => solid.targetname), [
+    "dragon_ring_segment_01_deck",
+    "dragon_ring_segment_02_deck",
+    "dragon_ring_segment_03_deck",
+    "dragon_ring_segment_04_deck",
+  ]);
+  assert.deepEqual(expanded.managedSolids[0], {
+    targetname: "dragon_ring_segment_01_deck",
+    center: [0, 4096, 384],
+    yaw: 45,
+    material: "materials/dev/reflectivity_30.vmat",
+    extrusion: {
+      points: [[512, 0], [0, 512], [0, 256], [256, 0]],
+      height: 64,
+    },
+  });
+  assert.deepEqual(
+    expanded.managedNavSurfaces[0]?.extrusion,
+    expanded.managedSolids[0]?.extrusion,
+  );
+  assert.throws(
+    () => componentList.parse([{ ...platform, innerRadius: 511 }]),
+    /at least two world units of platform/,
+  );
+});
+
 test("boss pit components create structured terrain, entrances, and an official spawn", () => {
   const [pit] = componentList.parse([
     {
@@ -384,6 +425,6 @@ test("the documented Dota component assembly remains valid", async () => {
   assert.equal(specification.managedEntities?.filter((entity) => entity.classname === "npc_dota_fort").length, 2);
   assert.equal(specification.managedEntities?.filter((entity) => entity.classname === "npc_dota_tower").length, 5);
   assert.equal(specification.managedTerrain?.filter((operation) => operation.op === "ramp").length, 3);
-  assert.equal(specification.managedSolids?.length, 6);
-  assert.equal(specification.managedNavSurfaces?.length, 3);
+  assert.equal(specification.managedSolids?.length, 14);
+  assert.equal(specification.managedNavSurfaces?.length, 11);
 });

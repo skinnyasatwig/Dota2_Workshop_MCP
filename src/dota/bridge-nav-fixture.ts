@@ -7,6 +7,7 @@ import { parseMapNavSurfaces, reconcileMapNavSurfaces } from "./map-nav-surface.
 import { parseMapSolids } from "./map-solid.js";
 import { parseTileGrid, TileGrid } from "./tilegrid.js";
 import { buildEntityBlock, insertEntity, maxNodeId } from "./vmap.js";
+import { relocateTileGridForIsolatedNavigation } from "./isolated-navigation-fixture.js";
 
 export const BRIDGE_NAV_FIXTURE_MAP = "bridge_nav_fixture";
 export const BRIDGE_NAV_FIXTURE_DEBUG_SDK_VERSION = "1.4.0";
@@ -71,21 +72,6 @@ export function bridgeNavigationFixtureLayout(grid: TileGrid): BridgeNavigationF
   };
 }
 
-function relocateTileGrid(text: string): string {
-  const marker = text.indexOf('"CMapDotaTileGrid"');
-  if (marker < 0) throw new Error("The bridge navigation fixture cannot relocate a missing tile grid.");
-  const relative = text.slice(marker);
-  const match = /"origin"\s+"vector3"\s+"([^"]+)"/.exec(relative);
-  if (!match || match.index === undefined) throw new Error("The bridge fixture tile grid has no origin.");
-  const original = match[1].trim().split(/\s+/).map(Number);
-  if (original.length !== 3 || original.some((value) => !Number.isFinite(value))) {
-    throw new Error("The bridge fixture tile-grid origin is malformed.");
-  }
-  const next = `${original[0] + 32768} ${original[1] + 32768} ${original[2]}`;
-  const start = marker + match.index;
-  return text.slice(0, start) + match[0].replace(match[1], next) + text.slice(start + match[0].length);
-}
-
 /**
  * Build a disposable causal navigation-surface fixture. Valve's tile terrain is relocated far away,
  * leaving only the three dedicated navigation meshes at the test coordinates. A nearby route with no
@@ -94,7 +80,7 @@ function relocateTileGrid(text: string): string {
 export function buildBridgeNavigationFixtureText(baseText: string): string {
   const grid = parseTileGrid(baseText);
   const layout = bridgeNavigationFixtureLayout(grid);
-  let text = relocateTileGrid(baseText);
+  let text = relocateTileGridForIsolatedNavigation(baseText);
   let nodeId = maxNodeId(text) + 1;
   text = insertEntity(text, buildEntityBlock({
     classname: "info_player_start_goodguys",

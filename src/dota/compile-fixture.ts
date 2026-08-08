@@ -109,6 +109,17 @@ export function buildRepositoryCompileFixtureText(baseText: string): string {
       thickness: 64,
       material: "materials/dev/reflectivity_30.vmat",
     },
+    {
+      kind: "ringPlatform",
+      name: "fixture_ring_platform",
+      center: [0, 2048, 384],
+      yaw: 22.5,
+      outerRadius: 768,
+      innerRadius: 384,
+      height: 64,
+      sides: 8,
+      material: "materials/dev/reflectivity_30.vmat",
+    },
   ]);
   text = reconcileMapSolids(text, [
     {

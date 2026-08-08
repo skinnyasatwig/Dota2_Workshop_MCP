@@ -166,11 +166,18 @@ Last updated: 2026-08-07
     console errors, shut down, and removed the disposable addon. This proves the checked surface recipe causes real
     GridNav connectivity while also establishing that independent stacked navigation layers cannot be inferred from
     Dota's X/Y-only API.
+39. This milestone - added `ringPlatform`, a checked regular three- to 32-sided platform with a genuine central
+    opening, composed from deterministic convex deck/navigation wedge pairs instead of arbitrary mesh input. Offline
+    reachability blocks the ring footprint while preserving its center. The repository compiler fixture accepted the
+    complete visible eight-segment composition. A second causal fixture relocated tile terrain 46,341 units away and
+    omitted all visible solids; real Dota connected a 3,015-unit arc across four navigation-wedge seams while both the
+    center-hole and outer-void controls remained non-traversable with path length -1. DebugSDK 1.4.0 reached state 4,
+    reported no console errors, and the runner shut down Dota and removed the isolated addon automatically.
 
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 285 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 289 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 200 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
@@ -180,12 +187,16 @@ Last updated: 2026-08-07
   sloped trigger volumes from text to binary VMAP and back during the integration suite, preserving exact corner heights.
 - `npm run test:compiler-fixture` successfully round-tripped and compiled the repository-owned acceptance payload,
   including its sloped trigger, flat and sloped concave L-shaped world solids, checked rectangular arch, checked bridge
-  deck/navigation twin, complete visible sloped bridge approach/navigation twin, and explicit navigation obstruction,
+  deck/navigation twin, complete visible sloped bridge approach/navigation twin, eight-segment ring platform, and
+  explicit navigation obstruction,
   into a real VPK. The generated map uses Valve's installed blank template only as required hidden
   infrastructure, depends on no private 3v3 file, stores no copied Valve VMAP, and leaves no temporary addon trees.
 - `npm run test:compiler-bridge-nav-fixture` and `npm run test:engine-bridge-nav-fixture` passed on the installed
   Workshop Tools. The latter produced fresh DebugSDK 1.4.0 state-4 readiness, the expected positive/negative/height-
   alias results, zero console errors, automatic shutdown, and complete fixture cleanup.
+- `npm run test:compiler-ring-nav-fixture` and `npm run test:engine-ring-nav-fixture` passed. The isolated engine
+  fixture crossed all four requested seams and preserved both negative controls, with fresh state-4 readiness, zero
+  console errors, automatic shutdown, and complete cleanup.
 - Installed ValveResourceFormat 19.2 recovered the physical hull bounds of
   `models/props_gameplay/cap_point001.vmdl_c` directly from `pak01_dir.vpk`; a second lookup reused the fingerprinted
   cache. The same real-resource test recovers validated exact convex-hull vertices into cache version 4.

@@ -242,6 +242,28 @@ const bridgeApproachComponentSchema = z.object({
   }
 });
 
+const ringPlatformComponentSchema = z.object({
+  kind: z.literal("ringPlatform"),
+  name: nameSchema,
+  /** World-space center of the complete platform prism. */
+  center: point3,
+  yaw: yawSchema,
+  /** Vertex radii of the regular outer edge and central opening. */
+  outerRadius: z.number().finite().min(4).max(16384),
+  innerRadius: z.number().finite().min(2).max(16382),
+  height: z.number().finite().min(1).max(4096),
+  sides: z.number().int().min(3).max(32).optional(),
+  material: visibleMaterialSchema,
+}).strict().superRefine((platform, context) => {
+  if (platform.outerRadius - platform.innerRadius < 2) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["innerRadius"],
+      message: "innerRadius must leave at least two world units of platform inside outerRadius",
+    });
+  }
+});
+
 const bossPitComponentSchema = z.object({
   kind: z.literal("bossPit"),
   name: nameSchema,
@@ -336,6 +358,7 @@ export const dotaComponentInputSchema = z.union([
   archComponentSchema,
   bridgeComponentSchema,
   bridgeApproachComponentSchema,
+  ringPlatformComponentSchema,
   bossPitComponentSchema,
   baseComponentSchema,
 ]);
@@ -381,10 +404,19 @@ export const WORLD_STRUCTURE_RECIPES = {
     purpose: "Sloped graybox bridge approach paired with exact Valve navigation-walkable geometry.",
     source: "MCP composition of compiler-proven sloped managedSolids and isolated real-GridNav-proven Valve navigation surfaces",
   },
+  ringPlatform: {
+    parts: ["segment_*_deck", "segment_*_walkable"],
+    purpose: "Regular ring platform with a real central opening, composed from checked convex deck/navigation pairs.",
+    source: "MCP composition of compiler-proven managedSolids and real-GridNav-proven Valve navigation surfaces",
+  },
 } as const;
 
+function normalizedNumber(value: number): number {
+  return Math.abs(value) < 1e-9 ? 0 : Number(value.toFixed(6));
+}
+
 function formatted(value: number): string {
-  return String(Math.abs(value) < 1e-9 ? 0 : Number(value.toFixed(6)));
+  return String(normalizedNumber(value));
 }
 
 function originString(origin: Point3): string {
@@ -726,6 +758,41 @@ function bridgeApproachParts(component: z.infer<typeof bridgeApproachComponentSc
   };
 }
 
+function ringPlatformParts(component: z.infer<typeof ringPlatformComponentSchema>): {
+  solids: ManagedMapSolid[];
+  navSurfaces: ManagedMapNavSurface[];
+} {
+  const sides = component.sides ?? 16;
+  const normalizeFootprint = (points: [number, number][]) =>
+    points.map(([x, y]) => [normalizedNumber(x), normalizedNumber(y)] as [number, number]);
+  const outer = normalizeFootprint(regularPolygonFootprint(component.outerRadius, sides));
+  const inner = normalizeFootprint(regularPolygonFootprint(component.innerRadius, sides));
+  const solids: ManagedMapSolid[] = [];
+  const navSurfaces: ManagedMapNavSurface[] = [];
+  for (let index = 0; index < sides; index++) {
+    const next = (index + 1) % sides;
+    const segment = String(index + 1).padStart(2, "0");
+    const extrusion = {
+      points: [outer[index], outer[next], inner[next], inner[index]] as [number, number][],
+      height: component.height,
+    };
+    solids.push({
+      targetname: `${component.name}_segment_${segment}_deck`,
+      center: component.center,
+      yaw: component.yaw,
+      material: component.material,
+      extrusion,
+    });
+    navSurfaces.push({
+      targetname: `${component.name}_segment_${segment}_walkable`,
+      center: component.center,
+      yaw: component.yaw,
+      extrusion,
+    });
+  }
+  return { solids, navSurfaces };
+}
+
 function pitOperations(component: z.infer<typeof bossPitComponentSchema>): ExpandedDotaComponents {
   const [cx, cy] = component.tileCenter;
   const rimWidth = component.rimWidth ?? 1.5;
@@ -954,6 +1021,12 @@ export function expandDotaComponents(components: DotaComponentInput[]): Expanded
         const approach = bridgeApproachParts(component);
         managedSolids.push(approach.solid);
         managedNavSurfaces.push(approach.navSurface);
+        break;
+      }
+      case "ringPlatform": {
+        const platform = ringPlatformParts(component);
+        managedSolids.push(...platform.solids);
+        managedNavSurfaces.push(...platform.navSurfaces);
         break;
       }
       case "bossPit": {

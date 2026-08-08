@@ -156,6 +156,17 @@
       "width": 512,
       "thickness": 64,
       "material": "materials/dev/reflectivity_30.vmat"
+    },
+    {
+      "kind": "ringPlatform",
+      "name": "dragon_overlook_ring",
+      "center": [0, 4608, 352],
+      "yaw": 22.5,
+      "outerRadius": 768,
+      "innerRadius": 384,
+      "height": 64,
+      "sides": 8,
+      "material": "materials/dev/reflectivity_30.vmat"
     }
   ]
 }
