@@ -40,7 +40,7 @@ fallback for non-tstl addons.
 | **Reference library** | `ref_harvest`, `ref_harvest_top`, `ref_list`, `ref_search`, `ref_find`, `ref_passport`, `ref_inspect`, `ref_get`, `ref_recipe`, `ref_curate`, `ref_stats`, `asset_db` (SQLite index: fast structured search by kind/ext/name) |
 | **Docs & references** | `docs_search`, `docs_get`, `docs_list`, `dota_patterns`, `panorama_api_search`, `panorama_api_get`, `tools_catalog` |
 | **Maps** | `map_create`, `map_add_entity`, `map_inspect`, `map_patch_entities`, `map_sync_contract`, `map_rewrite_path`, `map_to_text`, `map_from_text`, `map_compile`, `map_list`, `map_validate`, `map_engine_readiness_probe`, `map_engine_nav_test`, `map_engine_visual_test` |
-| **Map generation** | `map_build`, `map_terrain`, `map_preview`, `map_tile_to_world`, `map_recipe_catalog`, `entity_catalog`, `scaffold_td` |
+| **Map generation** | `map_build`, `map_compare_specifications`, `map_terrain`, `map_preview`, `map_tile_to_world`, `map_recipe_catalog`, `entity_catalog`, `scaffold_td` |
 | **Reference games** | `workshop_search`, `workshop_download`, `workshop_list`, `workshop_inspect`, `workshop_read`, `workshop_grep`, `panorama_decompile` |
 | **Asset preview (out of engine)** | `asset_preview` (particles/textures/models → inline contact-sheet image + HTML gallery), `sound_preview` (sounds → inline waveform/icon image + playable HTML soundboard + inline audio), `preview_studio` / `preview_studio_stop` (interactive gallery + public share link: animated particles, 3D models, audio players, click-to-select), `preview_pick` / `preview_selections` (resolve the IDs the user picked/clicked → game + asset path) — decoded via ValveResourceFormat, no Dota launch |
 | **Sounds & KV3** | `soundevents_list`, `soundevents_get`, `soundevents_upsert`, `kv3_read` |
@@ -229,6 +229,12 @@ verified milestone log in [`docs/PROGRESS.md`](docs/PROGRESS.md) and the ordered
   `dryRun:true` to generate and report the plan without writing, registering, or compiling anything. The report also
   resolves every resulting VMAP material against addon/base content, compiled assets, and Dota/core VPKs; a real write
   refuses missing or unsafe materials before conversion begins.
+- **`map_compare_specifications`** — prove that a contract refactor preserves the generated map before touching a
+  VMAP. Each side can be an inline specification or a project-local JSON file. The tool validates and expands reusable
+  components first, compares named entities/paths/solids/surfaces/volumes independent of declaration order, preserves
+  terrain-operation order, and reports additions, removals, changed fields, and any explicitly tolerated numeric drift.
+  It is read-only, requires no Dota installation, and rejects JSON paths outside the addon project (including links that
+  resolve outside it).
 - **`map_terrain`** — apply the shared validated terrain vocabulary to an existing map. It supports
   `fill` / `height` / `water` / `tileset` / `ramp` over `rect` / `circle` / `ring` / `path` /
   `polygon` / reusable `region` / `managedPath` shapes and regenerates valid cliff orientation and tile recipes. It is

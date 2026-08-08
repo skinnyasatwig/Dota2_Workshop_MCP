@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { join } from "node:path";
-import { readFile } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { readFile, realpath } from "node:fs/promises";
 import { resolveProject } from "../config.js";
 import { requireDotaPaths, resolveDotaPaths } from "../dota/paths.js";
 import { vmapToText, textToVmap, buildEntityBlock, insertEntity, maxNodeId, parseMapEntities } from "../dota/vmap.js";
@@ -20,6 +20,7 @@ import {
   regionDefinitionInputSchema,
   terrainOperationInputSchema,
 } from "../dota/map-spec.js";
+import { compareMapSpecifications } from "../dota/map-spec-compare.js";
 import { resolveDataPath } from "../util/datapath.js";
 import { runMapTransaction } from "../dota/map-transaction.js";
 import { renderMapPreview } from "../dota/map-preview.js";
@@ -58,6 +59,60 @@ const legacyPathInputSchema = managedMapPathInputSchema.extend({
 });
 type LegacyEntityInput = z.infer<typeof legacyEntityInputSchema>;
 type WaypointPathInput = z.infer<typeof legacyPathInputSchema>;
+
+async function loadProjectLocalMapSpecification(projectRoot: string, file: string, label: string) {
+  if (!file.toLowerCase().endsWith(".json")) {
+    throw new Error(`${label} must be a JSON file.`);
+  }
+  const canonicalRoot = await realpath(projectRoot);
+  const requested = resolve(canonicalRoot, file);
+  const requestedRelative = relative(canonicalRoot, requested);
+  if (
+    requestedRelative === ".." ||
+    requestedRelative.startsWith(`..${sep}`) ||
+    isAbsolute(requestedRelative)
+  ) {
+    throw new Error(`${label} must stay inside the addon project: ${canonicalRoot}`);
+  }
+  const canonicalFile = await realpath(requested);
+  const rel = relative(canonicalRoot, canonicalFile);
+  if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    throw new Error(`${label} must stay inside the addon project: ${canonicalRoot}`);
+  }
+  return parseMapSpecification(JSON.parse(await readFile(canonicalFile, "utf8")), canonicalFile);
+}
+
+function mapSpecificationComparisonSummary(
+  report: ReturnType<typeof compareMapSpecifications>,
+): string {
+  const lines = [
+    report.equivalent
+      ? report.exactEquivalent
+        ? "Map specifications are exactly semantically equivalent after expansion."
+        : "Map specifications are semantically equivalent within the requested numeric tolerance."
+      : "Map specifications are not semantically equivalent.",
+    `${report.differenceCount} object-level difference(s); ${report.fieldDifferenceCount} field-level difference(s).`,
+  ];
+  if (report.toleratedNumericDriftCount) {
+    lines.push(
+      `${report.toleratedNumericDriftCount} numeric drift(s) tolerated; maximum absolute drift ` +
+        `${report.maximumToleratedNumericDrift}.`,
+    );
+  }
+  if (!report.map.equivalent) {
+    lines.push(`map: ${report.map.baseline ?? "(unset)"} -> ${report.map.candidate ?? "(unset)"}`);
+  }
+  for (const [name, family] of Object.entries(report.families)) {
+    if (family.addedCount || family.removedCount || family.changedCount) {
+      lines.push(
+        `${name}: +${family.addedCount}, -${family.removedCount}, ` +
+          `~${family.changedCount}, =${family.unchangedCount}`,
+      );
+    }
+  }
+  if (report.truncated) lines.push("Detailed examples were truncated; aggregate counts remain complete.");
+  return lines.join("\n");
+}
 
 export interface WaypointEntity {
   classname: string;
@@ -315,6 +370,84 @@ function leak(this: void, unit: CDOTA_BaseNPC): void {
 }
 
 export function registerMapGenTools(server: McpServer) {
+  server.registerTool(
+    "map_compare_specifications",
+    {
+      title: "Compare expanded map specifications",
+      description:
+        "Read-only semantic comparison of two validated map specifications without opening Hammer or Dota. Each " +
+        "side may be supplied inline or as a project-local JSON file. Reusable components and Dota components are " +
+        "expanded first; named families compare independent of order while terrain operations preserve order. " +
+        "Optional numeric tolerance is explicit and tolerated drift remains visible in the report.",
+      inputSchema: {
+        projectRoot: z
+          .string()
+          .optional()
+          .describe("Addon root required when either side is loaded from a file."),
+        baselineSpecification: mapSpecificationInputSchema
+          .optional()
+          .describe("Inline baseline. Supply exactly one baseline source."),
+        baselineFile: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Project-local baseline JSON file. Supply exactly one baseline source."),
+        candidateSpecification: mapSpecificationInputSchema
+          .optional()
+          .describe("Inline candidate. Supply exactly one candidate source."),
+        candidateFile: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Project-local candidate JSON file. Supply exactly one candidate source."),
+        numericTolerance: z
+          .number()
+          .min(0)
+          .max(1)
+          .optional()
+          .describe("Maximum absolute numeric drift treated as equivalent (default 0)."),
+        maxDifferences: z
+          .number()
+          .int()
+          .min(1)
+          .max(1000)
+          .optional()
+          .describe("Maximum detailed examples retained in the report (default 100)."),
+      },
+    },
+    guard(async ({
+      projectRoot,
+      baselineSpecification,
+      baselineFile,
+      candidateSpecification,
+      candidateFile,
+      numericTolerance,
+      maxDifferences,
+    }): Promise<ToolResult> => {
+      if ((baselineSpecification === undefined) === (baselineFile === undefined)) {
+        return error("Supply exactly one baseline source: baselineSpecification or baselineFile.");
+      }
+      if ((candidateSpecification === undefined) === (candidateFile === undefined)) {
+        return error("Supply exactly one candidate source: candidateSpecification or candidateFile.");
+      }
+      const project = baselineFile || candidateFile ? await resolveProject(projectRoot) : undefined;
+      const baseline = baselineSpecification !== undefined
+        ? parseMapSpecification(baselineSpecification, "inline baseline specification")
+        : await loadProjectLocalMapSpecification(project!.root, baselineFile!, "baselineFile");
+      const candidate = candidateSpecification !== undefined
+        ? parseMapSpecification(candidateSpecification, "inline candidate specification")
+        : await loadProjectLocalMapSpecification(project!.root, candidateFile!, "candidateFile");
+      const report = compareMapSpecifications(baseline, candidate, {
+        numericTolerance,
+        maxDifferences,
+      });
+      return json(
+        report as unknown as Record<string, unknown>,
+        mapSpecificationComparisonSummary(report),
+      );
+    }),
+  );
+
   server.registerTool(
     "map_recipe_catalog",
     {

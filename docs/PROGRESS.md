@@ -219,11 +219,20 @@ Last updated: 2026-08-07
     untouched. Contract sync remained zero-change, compiled-required validation stayed at zero errors, and offline
     reachability retained 3,235/3,619 reachable cells, zero holes, and only the known 384-cell isolated strip.
 
+47. This milestone - added `map_compare_specifications`, a read-only semantic contract comparator that validates and
+    fully expands both sides before comparing every managed family. Named objects compare independent of declaration
+    order, terrain operations retain sequence semantics, vector formatting is normalized, and bounded reports retain
+    complete aggregate counts. Numeric tolerance is opt-in and never hides its accepted drift. Inline and project-local
+    JSON sources are supported, while lexical paths and resolved links outside the addon root fail closed. The real 3v3
+    contract before the three reuse refactors compared equivalent to the current nested contract: zero semantic object
+    or field differences, with four recorded yaw roundoff values below 0.0000005 degrees. No VMAP, Hammer, or Dota was
+    opened for that proof.
+
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 294 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
-- MCP smoke suite: 200 passed, 0 failed, and 1 network-dependent Workshop search skipped.
+- Default suite: 299 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
+- MCP smoke suite: 203 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
 - The guided refresh runner completed all four safe checks in 33 seconds without opening Dota or Hammer. Because the
@@ -255,7 +264,7 @@ Last updated: 2026-08-07
   or hitbox bounds.
 - VRF's public checked Juggernaut physics fixture produced 15 of 15 exact convex hulls after its 15 published bind
   poses were applied; no third-party fixture was copied into this repository.
-- Real Dota 3v3 contract: 86 managed entities, 4 managed paths, 97 terrain operations, and zero desired-state drift.
+- Real Dota 3v3 contract: 84 managed entities, 4 managed paths, 98 terrain operations, and zero desired-state drift.
 - Real Dota 3v3 minimap: both boundary entities, overview metadata, 1024x1024 PNG, source/compiled material and
   hashed texture, and the scale-16 world transform validate with zero findings.
 - Offline 3v3 terrain: zero holes, zero inaccessible camps, and only the deliberate 384-cell off-map strip.

@@ -76,7 +76,7 @@ async function main() {
     "kv3_read", "soundevents_list", "soundevents_get", "soundevents_upsert",
     "assets_list", "assets_search", "vpk_find", "vpk_read", "base_kv_entry",
     "scaffold_custom_event", "scaffold_net_table",
-    "entity_catalog", "map_terrain", "map_build", "map_preview", "map_tile_to_world", "scaffold_td",
+    "entity_catalog", "map_compare_specifications", "map_terrain", "map_build", "map_preview", "map_tile_to_world", "scaffold_td",
     "workshop_list", "workshop_inspect", "workshop_read", "workshop_search", "workshop_download", "workshop_grep",
     "dota_window", "dota_focus_window", "dota_click", "dota_type", "dota_input", "dota_status", "dota_wait_for", "dota_selftest",
     "addon_attach_debug_sdk", "addon_detach_debug_sdk", "dota_lua_eval", "dota_debug_dump",
@@ -207,6 +207,40 @@ async function main() {
   check("tools_catalog official lists VConsole/Hammer", /VConsole|Hammer/.test(textOf(cat)));
   const mapRecipes = await client.callTool({ name: "map_recipe_catalog", arguments: { verifyInstalled: true } });
   check("map_recipe_catalog reports its verified Dota baseline", /Baseline Dota build/.test(textOf(mapRecipes)));
+  const mapComparison = await client.callTool({
+    name: "map_compare_specifications",
+    arguments: {
+      baselineSpecification: {
+        managedEntities: [{ targetname: "copy_marker", classname: "info_target", origin: "0 0 0" }],
+      },
+      candidateSpecification: {
+        components: {
+          marker: {
+            managedEntities: [{ targetname: "marker", classname: "info_target", origin: "0.0 0 0" }],
+          },
+        },
+        placements: [{ component: "marker", name: "copy" }],
+      },
+    },
+  });
+  check(
+    "map_compare_specifications expands reusable components before comparing",
+    !mapComparison.isError && /exactly semantically equivalent/i.test(textOf(mapComparison)),
+    textOf(mapComparison),
+  );
+  const escapedMapComparison = await client.callTool({
+    name: "map_compare_specifications",
+    arguments: {
+      projectRoot: tmp,
+      baselineSpecification: {},
+      candidateFile: "../outside.json",
+    },
+  });
+  check(
+    "map_compare_specifications rejects files outside the addon project",
+    escapedMapComparison.isError === true && /inside the addon project/i.test(textOf(escapedMapComparison)),
+    textOf(escapedMapComparison),
+  );
   const recipeRefresh = await client.callTool({ name: "map_recipe_refresh_report", arguments: {} });
   check(
     "map_recipe_refresh_report is read-only and refuses unnecessary baseline churn",
