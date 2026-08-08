@@ -1931,7 +1931,8 @@ export function registerMapTools(server: McpServer) {
       description:
         "Preflight every VMAP material and model against addon/base loose assets and VPKs, then compile the content " +
         ".vmap into a playable game .vpk (resourcecompiler). Checked collision props must also prove real model PHYS. " +
-        "Missing, unsafe, or unproven assets stop before the expensive compiler run.",
+        "Missing, unsafe, or unproven assets stop before the expensive compiler run. The existing compiled VPK is " +
+        "backed up and restored automatically if compilation fails.",
       inputSchema: {
         projectRoot: z.string().optional(),
         name: z.string(),
@@ -1999,19 +2000,62 @@ export function registerMapTools(server: McpServer) {
           ].filter(Boolean).join("\n"),
         );
       }
-      const res = await compileProjectMap(dota, project, name, force);
-      const ok = res.code === 0 && (await pathExists(p.installedGameVpk));
+      const transaction = await runMapTransaction({
+        projectRoot: project.root,
+        label: `${name}-compile`,
+        trackedPaths: [p.gameVpk],
+        action: async () => {
+          const result = await compileProjectMap(dota, project, name, force);
+          const compiled = result.code === 0 && (await pathExists(p.installedGameVpk));
+          if (!compiled) {
+            throw new Error(
+              `Compilation failed (exit ${result.code ?? "unknown"}).\n` +
+                `${result.stdout.slice(-2000)}\n${result.stderr.slice(-1000)}`.trim(),
+            );
+          }
+          return result;
+        },
+      });
+      if (!transaction.committed || !transaction.value) {
+        const failure = json(
+          {
+            name,
+            ok: false,
+            committed: false,
+            rolledBack: transaction.rolledBack,
+            vpk: p.installedGameVpk,
+            backupDirectory: transaction.backupDirectory,
+            error: transaction.error,
+            rollbackErrors: transaction.rollbackErrors,
+            materialValidation: materials,
+            modelValidation: models,
+            modelPhysicsValidation: modelPhysics,
+          },
+          `COMPILE FAILED and ${transaction.rolledBack ? "the previous VPK was restored" : "rollback needs attention"}.\n` +
+            `Recovery backup: ${transaction.backupDirectory}\n${transaction.error ?? "Unknown compilation failure."}`,
+        );
+        failure.isError = true;
+        return failure;
+      }
+      const res = transaction.value;
       return json(
         {
           name,
-          ok,
+          ok: true,
+          committed: true,
+          rolledBack: false,
           vpk: p.installedGameVpk,
           exitCode: res.code,
+          backupDirectory: transaction.backupDirectory,
           materialValidation: materials,
           modelValidation: models,
           modelPhysicsValidation: modelPhysics,
         },
-        `${ok ? "COMPILE OK -> " + p.installedGameVpk : "COMPILE FAILED (exit " + res.code + ")"}\n\n${res.stdout.slice(-2000)}\n${res.stderr.slice(-500)}`.trim(),
+        [
+          `COMPILE OK -> ${p.installedGameVpk}`,
+          `Recovery backup: ${transaction.backupDirectory}`,
+          `${res.stdout.slice(-2000)}\n${res.stderr.slice(-500)}`.trim(),
+        ].filter(Boolean).join("\n\n"),
       );
     }),
   );

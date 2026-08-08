@@ -551,7 +551,8 @@ playable `.vpk` — a pipeline verified end to end.
 - **`map_to_text` / `map_from_text`** — read/write the full vmap DMX text for arbitrary edits.
 - **`map_compile`** — resolve all VMAP materials/models and any explicit managed-PHYS promises first, then compile
   `.vmap` → `.vpk`; missing, unsafe, or unproven assets stop before the expensive Valve compiler run. `dryRun:true`
-  returns both the command and evidence.
+  returns both the command and evidence. A real compile snapshots the prior VPK under `.dota-workshop/backups`, restores
+  it if ResourceCompiler fails or produces no output, and returns the committed/rolled-back recovery record.
 - **`map_list`** — list maps with source/compiled status.
 - **`map_validate`** — no-game preflight: verify map registration, source/compiled state, required
   script-facing entities, duplicate target names, and broken `path_corner`/`path_track` chains. It

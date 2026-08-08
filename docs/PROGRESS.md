@@ -533,6 +533,13 @@ Last updated: 2026-08-07
     completed in about seven seconds with 2 materials and 7 models safely resolved, zero PHYS requirements, all prior
     criteria green, and no compile, Dota launch, Hammer launch, or VMAP write.
 
+79. This milestone - closed the remaining rollback gap in direct `map_compile`. After asset/PHYS preflight, the tool now
+    snapshots the prior project VPK through the shared map transaction layer, treats a nonzero compiler exit or missing
+    installed output as failure, restores/removes the output accordingly, and returns committed/rolled-back recovery
+    evidence. Existing transaction tests prove both prior-file restoration and partial-new-file removal. A real compiler-
+    only 3v3 run committed successfully, retained a recovery copy of the previous VPK, and produced a checked 6,125,900-
+    byte VPK whose written and read-back MD5 both equal `9c7c11d31fe191b8cfa4b10154b60041`. Dota and Hammer stayed closed.
+
 ## Current verification record
 
 - TypeScript build passes.
