@@ -180,11 +180,17 @@ Last updated: 2026-08-07
     Tests cover a mirrored camp/FoW/bridge-approach/boss-pit kit across every output family. The documented map example
     now places mirrored ring recipes, and the real repository compiler fixture is routed through the nested recipe path;
     Valve conversion and ResourceCompiler accepted the resulting arch, bridge, approach, and ring composition.
+41. This milestone - added explicit team-aware reusable placements. `teamSwap: true` exchanges only recognized stock
+    Radiant/Dire identity: player-start classes, team numbers 2/3, associated `direside`, goodguys/badguys unit names,
+    and exact Ancient/tower/fountain model pairs. Geometry mirroring remains independent and never changes ownership by
+    itself; neutral and custom values are retained. A whole Radiant base-kit test covers its Ancient, fountain, shop,
+    player start, T2, gate, and blocker, while the repository fixture now sends both normal and mirrored/swapped team
+    entities through Valve conversion and ResourceCompiler successfully.
 
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 290 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 291 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 200 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
@@ -199,7 +205,8 @@ Last updated: 2026-08-07
   into a real VPK. The generated map uses Valve's installed blank template only as required hidden
   infrastructure, depends on no private 3v3 file, stores no copied Valve VMAP, and leaves no temporary addon trees.
   Its checked structures now originate inside one reusable component placement, proving the nested recipe path through
-  Valve's actual converter/compiler rather than only through unit tests.
+  Valve's actual converter/compiler rather than only through unit tests. The same fixture also includes a Radiant
+  player-start/T2 pair plus a mirrored `teamSwap` Dire pair, proving both official team variants compile.
 - `npm run test:compiler-bridge-nav-fixture` and `npm run test:engine-bridge-nav-fixture` passed on the installed
   Workshop Tools. The latter produced fresh DebugSDK 1.4.0 state-4 readiness, the expected positive/negative/height-
   alias results, zero console errors, automatic shutdown, and complete fixture cleanup.

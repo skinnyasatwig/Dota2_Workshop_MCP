@@ -8,6 +8,7 @@ import {
   insertEntity,
   maxNodeId,
   parseMapEntities,
+  reconcileMapEntities,
 } from "./vmap.js";
 import { parseMapVolumes, reconcileMapVolumes } from "./map-volume.js";
 import { parseMapSolids, reconcileMapSolids } from "./map-solid.js";
@@ -125,9 +126,38 @@ export function buildRepositoryCompileFixtureText(baseText: string): string {
           },
         ],
       },
+      team_pair: {
+        dotaComponents: [
+          {
+            kind: "playerStart",
+            name: "start",
+            team: "radiant",
+            origin: [-512, -2048, 128],
+          },
+          {
+            kind: "tower",
+            name: "tower",
+            team: "radiant",
+            origin: [-256, -2048, 128],
+            tier: 2,
+            lane: "mid",
+          },
+        ],
+      },
     },
-    placements: [{ component: "checked_structures", name: "fixture" }],
+    placements: [
+      { component: "checked_structures", name: "fixture" },
+      { component: "team_pair", name: "fixture_radiant_team" },
+      {
+        component: "team_pair",
+        name: "fixture_dire_team",
+        worldOffset: [512, 0, 0],
+        mirrorAxis: "x",
+        teamSwap: true,
+      },
+    ],
   });
+  text = reconcileMapEntities(text, structures.managedEntities ?? []).text;
   text = reconcileMapSolids(text, [
     {
       targetname: "fixture_concave_solid",

@@ -83,6 +83,12 @@
       ],
       "dotaComponents": [
         {
+          "kind": "playerStart",
+          "name": "start",
+          "team": "radiant",
+          "origin": [0, -768, 128]
+        },
+        {
           "kind": "ringPlatform",
           "name": "overlook",
           "center": [0, 0, 384],
@@ -105,7 +111,8 @@
       "component": "watch_marker",
       "name": "dire_watch",
       "worldOffset": [1024, 1024, 0],
-      "mirrorAxis": "x"
+      "mirrorAxis": "x",
+      "teamSwap": true
     }
   ],
   "managedPaths": [

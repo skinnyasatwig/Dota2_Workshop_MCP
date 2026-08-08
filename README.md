@@ -305,6 +305,10 @@ entities and paths, with optional `mirrorAxis: "x" | "y" | "xy"`. Local names ar
 so two copies cannot silently overwrite each other. A component property can explicitly refer to one of its local
 targets with `@local:name`; it becomes the correct namespaced target for each copy. Region mirrors can specify an
 `around` tile point, which makes map-center symmetry explicit instead of relying on duplicated coordinates.
+Team identity is deliberately separate from geometry: a placement may opt into `teamSwap: true` to exchange known
+stock Radiant/Dire player-start classes, team numbers 2/3, `direside`, goodguys/badguys unit names, and the exact
+stock Ancient/tower/fountain model pairs. Geometric mirroring never implies ownership, and neutral or custom values
+that are not one of those recognized pairs remain unchanged.
 
 For common gameplay structure, `dotaComponents` provides strongly checked `base`, `ancient`, `tower`, `fountain`,
 `shop`, `camp`, `bossPit`, `playerStart`, `gate`, `baseBlocker`, `fowBlocker`, `wall`, `arch`, `bridge`,
@@ -342,7 +346,9 @@ an arc across four wedge seams while both the center hole and the surrounding vo
 These recipes can also live inside a named specification `component`. One local objective kit can therefore combine,
 for example, a camp, boss pit, fog blockers, bridge approach, and ring platform, then be placed or mirrored repeatedly
 with separate world/tile offsets. The MCP expands the recipes first and applies one namespacing/transform pass to all
-generated entities, terrain, solids, navigation surfaces, volumes, and their internal references.
+generated entities, terrain, solids, navigation surfaces, volumes, and their internal references. A complete Radiant
+base kit can likewise be mirrored and explicitly team-swapped into its Dire counterpart without maintaining two
+nearly identical definitions.
 
 ## Learn from other custom games
 

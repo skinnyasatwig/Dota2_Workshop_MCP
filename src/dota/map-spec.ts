@@ -193,6 +193,7 @@ export const componentPlacementInputSchema = z.object({
   worldOffset: point3.optional(),
   tileOffset: point2.optional(),
   mirrorAxis: mirrorAxis.optional(),
+  teamSwap: z.boolean().optional(),
 }).strict();
 
 export const mapSpecificationInputSchema = z.object({
@@ -392,6 +393,56 @@ function localProperties(
   );
 }
 
+const DOTA_TEAM_MODEL_SWAP = new Map<string, string>([
+  ["models/props_structures/radiant_tower002.vmdl", "models/props_structures/dire_tower002.vmdl"],
+  ["models/props_structures/dire_tower002.vmdl", "models/props_structures/radiant_tower002.vmdl"],
+  ["models/props_structures/radiant_ancient001.vmdl", "models/props_structures/dire_ancient_base001.vmdl"],
+  ["models/props_structures/dire_ancient_base001.vmdl", "models/props_structures/radiant_ancient001.vmdl"],
+  ["models/props_structures/radiant_fountain002.vmdl", "models/props_structures/bad_fountain001.vmdl"],
+  ["models/props_structures/bad_fountain001.vmdl", "models/props_structures/radiant_fountain002.vmdl"],
+]);
+
+/** Swap only recognized stock Radiant/Dire identity; neutral and custom values remain untouched. */
+function swapDotaTeamEntity(entity: ManagedMapEntity): ManagedMapEntity {
+  const classname = entity.classname === "info_player_start_goodguys"
+    ? "info_player_start_badguys"
+    : entity.classname === "info_player_start_badguys"
+      ? "info_player_start_goodguys"
+      : entity.classname;
+  const entries = Object.entries(entity.properties ?? {});
+  const teamAssociated = classname !== entity.classname || entries.some(([key, value]) => {
+    const normalizedKey = key.toLowerCase();
+    return (normalizedKey === "teamnumber" && (value === "2" || value === "3")) ||
+      (normalizedKey === "mapunitname" && /^npc_dota_(goodguys|badguys)_/i.test(value)) ||
+      (normalizedKey === "model" && DOTA_TEAM_MODEL_SWAP.has(value.toLowerCase()));
+  });
+  const properties = entity.properties
+    ? Object.fromEntries(entries.map(([key, value]) => {
+        const normalizedKey = key.toLowerCase();
+        if ((normalizedKey === "teamnumber" || normalizedKey === "visualteam") &&
+            (value === "2" || value === "3")) {
+          return [key, value === "2" ? "3" : "2"];
+        }
+        if (normalizedKey === "direside" && teamAssociated && (value === "0" || value === "1")) {
+          return [key, value === "0" ? "1" : "0"];
+        }
+        if (normalizedKey === "mapunitname") {
+          if (/^npc_dota_goodguys_/i.test(value)) {
+            return [key, value.replace(/^npc_dota_goodguys_/i, "npc_dota_badguys_")];
+          }
+          if (/^npc_dota_badguys_/i.test(value)) {
+            return [key, value.replace(/^npc_dota_badguys_/i, "npc_dota_goodguys_")];
+          }
+        }
+        if (normalizedKey === "model") {
+          return [key, DOTA_TEAM_MODEL_SWAP.get(value.toLowerCase()) ?? value];
+        }
+        return [key, value];
+      }))
+    : undefined;
+  return { ...entity, classname, properties };
+}
+
 function transformComponentTerrain(
   operation: ManagedTerrainOperation,
   placement: ComponentPlacementInput,
@@ -426,18 +477,21 @@ function expandComponent(
   const worldOffset = placement.worldOffset ?? [0, 0, 0];
   const transformOrigin = (origin: string, field: string) =>
     transformVectorString(origin, placement.mirrorAxis, worldOffset, field, path);
-  const transformEntity = (entity: ManagedMapEntity): ManagedMapEntity => ({
-    ...entity,
-    targetname: localName(placement.name, entity.targetname),
-    origin: transformOrigin(entity.origin, `${fieldPrefix(placement)}.${entity.targetname}.origin`),
-    angles: transformAngles(
-      entity.angles,
-      placement.mirrorAxis,
-      `${fieldPrefix(placement)}.${entity.targetname}.angles`,
-      path,
-    ),
-    properties: localProperties(entity.properties, placement.name),
-  });
+  const transformEntity = (entity: ManagedMapEntity): ManagedMapEntity => {
+    const transformed: ManagedMapEntity = {
+      ...entity,
+      targetname: localName(placement.name, entity.targetname),
+      origin: transformOrigin(entity.origin, `${fieldPrefix(placement)}.${entity.targetname}.origin`),
+      angles: transformAngles(
+        entity.angles,
+        placement.mirrorAxis,
+        `${fieldPrefix(placement)}.${entity.targetname}.angles`,
+        path,
+      ),
+      properties: localProperties(entity.properties, placement.name),
+    };
+    return placement.teamSwap ? swapDotaTeamEntity(transformed) : transformed;
+  };
   const transformAbsent = (entity: ManagedAbsentMapEntity): ManagedAbsentMapEntity => ({
     ...entity,
     targetname: entity.targetname ? localName(placement.name, entity.targetname) : undefined,

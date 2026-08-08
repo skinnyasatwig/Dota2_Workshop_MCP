@@ -27,6 +27,16 @@ test("the documented map specification example stays valid", async () => {
   assert.equal(specification.managedTerrain?.length, 3);
   assert.equal(specification.managedSolids?.length, 12);
   assert.equal(specification.managedNavSurfaces?.length, 8);
+  assert.equal(
+    specification.managedEntities?.find((entity) => entity.targetname === "radiant_watch_start")
+      ?.classname,
+    "info_player_start_goodguys",
+  );
+  assert.equal(
+    specification.managedEntities?.find((entity) => entity.targetname === "dire_watch_start")
+      ?.classname,
+    "info_player_start_badguys",
+  );
 });
 
 test("parseMapSpecification exposes the contract terrain and path vocabulary", () => {
@@ -385,6 +395,110 @@ test("reusable component definitions expand, namespace, and mirror checked Dota 
   });
   assert.deepEqual(specification.managedTerrain?.[5]?.shape, {
     kind: "ring", cx: 24, cy: 10, rInner: 2, rOuter: 3,
+  });
+});
+
+test("teamSwap turns one reusable Radiant base kit into a checked Dire placement", () => {
+  const specification = parseMapSpecification({
+    components: {
+      base_kit: {
+        managedEntities: [
+          {
+            targetname: "neutral_marker",
+            classname: "info_target",
+            origin: "0 1024 128",
+            properties: { teamnumber: 4, VisualTeam: 4, comment: "neutral" },
+          },
+        ],
+        dotaComponents: [
+          {
+            kind: "base",
+            name: "base",
+            team: "radiant",
+            origin: [0, 0, 128],
+            ancientOffset: [0, 0, 0],
+            fountain: { name: "fountain", offset: [-512, 0, 0] },
+            shop: { name: "shop", offset: [-256, 256, 0], shopType: "home" },
+            playerStarts: [{ name: "start", offset: [-768, 0, 0] }],
+            towers: [{ name: "mid_t2", offset: [512, 0, 0], tier: 2, lane: "mid" }],
+            gates: [{ name: "gate", offset: [0, 512, 0] }],
+            blockers: [{ name: "blocker", offset: [0, 640, 0] }],
+          },
+        ],
+      },
+    },
+    placements: [
+      { component: "base_kit", name: "west", worldOffset: [-4096, 0, 0] },
+      {
+        component: "base_kit",
+        name: "east",
+        worldOffset: [4096, 0, 0],
+        mirrorAxis: "x",
+        teamSwap: true,
+      },
+    ],
+  });
+
+  const entity = (targetname: string) =>
+    specification.managedEntities?.find((candidate) => candidate.targetname === targetname);
+  assert.deepEqual(
+    {
+      classname: entity("west_base_ancient")?.classname,
+      origin: entity("west_base_ancient")?.origin,
+      teamnumber: entity("west_base_ancient")?.properties?.teamnumber,
+      direside: entity("west_base_ancient")?.properties?.direside,
+      unit: entity("west_base_ancient")?.properties?.MapUnitName,
+      model: entity("west_base_ancient")?.properties?.model,
+    },
+    {
+      classname: "npc_dota_fort",
+      origin: "-4096 0 128",
+      teamnumber: "2",
+      direside: "0",
+      unit: "npc_dota_goodguys_fort",
+      model: "models/props_structures/radiant_ancient001.vmdl",
+    },
+  );
+  assert.deepEqual(
+    {
+      classname: entity("east_base_ancient")?.classname,
+      origin: entity("east_base_ancient")?.origin,
+      teamnumber: entity("east_base_ancient")?.properties?.teamnumber,
+      direside: entity("east_base_ancient")?.properties?.direside,
+      unit: entity("east_base_ancient")?.properties?.MapUnitName,
+      model: entity("east_base_ancient")?.properties?.model,
+    },
+    {
+      classname: "npc_dota_fort",
+      origin: "4096 0 128",
+      teamnumber: "3",
+      direside: "1",
+      unit: "npc_dota_badguys_fort",
+      model: "models/props_structures/dire_ancient_base001.vmdl",
+    },
+  );
+
+  assert.equal(entity("east_base_fountain")?.properties?.teamnumber, "3");
+  assert.equal(
+    entity("east_base_fountain")?.properties?.model,
+    "models/props_structures/bad_fountain001.vmdl",
+  );
+  assert.equal(entity("east_base_mid_t2")?.properties?.MapUnitName, "npc_dota_badguys_tower2_mid");
+  assert.equal(
+    entity("east_base_mid_t2")?.properties?.model,
+    "models/props_structures/dire_tower002.vmdl",
+  );
+  assert.equal(entity("east_base_start")?.classname, "info_player_start_badguys");
+  assert.equal(entity("east_base_shop")?.properties?.teamnumber, "3");
+  assert.equal(entity("east_base_shop")?.properties?.direside, "1");
+  assert.equal(entity("east_base_gate")?.properties?.teamnumber, "3");
+  assert.equal(entity("east_base_gate")?.properties?.direside, "1");
+  assert.equal(entity("east_base_blocker")?.properties?.teamnumber, "3");
+  assert.equal(entity("east_base_blocker")?.properties?.direside, "1");
+  assert.deepEqual(entity("east_neutral_marker")?.properties, {
+    teamnumber: "4",
+    VisualTeam: "4",
+    comment: "neutral",
   });
 });
 
