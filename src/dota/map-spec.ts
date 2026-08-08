@@ -176,6 +176,15 @@ export const regionDefinitionInputSchema = z.union([
   }).strict(),
 ]);
 
+export const componentPlacementInputSchema = z.object({
+  component: componentName,
+  name: componentName,
+  worldOffset: point3.optional(),
+  tileOffset: point2.optional(),
+  mirrorAxis: mirrorAxis.optional(),
+  teamSwap: z.boolean().optional(),
+}).strict();
+
 export const componentDefinitionInputSchema = z.object({
   managedEntities: z.array(managedMapEntityInputSchema).optional(),
   managedAbsentEntities: z.array(managedAbsentEntityInputSchema).optional(),
@@ -185,15 +194,7 @@ export const componentDefinitionInputSchema = z.object({
   managedNavSurfaces: z.array(managedMapNavSurfaceInputSchema).optional(),
   managedVolumes: z.array(managedMapVolumeInputSchema).optional(),
   dotaComponents: z.array(dotaComponentInputSchema).optional(),
-}).strict();
-
-export const componentPlacementInputSchema = z.object({
-  component: componentName,
-  name: componentName,
-  worldOffset: point3.optional(),
-  tileOffset: point2.optional(),
-  mirrorAxis: mirrorAxis.optional(),
-  teamSwap: z.boolean().optional(),
+  placements: z.array(componentPlacementInputSchema).optional(),
 }).strict();
 
 export const mapSpecificationInputSchema = z.object({
@@ -382,13 +383,14 @@ function localName(instance: string, name: string): string {
 function localProperties(
   properties: Record<string, string> | undefined,
   instance: string,
+  defer: boolean = false,
 ): Record<string, string> | undefined {
   if (!properties) return undefined;
   return Object.fromEntries(
     Object.entries(properties).map(([key, value]) => [
       key,
       value.replace(/@local:([A-Za-z_][A-Za-z0-9_.-]*)/g, (_match, name: string) =>
-        localName(instance, name)),
+        `${defer ? "@local:" : ""}${localName(instance, name)}`),
     ]),
   );
 }
@@ -478,6 +480,7 @@ function expandComponent(
   component: MapContract,
   placement: ComponentPlacementInput,
   path: string,
+  deferLocalReferences: boolean = false,
 ): Pick<MapContract, "managedEntities" | "managedAbsentEntities" | "managedPaths" | "managedTerrain" | "managedSolids" | "managedNavSurfaces" | "managedVolumes"> {
   const worldOffset = placement.worldOffset ?? [0, 0, 0];
   const transformOrigin = (origin: string, field: string) =>
@@ -493,7 +496,7 @@ function expandComponent(
         `${fieldPrefix(placement)}.${entity.targetname}.angles`,
         path,
       ),
-      properties: localProperties(entity.properties, placement.name),
+      properties: localProperties(entity.properties, placement.name, deferLocalReferences),
     };
     return placement.teamSwap ? swapDotaTeamEntity(transformed) : transformed;
   };
@@ -529,7 +532,7 @@ function expandComponent(
       `${fieldPrefix(placement)}.${managedPath.name}.angles`,
       path,
     ),
-    properties: localProperties(managedPath.properties, placement.name),
+    properties: localProperties(managedPath.properties, placement.name, deferLocalReferences),
     // Local mirror relationships were checked before placement. Translation changes the mirror plane,
     // so retaining the world-origin assertion here would be incorrect.
     mirrorOf: undefined,
@@ -561,7 +564,7 @@ function expandComponent(
         volume.center[2] + worldOffset[2],
       ] as [number, number, number],
       yaw: transformedAngles ? parseVector(transformedAngles, "transformed volume yaw", path)[1] : volume.yaw,
-      properties: localProperties(volume.properties, placement.name),
+      properties: localProperties(volume.properties, placement.name, deferLocalReferences),
     };
     return volume.size !== undefined
       ? { ...transformed, recipe: volume.recipe, size: volume.size }
@@ -597,7 +600,7 @@ function expandComponent(
       yaw: transformedAngles ? parseVector(transformedAngles, "transformed solid yaw", path)[1] : solid.yaw,
       material: solid.material,
       extrusion,
-      properties: localProperties(solid.properties, placement.name),
+      properties: localProperties(solid.properties, placement.name, deferLocalReferences),
     };
   };
   const transformNavSurface = (surface: ManagedMapNavSurface): ManagedMapNavSurface => {
@@ -684,7 +687,10 @@ export function parseMapSpecification(value: unknown, path = "inline map specifi
   const parsed = mapSpecificationInputSchema.parse(value);
   const regions = resolveRegions(parsed.regions ?? {}, path);
   const dotaComponents = expandDotaComponents(parsed.dotaComponents ?? []);
-  const componentContracts = new Map<string, MapContract>();
+  const componentDefinitions = new Map<string, {
+    contract: MapContract;
+    placements: ComponentPlacementInput[];
+  }>();
   for (const [name, definition] of Object.entries(parsed.components ?? {})) {
     if (!componentName.safeParse(name).success) {
       throw new Error(`Invalid component name "${name}": ${path}`);
@@ -701,35 +707,115 @@ export function parseMapSpecification(value: unknown, path = "inline map specifi
     if (managedTerrain.some((operation) => operation.op === "fill")) {
       throw new Error(`Component "${name}" cannot contain a fill terrain operation: ${path}`);
     }
-    componentContracts.set(
+    componentDefinitions.set(
       name,
-      parseMapContract(
+      {
+        contract: parseMapContract(
+          {
+            requiredEntities: [],
+            managedEntities: [
+              ...(definition.managedEntities ?? []),
+              ...localDotaComponents.managedEntities,
+            ],
+            managedAbsentEntities: definition.managedAbsentEntities,
+            managedPaths: definition.managedPaths,
+            managedTerrain,
+            managedSolids: [
+              ...(definition.managedSolids ?? []),
+              ...localDotaComponents.managedSolids,
+            ],
+            managedNavSurfaces: [
+              ...(definition.managedNavSurfaces ?? []),
+              ...localDotaComponents.managedNavSurfaces,
+            ],
+            managedVolumes: [
+              ...(definition.managedVolumes ?? []),
+              ...localDotaComponents.managedVolumes,
+            ],
+          },
+          `${path}, component "${name}"`,
+        ),
+        placements: definition.placements ?? [],
+      },
+    );
+  }
+
+  const componentContracts = new Map<string, MapContract>();
+  const resolvingComponents: string[] = [];
+  const resolveComponent = (name: string): MapContract => {
+    const resolved = componentContracts.get(name);
+    if (resolved) return resolved;
+    const cycleStart = resolvingComponents.indexOf(name);
+    if (cycleStart >= 0) {
+      const cycle = [...resolvingComponents.slice(cycleStart), name].join(" -> ");
+      throw new Error(`Component placement cycle detected (${cycle}): ${path}`);
+    }
+    if (resolvingComponents.length >= 32) {
+      throw new Error(`Component nesting exceeds the safe depth of 32 at "${name}": ${path}`);
+    }
+    const definition = componentDefinitions.get(name);
+    if (!definition) {
+      throw new Error(`Missing component "${name}": ${path}`);
+    }
+    resolvingComponents.push(name);
+    try {
+      const nestedNames = new Set<string>();
+      const nested = definition.placements.map((placement) => {
+        if (nestedNames.has(placement.name)) {
+          throw new Error(
+            `Component "${name}" placement name "${placement.name}" is duplicated: ${path}`,
+          );
+        }
+        nestedNames.add(placement.name);
+        if (!componentDefinitions.has(placement.component)) {
+          throw new Error(
+            `Component "${name}" placement "${placement.name}" references missing component ` +
+            `"${placement.component}": ${path}`,
+          );
+        }
+        return expandComponent(resolveComponent(placement.component), placement, path, true);
+      });
+      const contract = parseMapContract(
         {
           requiredEntities: [],
           managedEntities: [
-            ...(definition.managedEntities ?? []),
-            ...localDotaComponents.managedEntities,
+            ...(definition.contract.managedEntities ?? []),
+            ...nested.flatMap((component) => component.managedEntities ?? []),
           ],
-          managedAbsentEntities: definition.managedAbsentEntities,
-          managedPaths: definition.managedPaths,
-          managedTerrain,
+          managedAbsentEntities: [
+            ...(definition.contract.managedAbsentEntities ?? []),
+            ...nested.flatMap((component) => component.managedAbsentEntities ?? []),
+          ],
+          managedPaths: [
+            ...(definition.contract.managedPaths ?? []),
+            ...nested.flatMap((component) => component.managedPaths ?? []),
+          ],
+          managedTerrain: [
+            ...(definition.contract.managedTerrain ?? []),
+            ...nested.flatMap((component) => component.managedTerrain ?? []),
+          ],
           managedSolids: [
-            ...(definition.managedSolids ?? []),
-            ...localDotaComponents.managedSolids,
+            ...(definition.contract.managedSolids ?? []),
+            ...nested.flatMap((component) => component.managedSolids ?? []),
           ],
           managedNavSurfaces: [
-            ...(definition.managedNavSurfaces ?? []),
-            ...localDotaComponents.managedNavSurfaces,
+            ...(definition.contract.managedNavSurfaces ?? []),
+            ...nested.flatMap((component) => component.managedNavSurfaces ?? []),
           ],
           managedVolumes: [
-            ...(definition.managedVolumes ?? []),
-            ...localDotaComponents.managedVolumes,
+            ...(definition.contract.managedVolumes ?? []),
+            ...nested.flatMap((component) => component.managedVolumes ?? []),
           ],
         },
         `${path}, component "${name}"`,
-      ),
-    );
-  }
+      );
+      componentContracts.set(name, contract);
+      return contract;
+    } finally {
+      resolvingComponents.pop();
+    }
+  };
+  for (const name of componentDefinitions.keys()) resolveComponent(name);
 
   const placementNames = new Set<string>();
   const expandedComponents = (parsed.placements ?? []).map((placement) => {

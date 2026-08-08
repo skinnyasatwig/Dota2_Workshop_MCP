@@ -144,12 +144,15 @@ export function buildRepositoryCompileFixtureText(baseText: string): string {
           },
         ],
       },
+      team_wrapper: {
+        placements: [{ component: "team_pair", name: "core" }],
+      },
     },
     placements: [
       { component: "checked_structures", name: "fixture" },
-      { component: "team_pair", name: "fixture_radiant_team" },
+      { component: "team_wrapper", name: "fixture_radiant_team" },
       {
-        component: "team_pair",
+        component: "team_wrapper",
         name: "fixture_dire_team",
         worldOffset: [512, 0, 0],
         mirrorAxis: "x",

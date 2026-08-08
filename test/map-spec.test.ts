@@ -28,12 +28,12 @@ test("the documented map specification example stays valid", async () => {
   assert.equal(specification.managedSolids?.length, 12);
   assert.equal(specification.managedNavSurfaces?.length, 8);
   assert.equal(
-    specification.managedEntities?.find((entity) => entity.targetname === "radiant_watch_start")
+    specification.managedEntities?.find((entity) => entity.targetname === "radiant_watch_platform_start")
       ?.classname,
     "info_player_start_goodguys",
   );
   assert.equal(
-    specification.managedEntities?.find((entity) => entity.targetname === "dire_watch_start")
+    specification.managedEntities?.find((entity) => entity.targetname === "dire_watch_platform_start")
       ?.classname,
     "info_player_start_badguys",
   );
@@ -396,6 +396,133 @@ test("reusable component definitions expand, namespace, and mirror checked Dota 
   assert.deepEqual(specification.managedTerrain?.[5]?.shape, {
     kind: "ring", cx: 24, cy: 10, rInner: 2, rOuter: 3,
   });
+});
+
+test("nested reusable components compose transforms, references, terrain, and team identity", () => {
+  const specification = parseMapSpecification({
+    components: {
+      base_core: {
+        managedEntities: [
+          {
+            targetname: "controller",
+            classname: "info_target",
+            origin: "0 256 128",
+            properties: { target: "@local:route_1" },
+          },
+        ],
+        managedPaths: [{ name: "route", points: [[0, 0, 128], [512, 0, 128]] }],
+        managedTerrain: [{
+          op: "height",
+          level: 1,
+          shape: { kind: "rect", x0: 0, y0: 0, x1: 1, y1: 1 },
+        }],
+        managedVolumes: [{
+          targetname: "bounds",
+          recipe: "heroTrigger",
+          center: [0, 0, 256],
+          size: [512, 512, 512],
+          properties: { OnUser1: "@local:controller,Enable,,0,-1" },
+        }],
+        dotaComponents: [
+          {
+            kind: "camp",
+            name: "camp",
+            origin: [0, -256, 128],
+            size: "small",
+            volumeName: "camp_bounds",
+            volume: { size: [384, 384, 384] },
+          },
+          {
+            kind: "base",
+            name: "base",
+            team: "radiant",
+            origin: [0, 0, 128],
+            playerStarts: [{ name: "start", offset: [-512, 0, 0] }],
+            towers: [{ name: "mid_t2", offset: [512, 0, 0], tier: 2, lane: "mid" }],
+          },
+        ],
+      },
+      complete_base: {
+        placements: [{
+          component: "base_core",
+          name: "core",
+          worldOffset: [256, 0, 0],
+          tileOffset: [2, 3],
+        }],
+      },
+    },
+    placements: [
+      {
+        component: "complete_base",
+        name: "west",
+        worldOffset: [-4096, 0, 0],
+        tileOffset: [10, 20],
+      },
+      {
+        component: "complete_base",
+        name: "east",
+        worldOffset: [4096, 0, 0],
+        tileOffset: [50, 20],
+        mirrorAxis: "x",
+        teamSwap: true,
+      },
+    ],
+  });
+
+  const entity = (targetname: string) =>
+    specification.managedEntities?.find((candidate) => candidate.targetname === targetname);
+  assert.equal(entity("west_core_controller")?.properties?.target, "west_core_route_1");
+  assert.equal(entity("east_core_controller")?.properties?.target, "east_core_route_1");
+  assert.equal(entity("west_core_camp")?.properties?.VolumeName, "west_core_camp_bounds");
+  assert.equal(entity("east_core_camp")?.properties?.VolumeName, "east_core_camp_bounds");
+  assert.equal(entity("west_core_base_ancient")?.origin, "-3840 0 128");
+  assert.equal(entity("east_core_base_ancient")?.origin, "3840 0 128");
+  assert.equal(entity("west_core_base_ancient")?.properties?.teamnumber, "2");
+  assert.equal(entity("east_core_base_ancient")?.properties?.teamnumber, "3");
+  assert.equal(entity("east_core_base_start")?.classname, "info_player_start_badguys");
+  assert.equal(
+    entity("east_core_base_mid_t2")?.properties?.MapUnitName,
+    "npc_dota_badguys_tower2_mid",
+  );
+  assert.deepEqual(
+    specification.managedPaths?.map(({ name, points }) => ({ name, points })),
+    [
+      { name: "west_core_route", points: [[-3840, 0, 128], [-3328, 0, 128]] },
+      { name: "east_core_route", points: [[3840, 0, 128], [3328, 0, 128]] },
+    ],
+  );
+  assert.deepEqual(specification.managedTerrain, [
+    { op: "height", level: 1, dome: undefined, shape: { kind: "rect", x0: 12, y0: 23, x1: 13, y1: 24 } },
+    { op: "height", level: 1, dome: undefined, shape: { kind: "rect", x0: 47, y0: 23, x1: 48, y1: 24 } },
+  ]);
+  const volume = (targetname: string) =>
+    specification.managedVolumes?.find((candidate) => candidate.targetname === targetname);
+  assert.equal(volume("west_core_bounds")?.properties?.OnUser1, "west_core_controller,Enable,,0,-1");
+  assert.equal(volume("east_core_bounds")?.properties?.OnUser1, "east_core_controller,Enable,,0,-1");
+});
+
+test("nested team swaps compose instead of being inferred from geometry", () => {
+  const specification = parseMapSpecification({
+    components: {
+      start: {
+        dotaComponents: [{
+          kind: "playerStart",
+          name: "spawn",
+          team: "radiant",
+          origin: [0, 0, 128],
+        }],
+      },
+      swapped_once: {
+        placements: [{ component: "start", name: "inner", teamSwap: true }],
+      },
+    },
+    placements: [
+      { component: "swapped_once", name: "dire" },
+      { component: "swapped_once", name: "radiant", teamSwap: true, mirrorAxis: "x" },
+    ],
+  });
+  assert.equal(specification.managedEntities?.[0].classname, "info_player_start_badguys");
+  assert.equal(specification.managedEntities?.[1].classname, "info_player_start_goodguys");
 });
 
 test("teamSwap turns one reusable Radiant base kit into a checked Dire placement", () => {
@@ -775,6 +902,40 @@ test("component definitions reject unsafe or unresolved reuse", () => {
         placements: [{ component: "missing", name: "instance" }],
       }),
     /references missing component "missing"/,
+  );
+  assert.throws(
+    () =>
+      parseMapSpecification({
+        components: {
+          wrapper: { placements: [{ component: "missing", name: "inner" }] },
+        },
+      }),
+    /component "wrapper" placement "inner" references missing component "missing"/i,
+  );
+  assert.throws(
+    () =>
+      parseMapSpecification({
+        components: {
+          leaf: {},
+          wrapper: {
+            placements: [
+              { component: "leaf", name: "duplicate" },
+              { component: "leaf", name: "duplicate" },
+            ],
+          },
+        },
+      }),
+    /component "wrapper" placement name "duplicate" is duplicated/i,
+  );
+  assert.throws(
+    () =>
+      parseMapSpecification({
+        components: {
+          a: { placements: [{ component: "b", name: "b" }] },
+          b: { placements: [{ component: "a", name: "a" }] },
+        },
+      }),
+    /component placement cycle detected \(a -> b -> a\)/i,
   );
   assert.throws(
     () =>

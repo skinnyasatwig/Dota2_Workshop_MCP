@@ -191,11 +191,18 @@ Last updated: 2026-08-07
     associated `direside` correction, and reverse Dire-to-Radiant conversion is covered. Regression tests prove that
     neutral team 4, neutral absence selectors, and arbitrary custom labels remain byte-for-byte semantic values rather
     than being guessed from words such as “dire”.
+43. This milestone - added nested reusable component composition. A component can place smaller components with local
+    world/tile offsets, mirroring, and team swaps, then expose the combined result as one higher-level kit. Deferred
+    `@local:` links accumulate every namespace instead of resolving too early, preserving waypoint targets, trigger
+    outputs, camp-volume references, and generated Dota links through multiple levels. Resolution is order-independent
+    and rejects missing children, duplicate local instance names, dependency cycles, and depth beyond 32. Tests cover
+    terrain, paths, volumes, generated camps, a mirrored team-aware base, and double team swaps. The documented example
+    now nests its platform recipe, and Valve conversion/ResourceCompiler accepted a nested team-pair fixture.
 
 ## Current verification record
 
 - TypeScript build passes.
-- Default suite: 292 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
+- Default suite: 294 passed, 0 failed, and 3 opt-in compiler/installed-VRF tests skipped.
 - MCP smoke suite: 200 passed, 0 failed, and 1 network-dependent Workshop search skipped.
 - Installed recipe fingerprint is verified against Dota app build `24541331`, source revision `10879186`,
   Workshop-tools depot manifest `8024482296929360461`, and five authoritative source/tool hashes.
@@ -209,9 +216,10 @@ Last updated: 2026-08-07
   explicit navigation obstruction,
   into a real VPK. The generated map uses Valve's installed blank template only as required hidden
   infrastructure, depends on no private 3v3 file, stores no copied Valve VMAP, and leaves no temporary addon trees.
-  Its checked structures now originate inside one reusable component placement, proving the nested recipe path through
+  Its checked structures now originate inside one reusable component placement, proving the recipe path through
   Valve's actual converter/compiler rather than only through unit tests. The same fixture also includes a Radiant
-  player-start/T2 pair plus a mirrored `teamSwap` Dire pair, proving both official team variants compile.
+  player-start/T2 pair inside a nested wrapper plus a mirrored `teamSwap` Dire pair, proving composition and both
+  official team variants compile.
 - `npm run test:compiler-bridge-nav-fixture` and `npm run test:engine-bridge-nav-fixture` passed on the installed
   Workshop Tools. The latter produced fresh DebugSDK 1.4.0 state-4 readiness, the expected positive/negative/height-
   alias results, zero console errors, automatic shutdown, and complete fixture cleanup.

@@ -31,13 +31,13 @@ test("repository compile fixture is self-contained and structurally inspectable"
       "fixture_bridge_deck",
       "fixture_concave_solid",
       "fixture_dire_start",
-      "fixture_dire_team_start",
-      "fixture_dire_team_tower",
+      "fixture_dire_team_core_start",
+      "fixture_dire_team_core_tower",
       "fixture_nav_obstruction",
       "fixture_polygon_no_wards",
       "fixture_radiant_start",
-      "fixture_radiant_team_start",
-      "fixture_radiant_team_tower",
+      "fixture_radiant_team_core_start",
+      "fixture_radiant_team_core_tower",
       "fixture_ring_platform_segment_01_deck",
       "fixture_ring_platform_segment_02_deck",
       "fixture_ring_platform_segment_03_deck",
@@ -53,24 +53,24 @@ test("repository compile fixture is self-contained and structurally inspectable"
     ],
   );
   const radiantTower = fixture.entities.find(
-    (entity) => entity.targetname === "fixture_radiant_team_tower",
+    (entity) => entity.targetname === "fixture_radiant_team_core_tower",
   );
   assert.equal(radiantTower?.properties.teamnumber, "2");
   assert.equal(radiantTower?.properties.MapUnitName, "npc_dota_goodguys_tower2_mid");
   assert.equal(radiantTower?.properties.model, "models/props_structures/radiant_tower002.vmdl");
   const direTower = fixture.entities.find(
-    (entity) => entity.targetname === "fixture_dire_team_tower",
+    (entity) => entity.targetname === "fixture_dire_team_core_tower",
   );
   assert.equal(direTower?.properties.teamnumber, "3");
   assert.equal(direTower?.properties.direside, "1");
   assert.equal(direTower?.properties.MapUnitName, "npc_dota_badguys_tower2_mid");
   assert.equal(direTower?.properties.model, "models/props_structures/dire_tower002.vmdl");
   assert.equal(
-    fixture.entities.find((entity) => entity.targetname === "fixture_radiant_team_start")?.classname,
+    fixture.entities.find((entity) => entity.targetname === "fixture_radiant_team_core_start")?.classname,
     "info_player_start_goodguys",
   );
   assert.equal(
-    fixture.entities.find((entity) => entity.targetname === "fixture_dire_team_start")?.classname,
+    fixture.entities.find((entity) => entity.targetname === "fixture_dire_team_core_start")?.classname,
     "info_player_start_badguys",
   );
   assert.equal(fixture.solids.length, 15);

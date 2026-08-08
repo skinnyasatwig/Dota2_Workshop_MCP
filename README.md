@@ -310,6 +310,9 @@ stock Radiant/Dire player-start classes, team numbers 2/3, `direside`, goodguys/
 stock Ancient/tower/fountain model pairs. Geometric mirroring never implies ownership, and neutral or custom values
 that are not one of those recognized pairs remain unchanged. Reusable exact-absence selectors follow the same
 player-start class swap, so a placed cleanup rule cannot accidentally target the opposite team's spawn class.
+A component may also contain its own `placements`, allowing small proven pieces to form larger reusable assemblies.
+Transforms and team swaps compose at every level, while deferred `@local:` references acquire every namespace in the
+chain. Missing children, duplicate local placement names, cycles, and nesting deeper than 32 levels are rejected.
 
 For common gameplay structure, `dotaComponents` provides strongly checked `base`, `ancient`, `tower`, `fountain`,
 `shop`, `camp`, `bossPit`, `playerStart`, `gate`, `baseBlocker`, `fowBlocker`, `wall`, `arch`, `bridge`,
@@ -349,7 +352,8 @@ for example, a camp, boss pit, fog blockers, bridge approach, and ring platform,
 with separate world/tile offsets. The MCP expands the recipes first and applies one namespacing/transform pass to all
 generated entities, terrain, solids, navigation surfaces, volumes, and their internal references. A complete Radiant
 base kit can likewise be mirrored and explicitly team-swapped into its Dire counterpart without maintaining two
-nearly identical definitions.
+nearly identical definitions. Components can nest those kits, so a complete base can be assembled from a structure
+core, terrain platform, walls, and objective pieces while retaining one checked placement interface.
 
 ## Learn from other custom games
 

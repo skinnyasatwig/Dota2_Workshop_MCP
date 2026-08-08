@@ -81,6 +81,14 @@
           }
         }
       ],
+      "placements": [
+        {
+          "component": "watch_platform",
+          "name": "platform"
+        }
+      ]
+    },
+    "watch_platform": {
       "dotaComponents": [
         {
           "kind": "playerStart",
